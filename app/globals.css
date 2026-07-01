@@ -123,28 +123,28 @@ svg {
   transform-origin: left center;
 }
 
-.sessa-signature--drawn.sessa-signature--animate .sessa-signature__reveal {
-  animation: signatureReveal 1.95s cubic-bezier(0.62, 0, 0.13, 1) 0.18s both;
+.sessa-signature--drawn.sessa-signature--animate .sessa-signature__flourish {
+  animation: signatureStroke 0.65s cubic-bezier(0.4, 0, 0.2, 1) 0.1s both;
 }
 
-.sessa-signature--drawn.sessa-signature--animate .sessa-signature__flourish {
-  animation: signatureStroke 1.2s cubic-bezier(0.58, 0, 0.12, 1) 0.05s both;
+.sessa-signature--drawn.sessa-signature--animate .sessa-signature__reveal {
+  animation: signatureReveal 1.4s linear 0.7s both;
 }
 
 .sessa-signature--drawn.sessa-signature--animate .sessa-signature__tail {
-  animation: signatureStroke 1.18s cubic-bezier(0.58, 0, 0.12, 1) 1.42s both;
+  animation: signatureStroke 0.65s cubic-bezier(0.4, 0, 0.2, 1) 2.0s both;
 }
 
 .hero-signature.sessa-signature--drawn.sessa-signature--animate .sessa-signature__flourish {
-  animation: signatureStroke 2.2s cubic-bezier(0.6, 0, 0.12, 1) 2.25s both;
+  animation: signatureStroke 1s cubic-bezier(0.4, 0, 0.2, 1) 3.35s both;
 }
 
 .hero-signature.sessa-signature--drawn.sessa-signature--animate .sessa-signature__reveal {
-  animation: signatureRevealHuman 5.65s cubic-bezier(0.64, 0, 0.11, 1) 3.05s both;
+  animation: signatureReveal 2.2s linear 4.25s both;
 }
 
 .hero-signature.sessa-signature--drawn.sessa-signature--animate .sessa-signature__tail {
-  animation: signatureStroke 3.1s cubic-bezier(0.56, 0, 0.07, 1) 7.7s both;
+  animation: signatureStroke 1s cubic-bezier(0.4, 0, 0.2, 1) 6.35s both;
 }
 
 .hero-media-stage {
@@ -331,29 +331,6 @@ svg {
   }
 }
 
-@keyframes signatureRevealHuman {
-  0% {
-    transform: scaleX(0);
-  }
-  16% {
-    transform: scaleX(0.18);
-  }
-  31% {
-    transform: scaleX(0.32);
-  }
-  49% {
-    transform: scaleX(0.55);
-  }
-  66% {
-    transform: scaleX(0.72);
-  }
-  82% {
-    transform: scaleX(0.88);
-  }
-  100% {
-    transform: scaleX(1);
-  }
-}
 
 @keyframes signatureStroke {
   from {

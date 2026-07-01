@@ -1,4 +1,5 @@
 import Image from "next/image";
+import { assetPath } from "@/lib/paths";
 
 type SessaSignatureProps = {
   animate?: boolean;
@@ -94,7 +95,7 @@ export function SessaSignature({
           draggable={false}
           height={489}
           priority={tail === "long"}
-          src="/brand/sessa-logo-white.png"
+          src={assetPath("/brand/sessa-logo-white.png")}
           unoptimized
           width={1800}
         />
