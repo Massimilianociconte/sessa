@@ -1,9 +1,13 @@
 import Image from "next/image";
+import { CategoryCards } from "@/components/CategoryCards";
 import { categories, shopProducts, specialties } from "@/data/site-content";
 
 export function ProductsSection() {
   return (
-    <section id="dolci" className="relative bg-cream px-5 py-20 sm:px-8 sm:py-28 lg:px-12">
+    <section
+      id="dolci"
+      className="relative scroll-mt-[72px] bg-cream px-5 py-20 sm:scroll-mt-[86px] sm:px-8 sm:py-28 lg:px-12"
+    >
       <div className="relative z-30 mx-auto max-w-[1380px]">
         <div className="grid gap-7 lg:grid-cols-[0.85fr_1.15fr] lg:items-end">
           <h2 className="max-w-3xl font-serif text-[clamp(3.4rem,7vw,7.4rem)] font-medium leading-[0.9] text-ink">
@@ -15,27 +19,7 @@ export function ProductsSection() {
           </p>
         </div>
 
-        <div className="mt-12 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {categories.map((category) => (
-            <article
-              key={category.name}
-              className="grid min-h-28 grid-cols-[86px_1fr] items-center gap-4 border border-ink/10 bg-white/74 p-4"
-            >
-              <div className="relative aspect-square overflow-hidden bg-ivory">
-                <Image
-                  src={category.image}
-                  alt={category.name}
-                  fill
-                  sizes="86px"
-                  className="object-contain p-2"
-                />
-              </div>
-              <h3 className="font-serif text-3xl font-medium leading-none text-ink">
-                {category.name}
-              </h3>
-            </article>
-          ))}
-        </div>
+        <CategoryCards categories={categories} />
 
         <div className="mt-16 grid gap-8 md:grid-cols-2 xl:grid-cols-4">
           {specialties.map((product, index) => (

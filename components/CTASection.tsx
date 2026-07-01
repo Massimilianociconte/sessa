@@ -1,4 +1,5 @@
 import { brandFacts } from "@/data/site-content";
+import { SessaSignature } from "@/components/SessaSignature";
 
 export function CTASection() {
   return (
@@ -8,9 +9,11 @@ export function CTASection() {
     >
       <div className="relative z-30 mx-auto grid max-w-[1180px] gap-10 lg:grid-cols-[1fr_0.7fr] lg:items-end">
         <div>
-          <p className="font-script text-[clamp(5.5rem,12vw,13rem)] leading-[0.68] text-cream/[0.78]">
-            Sessa
-          </p>
+          <SessaSignature
+            ariaLabel="Sessa"
+            className="h-auto w-[min(76vw,560px)] opacity-80"
+            tail="short"
+          />
           <h2 className="mt-8 max-w-4xl font-serif text-[clamp(3.4rem,7vw,7.6rem)] font-medium leading-[0.9] text-white">
             Porta a casa un pezzo di Napoli
           </h2>

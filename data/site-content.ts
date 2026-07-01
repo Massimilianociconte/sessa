@@ -56,6 +56,7 @@ export type ImageCredit = {
 };
 
 const officialImagePath = assetPath("/images/official/processed");
+const stickerImagePath = assetPath("/images/stickers");
 
 export const navItems: NavItem[] = [
   { label: "Storia", href: "#storia" },
@@ -79,12 +80,12 @@ export const brandFacts = {
 };
 
 export const categories: Category[] = [
-  { name: "Colazioni", image: `${officialImagePath}/category-colazioni.png` },
-  { name: "Sfogliatelle", image: `${officialImagePath}/category-sfogliatelle.png` },
-  { name: "Box Regalo", image: `${officialImagePath}/category-box-regalo.png` },
+  { name: "Colazioni", image: `${stickerImagePath}/colazioni-sessa-sticker.png` },
+  { name: "Sfogliatelle", image: `${stickerImagePath}/sfogliatella-sessa-sticker.png` },
+  { name: "Box Regalo", image: `${stickerImagePath}/box-regalo-sessa-sticker.png` },
   {
     name: "Pasticceria Tradizionale",
-    image: `${officialImagePath}/category-pasticceria-tradizionale.png`
+    image: `${stickerImagePath}/pasticceria-tradizionale-sessa-sticker.png`
   }
 ];
 
@@ -259,9 +260,5 @@ export const socialLinks: SocialLink[] = [
 ];
 
 export const imageCredits: ImageCredit[] = [
-  { label: "Immagini e dati prodotto: Sessa 1930", href: "https://sessa1930.com/" },
-  {
-    label: "Pattern piastrella: asset fornito dal cliente",
-    href: assetPath("/patterns/piastrella-napoletana.png")
-  }
+  { label: "Immagini e dati prodotto: Sessa 1930", href: "https://sessa1930.com/" }
 ];

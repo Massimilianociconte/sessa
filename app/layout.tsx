@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Allura, Cormorant_Garamond, Manrope } from "next/font/google";
+import { Allura, Cormorant_Garamond, Great_Vibes, Manrope } from "next/font/google";
 import "./globals.css";
 
 const serif = Cormorant_Garamond({
@@ -23,6 +23,13 @@ const script = Allura({
   weight: "400"
 });
 
+const signature = Great_Vibes({
+  subsets: ["latin"],
+  variable: "--font-signature",
+  display: "swap",
+  weight: "400"
+});
+
 export const metadata: Metadata = {
   title: "Sessa 1930 | Tradizione partenopea",
   description:
@@ -42,7 +49,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="it">
-      <body className={`${serif.variable} ${sans.variable} ${script.variable} font-sans`}>
+      <body
+        className={`${serif.variable} ${sans.variable} ${script.variable} ${signature.variable} font-sans`}
+      >
         {children}
       </body>
     </html>

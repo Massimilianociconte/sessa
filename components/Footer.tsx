@@ -1,13 +1,16 @@
 import { brandFacts, imageCredits, socialLinks } from "@/data/site-content";
-import { TileBand } from "@/components/TileTexture";
+import { SessaSignature } from "@/components/SessaSignature";
 
 export function Footer() {
   return (
     <footer className="relative z-[80] overflow-hidden bg-ink text-ivory">
-      <TileBand overlayClassName="bg-ink/12" tileSize="clamp(64px, 5vw, 84px)" />
       <div className="mx-auto grid max-w-[1320px] gap-10 px-5 py-12 sm:px-8 md:grid-cols-[1fr_1fr_1fr] lg:px-12">
         <div>
-          <p className="font-script text-7xl leading-none text-cream">Sessa</p>
+          <SessaSignature
+            ariaLabel="Sessa"
+            className="h-auto w-[180px] sm:w-[210px]"
+            tail="short"
+          />
           <p className="mt-5 max-w-sm text-sm leading-7 text-ivory/[0.64]">
             Sessa 1930. Tradizione partenopea, cura al dettaglio, qualità e passione.
           </p>

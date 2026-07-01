@@ -72,8 +72,8 @@ export function AnimatedThread() {
           stroke="#D65A1F"
           strokeLinecap="round"
           strokeLinejoin="round"
-          strokeWidth="10"
-          opacity="0.42"
+          strokeWidth="6"
+          opacity="0.3"
         />
       </svg>
       <svg
@@ -88,8 +88,8 @@ export function AnimatedThread() {
           stroke="#D65A1F"
           strokeLinecap="round"
           strokeLinejoin="round"
-          strokeWidth="4"
-          opacity="0.24"
+          strokeWidth="2.4"
+          opacity="0.18"
         />
       </svg>
     </div>

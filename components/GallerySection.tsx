@@ -1,5 +1,6 @@
 import Image from "next/image";
 import { galleryImages } from "@/data/site-content";
+import { SessaSignature } from "@/components/SessaSignature";
 
 export function GallerySection() {
   return (
@@ -20,7 +21,7 @@ export function GallerySection() {
         <div className="relative grid gap-8 lg:col-span-5">
           <div className="relative z-30 flex min-h-[320px] items-end bg-terracotta p-8 text-ivory sm:min-h-[360px] sm:p-10">
             <div>
-              <p className="font-script text-7xl leading-none text-cream">Sessa</p>
+              <SessaSignature ariaLabel="Sessa" className="h-auto w-[220px]" tail="short" />
               <h2 className="mt-6 font-serif text-[clamp(3rem,5vw,5.7rem)] font-medium leading-[0.9]">
                 Un ritmo fatto di mani, calore e attese
               </h2>
