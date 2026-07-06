@@ -54,7 +54,7 @@ svg {
 
 .initial-loader__inner {
   position: relative;
-  width: min(98vw, 1320px);
+  width: min(92vw, 1180px);
 }
 
 .initial-loader__signature {
@@ -154,9 +154,10 @@ svg {
 
 .hero-signature {
   opacity: 0;
-  width: 100vw;
+  width: 94vw;
   max-width: none;
-  margin-inline: calc(50% - 50vw);
+  margin-left: auto;
+  margin-right: calc(50% - 50vw);
   transform: translateY(16px);
   animation: heroSignatureIn 1.05s cubic-bezier(0.22, 1, 0.36, 1) 4.45s forwards;
 }
