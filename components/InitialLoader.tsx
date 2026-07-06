@@ -11,7 +11,7 @@ export function InitialLoader() {
 
   useEffect(() => {
     const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const minimumDelay = reduceMotion ? 650 : 2650;
+    const minimumDelay = reduceMotion ? 650 : 3700;
     const finishLoad = () => setLoaded(true);
     const minimumTimer = window.setTimeout(() => setMinimumDone(true), minimumDelay);
 
