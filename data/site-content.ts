@@ -8,6 +8,8 @@ export type NavItem = {
 export type Category = {
   name: string;
   image: string;
+  accent: "terracotta" | "blue" | "green";
+  tile: string;
 };
 
 export type Specialty = {
@@ -57,10 +59,12 @@ export type ImageCredit = {
 
 const officialImagePath = assetPath("/images/official/processed");
 const stickerImagePath = assetPath("/images/stickers");
+const patternPath = assetPath("/patterns");
 
 export const navItems: NavItem[] = [
   { label: "Storia", href: "#storia" },
   { label: "Dolci", href: "#dolci" },
+  { label: "Identità", href: "#identita" },
   { label: "Sedi", href: "#sedi" },
   { label: "Galleria", href: "#galleria" },
   { label: "Contatti", href: "#contatti" }
@@ -80,12 +84,29 @@ export const brandFacts = {
 };
 
 export const categories: Category[] = [
-  { name: "Colazioni", image: `${stickerImagePath}/colazioni-sessa-sticker.png` },
-  { name: "Sfogliatelle", image: `${stickerImagePath}/sfogliatella-sessa-sticker.png` },
-  { name: "Box Regalo", image: `${stickerImagePath}/box-regalo-sessa-sticker.png` },
+  {
+    name: "Colazioni",
+    image: `${stickerImagePath}/colazioni-sessa-sticker.png`,
+    accent: "terracotta",
+    tile: `${patternPath}/sessa-maiolica-orange.png`
+  },
+  {
+    name: "Sfogliatelle",
+    image: `${stickerImagePath}/sfogliatella-sessa-sticker.png`,
+    accent: "blue",
+    tile: `${patternPath}/sessa-maiolica-blue.png`
+  },
+  {
+    name: "Box Regalo",
+    image: `${stickerImagePath}/box-regalo-sessa-sticker.png`,
+    accent: "green",
+    tile: `${patternPath}/sessa-maiolica-green.png`
+  },
   {
     name: "Pasticceria Tradizionale",
-    image: `${stickerImagePath}/pasticceria-tradizionale-sessa-sticker.png`
+    image: `${stickerImagePath}/pasticceria-tradizionale-sessa-sticker.png`,
+    accent: "terracotta",
+    tile: `${patternPath}/sessa-maiolica-orange.png`
   }
 ];
 

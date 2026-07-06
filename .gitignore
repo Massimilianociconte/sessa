@@ -1,4 +1,5 @@
 .next/
+.netlify/
 node_modules/
 out/
 dist/

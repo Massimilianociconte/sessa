@@ -1,4 +1,5 @@
 import { AnimatedThread } from "@/components/AnimatedThread";
+import { BrandSystemSection } from "@/components/BrandSystemSection";
 import { CTASection } from "@/components/CTASection";
 import { Footer } from "@/components/Footer";
 import { GallerySection } from "@/components/GallerySection";
@@ -19,6 +20,7 @@ export default function Home() {
       <HeroSection />
       <HeritageSection />
       <ProductsSection />
+      <BrandSystemSection />
       <StorySection />
       <LocationsSection />
       <GallerySection />
