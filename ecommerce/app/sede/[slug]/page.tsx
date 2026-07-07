@@ -223,7 +223,7 @@ export default async function StoreCatalogPage({ params, searchParams }: Props) 
           </div>
         </section>
 
-        <section className="catalog-search-card catalog-toolbar mb-8 grid gap-4 p-4 md:grid-cols-[1fr_auto]">
+        <section className="catalog-search-card catalog-toolbar mb-8 mt-8 grid gap-4 p-4 md:mt-12 md:grid-cols-[1fr_auto]">
           <form action={`/sede/${slug}`} className="flex flex-col gap-3 sm:flex-row">
             {categoria && <input type="hidden" name="categoria" value={categoria} />}
             {uso && <input type="hidden" name="uso" value={uso} />}
