@@ -60,7 +60,7 @@ const OFFICIAL_LOCATION_PROFILES: Record<string, OfficialLocationProfile> = {
     province: "NA",
     address: "Piazza Municipio, 27",
     postalCode: "80044",
-    hours: "06:30-21:00, martedi chiuso",
+    hours: "06:30-21:00, martedì chiuso",
     openingHoursSchema: ["Mo,We,Th,Fr,Sa,Su 06:30-21:00"],
     openingHoursSpecification: openingHoursSpec(OTTAVIANO_OPEN_DAYS, "06:30", "21:00"),
     geoArea: "Ottaviano, Vesuvio e provincia di Napoli",
@@ -99,7 +99,7 @@ const OFFICIAL_LOCATION_PROFILES: Record<string, OfficialLocationProfile> = {
     keywordCity: "Milano Centrale",
     localIntent: "pasticceria napoletana Sessa a Milano Centrale",
     signatureProducts: ["sfogliatelle", "pasticceria napoletana", "grandi lievitati", "box regalo"],
-    sourceNote: "Sessa 1930 e presente al Mercato Centrale Milano con la sfogliatella napoletana di Sabato Sessa.",
+    sourceNote: "Sessa 1930 è presente al Mercato Centrale Milano con la sfogliatella napoletana di Sabato Sessa.",
     sourceUrl: "https://www.mercatocentrale.com/milan/artisans/sabato-sessas-neapolitan-sfogliatella/"
   },
   firenze: {
@@ -147,7 +147,7 @@ const OFFICIAL_LOCATION_PROFILES: Record<string, OfficialLocationProfile> = {
     keywordCity: "Merlata Bloom Milano",
     localIntent: "pasticceria Sessa 1930 a Merlata Bloom Milano",
     signatureProducts: ["sfogliatelle", "pasticceria napoletana", "colazioni", "box regalo"],
-    sourceNote: "Sessa 1930 e presente nell'offerta food del centro Merlata Bloom Milano.",
+    sourceNote: "Sessa 1930 è presente nell'offerta food del centro Merlata Bloom Milano.",
     sourceUrl: "https://www.merlatabloommilano.com/la-nostra-offerta/food/sessa-1930/"
   },
   "roma-termini": {
@@ -162,14 +162,14 @@ const OFFICIAL_LOCATION_PROFILES: Record<string, OfficialLocationProfile> = {
     geoArea: "Stazione Roma Termini",
     keywordCity: "Roma Termini",
     localIntent: "pasticceria Sessa 1930 alla Stazione Roma Termini",
-    signatureProducts: ["caffe gourmet", "cornetti", "sfogliatelle", "cheesecake", "pasticceria napoletana"],
+    signatureProducts: ["caffè gourmet", "cornetti", "sfogliatelle", "cheesecake", "pasticceria napoletana"],
     sourceNote: "Il sito Sessa indica la sede Stazione Roma Termini in Via Giovanni Giolitti, 40.",
     sourceUrl: "https://sessa1930.com/"
   }
 };
 
 const BRAND_DESCRIPTION =
-  "Sessa 1930 e una pasticceria artigianale partenopea nata a Ottaviano, legata a tradizione napoletana, materie prime selezionate e specialita come sfogliatelle, babà, pastiera, caprese e grandi lievitati.";
+  "Sessa 1930 è una pasticceria artigianale partenopea nata a Ottaviano, legata a tradizione napoletana, materie prime selezionate e specialità come sfogliatelle, babà, pastiera, caprese e grandi lievitati.";
 
 function profileFor(location: LocationLike): OfficialLocationProfile {
   return (
@@ -199,14 +199,14 @@ export function getStoreSeo(location: LocationLike) {
   const canonicalUrl = `${SITE_URL}/sede/${location.slug}`;
   const title = `${name} - Shop online ${cityName}`;
   const description =
-    `Ordina online da ${name}: ${profile.signatureProducts.slice(0, 4).join(", ")} e specialita napoletane. ` +
+    `Ordina online da ${name}: ${profile.signatureProducts.slice(0, 4).join(", ")} e specialità napoletane. ` +
     `${address}, ${cityName}. Ritiro${location.deliveryEnabled ? " e consegna" : ""}.`;
   const h1 = `${name}: ecommerce della sede di ${cityName}`;
   const directAnswer =
     `${name} e la pagina ecommerce locale di Sessa 1930 per ${profile.geoArea}. Qui puoi ordinare online ` +
     `${profile.signatureProducts.slice(0, 4).join(", ")} e prodotti della pasticceria napoletana, con disponibilità e stock collegati alla sede.`;
   const narrative =
-    `${BRAND_DESCRIPTION} La sede ${name} porta questa identita a ${profile.geoArea}, con un catalogo online pensato per ritiro` +
+    `${BRAND_DESCRIPTION} La sede ${name} porta questa identità a ${profile.geoArea}, con un catalogo online pensato per ritiro` +
     `${location.deliveryEnabled ? " e consegna" : ""} dalla sede selezionata.`;
   const faq: LocalFaq[] = [
     {
@@ -215,7 +215,7 @@ export function getStoreSeo(location: LocationLike) {
     },
     {
       question: `Cosa posso ordinare online da ${name}?`,
-      answer: `Puoi ordinare prodotti Sessa come ${profile.signatureProducts.slice(0, 5).join(", ")} e altre specialita disponibili nel catalogo della sede.`
+      answer: `Puoi ordinare prodotti Sessa come ${profile.signatureProducts.slice(0, 5).join(", ")} e altre specialità disponibili nel catalogo della sede.`
     },
     {
       question: `Il catalogo online cambia in base alla sede?`,

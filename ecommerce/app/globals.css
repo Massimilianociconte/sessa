@@ -1648,8 +1648,7 @@ canvas {
   align-items: center;
 }
 
-.shop-home-hero::before,
-.catalog-hero-premium::before {
+.shop-home-hero::before {
   content: "";
   position: absolute;
   inset: 1.5rem 50% 1.2rem auto;
@@ -1752,10 +1751,46 @@ canvas {
 .catalog-hero-premium {
   position: relative;
   isolation: isolate;
+  overflow: hidden;
   min-height: auto;
+  --location-hero-bg: none;
+  --location-hero-bg-opacity: 0.18;
+}
+
+.catalog-hero-premium::before {
+  content: "";
+  position: absolute;
+  inset: -0.5rem -8vw -1rem -8vw;
+  z-index: -2;
+  background-image: var(--location-hero-bg);
+  background-repeat: no-repeat;
+  background-position: right clamp(-4rem, -4vw, -1rem) center;
+  background-size: min(980px, 76vw) auto;
+  opacity: var(--location-hero-bg-opacity);
+  filter: grayscale(1) contrast(1.08);
+  mix-blend-mode: multiply;
+  -webkit-mask-image: linear-gradient(90deg, transparent 0%, transparent 16%, #000 48%, #000 100%);
+  mask-image: linear-gradient(90deg, transparent 0%, transparent 16%, #000 48%, #000 100%);
+  pointer-events: none;
+}
+
+.catalog-hero-premium::after {
+  content: "";
+  position: absolute;
+  inset: 1.5rem 50% 1.2rem auto;
+  z-index: -1;
+  width: 50vw;
+  background-image: url("/patterns/piastrella-napoletana.webp");
+  background-size: 180px 180px;
+  opacity: 0.058;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 22%, #000 72%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 22%, #000 72%, transparent);
+  pointer-events: none;
 }
 
 .catalog-hero-inner {
+  position: relative;
+  z-index: 1;
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 0.4fr);
   gap: clamp(1.25rem, 4vw, 3rem);
@@ -2893,6 +2928,23 @@ canvas {
 
 	  .shop-home-hero {
 	    padding-top: 1.75rem;
+	  }
+
+	  .catalog-hero-premium::before {
+	    inset: -0.5rem -28vw auto -28vw;
+	    height: 18rem;
+	    background-position: top center;
+	    background-size: 128vw auto;
+	    opacity: 0.14;
+	    -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 42%, transparent 100%);
+	    mask-image: linear-gradient(180deg, #000 0%, #000 42%, transparent 100%);
+	  }
+
+	  .catalog-hero-premium::after {
+	    inset: 0.65rem auto auto -18vw;
+	    width: 92vw;
+	    height: 12rem;
+	    opacity: 0.042;
 	  }
 
 	  .shop-home-panel,

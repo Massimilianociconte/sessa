@@ -19,10 +19,38 @@ const CATEGORY_ACCENTS: Record<string, { color: string; tile: string }> = {
   green: { color: "#08c963", tile: 'url("/patterns/sessa-maiolica-green.png")' }
 };
 
+const CITY_HERO_BACKGROUNDS: Record<string, string> = {
+  firenze: "/images/sfondo-sedi/firenze.webp",
+  milano: "/images/sfondo-sedi/milano.webp",
+  roma: "/images/sfondo-sedi/roma.webp",
+  torino: "/images/sfondo-sedi/torino.webp",
+  vesuvio: "/images/sfondo-sedi/vesuvio1.webp"
+};
+
 type Props = {
   params: Promise<{ slug: string }>;
   searchParams: Promise<{ categoria?: string; q?: string; uso?: string }>;
 };
+
+function normalizeLocationText(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\(.+?\)/g, " ");
+}
+
+function getLocationHeroBackground(location: { slug: string; name: string; city: string }, cityName: string) {
+  const haystack = normalizeLocationText(`${location.slug} ${location.name} ${location.city} ${cityName}`);
+  if (haystack.includes("milano") || haystack.includes("merlata")) return CITY_HERO_BACKGROUNDS.milano;
+  if (haystack.includes("roma")) return CITY_HERO_BACKGROUNDS.roma;
+  if (haystack.includes("torino")) return CITY_HERO_BACKGROUNDS.torino;
+  if (haystack.includes("firenze")) return CITY_HERO_BACKGROUNDS.firenze;
+  if (haystack.includes("ottaviano") || haystack.includes("vesuvio") || haystack.includes("napoli")) {
+    return CITY_HERO_BACKGROUNDS.vesuvio;
+  }
+  return CITY_HERO_BACKGROUNDS.vesuvio;
+}
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
@@ -46,6 +74,7 @@ export default async function StoreCatalogPage({ params, searchParams }: Props) 
   const itemListName = activeOccasion?.label ?? activeCategory?.name ?? `Catalogo ${location.name}`;
   const seo = getStoreSeo(location);
   const jsonLd = buildStoreJsonLd(location, products);
+  const heroBackground = getLocationHeroBackground(location, seo.cityName);
   const activeFiltersCount = [categoria, uso, q?.trim()].filter(Boolean).length;
   const categoryFilters = [
     {
@@ -115,7 +144,15 @@ export default async function StoreCatalogPage({ params, searchParams }: Props) 
         }}
       />
       <main className="shop-main mx-auto max-w-6xl px-4">
-        <section className="catalog-hero catalog-hero-premium py-8 md:py-12">
+        <section
+          className="catalog-hero catalog-hero-premium py-8 md:py-12"
+          style={
+            {
+              "--location-hero-bg": `url("${heroBackground}")`,
+              "--location-hero-bg-opacity": "0.2"
+            } as CSSProperties
+          }
+        >
           <div className="catalog-hero-inner">
             <div className="catalog-hero-copy">
               <Link href="/" className="catalog-back-link">
