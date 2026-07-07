@@ -125,7 +125,7 @@ export default async function StoreProductPage({ params }: Props) {
             </div>
             <p className="mt-4 whitespace-pre-line text-ink/70">{product.description}</p>
             <p className="mt-3 text-sm leading-6 text-ink/55">
-              Pagina prodotto locale per {seo.keywordCity}: disponibilita, varianti e stock sono collegati alla sede {seo.name}.
+              Pagina prodotto locale per {seo.keywordCity}: disponibilità, varianti e stock sono collegati alla sede {seo.name}.
             </p>
 
             {(product.ingredients || product.allergens) && (
@@ -178,7 +178,7 @@ export default async function StoreProductPage({ params }: Props) {
           <div className="accent-card rounded-2xl border border-ink/10 bg-white p-4">
             <p className="font-serif text-lg font-semibold">Ritiro e consegna</p>
             <p className="mt-1 text-sm text-ink/60">
-              {fulfillmentCopy ? `Puoi scegliere ${fulfillmentCopy} nel checkout.` : "La sede gestisce la disponibilita prima della conferma."}
+              {fulfillmentCopy ? `Puoi scegliere ${fulfillmentCopy} nel checkout.` : "La sede gestisce la disponibilità prima della conferma."}
             </p>
           </div>
           <div className="accent-card rounded-2xl border border-ink/10 bg-white p-4">

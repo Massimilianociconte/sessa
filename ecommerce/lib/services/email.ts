@@ -11,7 +11,9 @@ export type EmailType =
   | "ORDER_CONFIRMATION"
   | "PASSWORD_RESET"
   | "REFERRAL_WELCOME"
-  | "REFERRAL_REWARD";
+  | "REFERRAL_REWARD"
+  | "SECURITY_LOGIN"
+  | "SECURITY_PASSWORD_CHANGED";
 
 let transporter: nodemailer.Transporter | null = null;
 function getTransport(): nodemailer.Transporter | null {

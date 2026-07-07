@@ -24,7 +24,7 @@ export default async function AccountPreferencesPage() {
       <AccountPageIntro
         kicker="Esperienza"
         title="Preferenze"
-        description="Una base pronta per checkout piu rapido, promo locali, riordino intelligente e comunicazioni piu pertinenti."
+        description="Una base pronta per checkout più rapido, promo locali, riordino intelligente e comunicazioni più pertinenti."
       >
         <Link href="/account/profilo" className="btn-secondary">Aggiorna dati</Link>
       </AccountPageIntro>
@@ -39,7 +39,7 @@ export default async function AccountPreferencesPage() {
         <AccountInfoTile
           label="Modalita preferita"
           value={preferredFulfillment}
-          description="Usata per suggerire il percorso piu rapido al checkout."
+          description="Usata per suggerire il percorso più rapido al checkout."
           tone="ceramic"
         />
         <AccountInfoTile
@@ -53,7 +53,7 @@ export default async function AccountPreferencesPage() {
       <AccountPanel
         eyebrow="Checkout"
         title="Preferenze operative"
-        description="Questi dati migliorano velocita e precisione nei flussi futuri."
+        description="Questi dati migliorano velocità e precisione nei flussi futuri."
       >
         <div className="account-preference-grid">
           <div>
@@ -76,7 +76,7 @@ export default async function AccountPreferencesPage() {
             <span>
               {snapshot.inferredLocation
                 ? `Catalogo locale di ${snapshot.inferredLocation.city}.`
-                : "Scegli la sede da cui vuoi ordinare piu spesso."}
+                : "Scegli la sede da cui vuoi ordinare più spesso."}
             </span>
             <Link href={snapshot.inferredLocation?.slug ? `/sede/${snapshot.inferredLocation.slug}` : "/"} className="btn-ghost">
               Apri catalogo
@@ -94,7 +94,7 @@ export default async function AccountPreferencesPage() {
       <AccountPanel
         eyebrow="Sedi"
         title="Cataloghi locali"
-        description="Le preferenze di sede permettono di mostrare disponibilita, ritiro e consegna corretti."
+        description="Le preferenze di sede permettono di mostrare disponibilità, ritiro e consegna corretti."
       >
         {snapshot.locations.length === 0 ? (
           <AccountEmptyState

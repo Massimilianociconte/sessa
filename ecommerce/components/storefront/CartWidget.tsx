@@ -163,8 +163,18 @@ export default function CartWidget({
   const data = cart ?? EMPTY_CART;
   const payable = Math.max(0, data.subtotalCents - data.discountCents);
   const hasLines = data.lines.length > 0;
-  const drawerLocationName = hasLines ? data.locationName ?? currentLocation?.name ?? null : currentLocation?.name ?? data.locationName ?? null;
-  const drawerLocationSlug = hasLines ? data.locationSlug ?? currentLocation?.slug ?? null : currentLocation?.slug ?? data.locationSlug ?? null;
+  const browsingLocationName = currentLocation?.name ?? null;
+  const browsingLocationSlug = currentLocation?.slug ?? null;
+  const cartLocationName = hasLines ? data.locationName ?? null : null;
+  const cartLocationSlug = hasLines ? data.locationSlug ?? null : null;
+  const visibleLocationName = browsingLocationName ?? cartLocationName ?? data.locationName ?? null;
+  const visibleLocationSlug = browsingLocationSlug ?? cartLocationSlug ?? data.locationSlug ?? null;
+  const hasLocationMismatch = Boolean(
+    hasLines &&
+    browsingLocationSlug &&
+    cartLocationSlug &&
+    browsingLocationSlug !== cartLocationSlug
+  );
   const isLoadingInitial = loading && !cart;
   const itemLabel = useMemo(() => {
     if (data.itemCount === 1) return "1 pezzo scelto";
@@ -242,10 +252,10 @@ export default function CartWidget({
               <p className="text-[10px] font-bold uppercase tracking-[0.34em] text-cream/75">Sessa 1930</p>
               <p id="cart-drawer-title" className="mt-1 font-script text-4xl leading-none sm:text-5xl">Il tuo carrello</p>
               <p id="cart-drawer-description" className="mt-2 max-w-[18rem] text-sm font-medium text-cream/85">
-                {hasLines
-                  ? "Una selezione pronta per il laboratorio."
-                  : drawerLocationName
-                    ? `Stai sfogliando il catalogo di ${drawerLocationName}.`
+                {hasLocationMismatch
+                  ? `Stai visitando ${browsingLocationName}; il carrello contiene prodotti da ${cartLocationName}.`
+                  : visibleLocationName
+                    ? `Stai sfogliando il catalogo di ${visibleLocationName}.`
                     : "Scegli una sede e componi il tuo vassoio."}
               </p>
             </div>
@@ -262,14 +272,18 @@ export default function CartWidget({
             </button>
           </div>
 
-          <div className="mt-5 grid grid-cols-2 gap-2">
+          <div className="mt-5 grid grid-cols-3 gap-2">
             <div className="drawer-stat">
               <span>Selezione</span>
               <strong>{itemLabel}</strong>
             </div>
             <div className="drawer-stat">
-              <span>Sede</span>
-              <strong>{drawerLocationName ?? "Da scegliere"}</strong>
+              <span>Stai visitando</span>
+              <strong>{browsingLocationName ?? "Sedi Sessa"}</strong>
+            </div>
+            <div className="drawer-stat">
+              <span>Carrello</span>
+              <strong>{cartLocationName ?? visibleLocationName ?? "Da riempire"}</strong>
             </div>
           </div>
         </header>
@@ -319,21 +333,25 @@ export default function CartWidget({
               <div>
                 <p className="font-serif text-2xl font-semibold text-ink">Il carrello aspetta il primo dolce</p>
                 <p className="mx-auto mt-2 max-w-xs text-sm leading-6 text-ink/60">
-                  {drawerLocationName
-                    ? `Aggiungi sfogliatelle, colazioni o box regalo dal catalogo di ${drawerLocationName}.`
+                  {visibleLocationName
+                    ? `Aggiungi sfogliatelle, colazioni o box regalo dal catalogo di ${visibleLocationName}.`
                     : "Parti da una sede, scegli sfogliatelle, colazioni o box regalo e ritroverai tutto qui."}
                 </p>
               </div>
-              <Link href={drawerLocationSlug ? `/sede/${drawerLocationSlug}` : "/"} onClick={closeDrawer} className="btn-primary">
-                {drawerLocationSlug ? "Continua in questa sede" : "Scopri le sedi"}
+              <Link href={visibleLocationSlug ? `/sede/${visibleLocationSlug}` : "/"} onClick={closeDrawer} className="btn-primary">
+                {visibleLocationSlug ? "Continua in questa sede" : "Scopri le sedi"}
               </Link>
             </div>
           ) : (
             <>
               <div className="cart-care-note mb-4 rounded-2xl px-4 py-3">
-                <p className="text-xs font-bold uppercase tracking-[0.2em] text-terracotta">Cornice Sessa</p>
+                <p className="text-xs font-bold uppercase tracking-[0.2em] text-terracotta">
+                  {hasLocationMismatch ? "Carrello salvato in un'altra sede" : "Cornice Sessa"}
+                </p>
                 <p className="mt-1 text-sm text-ink/65">
-                  Prezzi aggiornati in tempo reale. Ritiro e consegna si definiscono nel checkout.
+                  {hasLocationMismatch
+                    ? `Ora stai visitando ${browsingLocationName}, ma questi prodotti sono nel carrello di ${cartLocationName}. Checkout, prezzi e stock seguiranno quella sede.`
+                    : `Prodotti nel carrello di ${cartLocationName ?? "Sessa"}. Ritiro e consegna si definiscono nel checkout.`}
                 </p>
               </div>
 
@@ -369,6 +387,11 @@ export default function CartWidget({
                           <p className="mt-1 text-xs font-semibold uppercase tracking-[0.14em] text-ink/45">
                             {line.variantName}
                           </p>
+                          {hasLocationMismatch && (
+                            <p className="mt-1 text-[11px] font-bold uppercase tracking-[0.12em] text-terracotta">
+                              Salvato per {cartLocationName}
+                            </p>
+                          )}
                         </div>
                         <button
                           type="button"
@@ -455,7 +478,7 @@ export default function CartWidget({
             </div>
             <div className="mt-3 grid grid-cols-2 gap-2 text-[11px] font-semibold uppercase tracking-[0.12em] text-ink/45">
               <span className="cart-footer-chip">IVA inclusa</span>
-              <span className="cart-footer-chip">Ritiro o consegna</span>
+              <span className="cart-footer-chip">{cartLocationName ?? "Ritiro o consegna"}</span>
             </div>
 
             <div className="mt-4 grid grid-cols-[0.9fr_1.35fr] gap-3">

@@ -12,8 +12,6 @@ type HeaderLocationContext = {
 export default async function Header({ currentLocation }: { currentLocation?: HeaderLocationContext }) {
   const [cartView, customer] = await Promise.all([getCurrentCartView(), getSessionCustomer()]);
   const count = cartView?.itemCount ?? 0;
-  const cartLocation = cartView ? { slug: cartView.locationSlug, name: cartView.locationName } : undefined;
-  const activeLocation = cartView && cartView.itemCount > 0 ? cartLocation : currentLocation ?? cartLocation;
 
   return (
     <header className="brand-ribbon sticky top-0 z-40 text-ivory backdrop-blur">
@@ -28,21 +26,22 @@ export default async function Header({ currentLocation }: { currentLocation?: He
         </Link>
 
         <div className="flex min-w-0 items-center gap-2 text-sm">
-          {activeLocation && (
+          {currentLocation ? (
             <Link
-              href={`/sede/${activeLocation.slug}`}
+              href={`/sede/${currentLocation.slug}`}
               className="location-pill hidden rounded-full px-3 py-1.5 text-cream/85 transition hover:bg-white/10 hover:text-white sm:inline-flex"
             >
-              <span>Sede</span>
-              {activeLocation.name}
+              <span>Sede attiva</span>
+              {currentLocation.name}
+            </Link>
+          ) : (
+            <Link
+              href="/"
+              className="hidden rounded-full px-3 py-1.5 font-medium text-cream/85 transition hover:bg-white/10 hover:text-white sm:inline-flex"
+            >
+              Sedi
             </Link>
           )}
-          <Link
-            href="/"
-            className="hidden rounded-full px-3 py-1.5 font-medium text-cream/85 transition hover:bg-white/10 hover:text-white sm:inline-flex"
-          >
-            Sedi
-          </Link>
           <Link
             href="/account"
             className="inline-flex min-h-10 items-center rounded-full border border-cream/45 px-3 py-1.5 font-semibold text-cream transition hover:bg-cream hover:text-terracotta sm:px-4"

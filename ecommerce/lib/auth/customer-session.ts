@@ -1,21 +1,62 @@
 import "server-only";
 import { createHash, randomBytes } from "node:crypto";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { cache } from "react";
 import { prisma } from "@/lib/db";
 import { CUSTOMER_SESSION_COOKIE } from "@/lib/auth/constants";
 
 const SESSION_DAYS = 30;
+const SESSION_TOUCH_INTERVAL_MS = 5 * 60 * 1000;
+const MAX_USER_AGENT_LENGTH = 500;
+const MAX_IP_LENGTH = 80;
 
 function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
 }
 
+function trimNullable(value: string | null, max: number): string | null {
+  const clean = value?.trim();
+  if (!clean) return null;
+  return clean.slice(0, max);
+}
+
+async function getRequestSessionContext() {
+  const h = await headers();
+  return {
+    userAgent: trimNullable(h.get("user-agent"), MAX_USER_AGENT_LENGTH),
+    ipAddress: trimNullable(h.get("x-forwarded-for")?.split(",")[0] ?? h.get("x-real-ip") ?? "local", MAX_IP_LENGTH)
+  };
+}
+
+async function currentSessionTokenHash(): Promise<string | null> {
+  const cookieStore = await cookies();
+  const token = cookieStore.get(CUSTOMER_SESSION_COOKIE)?.value;
+  return token ? hashToken(token) : null;
+}
+
 /** Crea la sessione cliente a DB e imposta il cookie (solo l'hash del token tocca il DB). */
-export async function createCustomerSession(customerId: string): Promise<void> {
+export async function createCustomerSession(customerId: string) {
   const token = randomBytes(32).toString("hex");
+  const context = await getRequestSessionContext();
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000);
-  await prisma.customerSession.create({ data: { tokenHash: hashToken(token), customerId, expiresAt } });
+  const session = await prisma.customerSession.create({
+    data: {
+      tokenHash: hashToken(token),
+      customerId,
+      userAgent: context.userAgent,
+      ipAddress: context.ipAddress,
+      lastSeenAt: new Date(),
+      expiresAt
+    },
+    select: {
+      id: true,
+      userAgent: true,
+      ipAddress: true,
+      lastSeenAt: true,
+      expiresAt: true,
+      createdAt: true
+    }
+  });
   const cookieStore = await cookies();
   cookieStore.set(CUSTOMER_SESSION_COOKIE, token, {
     httpOnly: true,
@@ -24,6 +65,7 @@ export async function createCustomerSession(customerId: string): Promise<void> {
     path: "/",
     expires: expiresAt
   });
+  return session;
 }
 
 export async function destroyCustomerSession(): Promise<void> {
@@ -39,6 +81,37 @@ export async function destroyAllCustomerSessions(customerId: string): Promise<vo
   cookieStore.delete(CUSTOMER_SESSION_COOKIE);
 }
 
+export async function destroyOtherCustomerSessions(customerId: string): Promise<void> {
+  const tokenHash = await currentSessionTokenHash();
+  if (!tokenHash) {
+    await destroyAllCustomerSessions(customerId);
+    return;
+  }
+  await prisma.customerSession.deleteMany({
+    where: {
+      customerId,
+      NOT: { tokenHash }
+    }
+  });
+}
+
+export async function destroyCustomerSessionById(customerId: string, sessionId: string): Promise<"current" | "other" | "missing"> {
+  const tokenHash = await currentSessionTokenHash();
+  const target = await prisma.customerSession.findFirst({
+    where: { id: sessionId, customerId },
+    select: { tokenHash: true }
+  });
+  if (!target) return "missing";
+
+  await prisma.customerSession.deleteMany({ where: { id: sessionId, customerId } });
+  if (target.tokenHash === tokenHash) {
+    const cookieStore = await cookies();
+    cookieStore.delete(CUSTOMER_SESSION_COOKIE);
+    return "current";
+  }
+  return "other";
+}
+
 export type SessionCustomer = {
   id: string;
   email: string;
@@ -52,11 +125,26 @@ export const getSessionCustomer = cache(async (): Promise<SessionCustomer | null
   const cookieStore = await cookies();
   const token = cookieStore.get(CUSTOMER_SESSION_COOKIE)?.value;
   if (!token) return null;
+  const tokenHash = hashToken(token);
   const session = await prisma.customerSession.findUnique({
-    where: { tokenHash: hashToken(token) },
+    where: { tokenHash },
     include: { customer: true }
   });
   if (!session || session.expiresAt < new Date()) return null;
+  const lastSeenAt = session.lastSeenAt ?? session.createdAt;
+
+  if (Date.now() - lastSeenAt.getTime() > SESSION_TOUCH_INTERVAL_MS) {
+    const context = await getRequestSessionContext();
+    await prisma.customerSession.update({
+      where: { id: session.id },
+      data: {
+        lastSeenAt: new Date(),
+        userAgent: context.userAgent ?? session.userAgent,
+        ipAddress: context.ipAddress ?? session.ipAddress
+      }
+    });
+  }
+
   const { id, email, firstName, lastName, phone, referralCode } = session.customer;
   return { id, email, firstName, lastName, phone, referralCode };
 });
@@ -79,13 +167,22 @@ export async function pruneExpiredCustomerSessions(): Promise<void> {
 
 export async function listCustomerSessions(customerId: string) {
   await pruneExpiredCustomerSessions();
-  return prisma.customerSession.findMany({
+  const tokenHash = await currentSessionTokenHash();
+  const sessions = await prisma.customerSession.findMany({
     where: { customerId },
-    orderBy: { createdAt: "desc" },
+    orderBy: [{ lastSeenAt: "desc" }, { createdAt: "desc" }],
     select: {
       id: true,
+      tokenHash: true,
+      userAgent: true,
+      ipAddress: true,
+      lastSeenAt: true,
       createdAt: true,
       expiresAt: true
     }
   });
+  return sessions.map(({ tokenHash: sessionTokenHash, ...session }) => ({
+    ...session,
+    isCurrent: Boolean(tokenHash && sessionTokenHash === tokenHash)
+  }));
 }

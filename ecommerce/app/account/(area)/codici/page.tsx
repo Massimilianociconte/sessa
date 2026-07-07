@@ -81,7 +81,7 @@ export default async function AccountDiscountCodesPage() {
       <AccountInfoGrid>
         <AccountInfoTile label="Attivi" value={String(activeCodes.length)} description="Pronti per il prossimo checkout." tone="brilliant" />
         <AccountInfoTile label="Usati" value={String(usedCodes.length)} description="Storico dei codici gia riscattati." tone="terracotta" />
-        <AccountInfoTile label="Scaduti/non attivi" value={String(expiredCodes.length)} description="Codici non piu applicabili." tone="ceramic" />
+        <AccountInfoTile label="Scaduti/non attivi" value={String(expiredCodes.length)} description="Codici non più applicabili." tone="ceramic" />
       </AccountInfoGrid>
 
       <AccountPanel

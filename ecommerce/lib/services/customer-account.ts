@@ -2,6 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { prisma } from "@/lib/db";
 import { DomainError } from "@/lib/domain";
 import { hashPassword } from "@/lib/auth/password";
+import { enqueueEmail } from "@/lib/services/email";
 
 const RESET_TTL_MS = 60 * 60 * 1000; // 1 ora
 
@@ -323,7 +324,10 @@ export async function createResetToken(email: string): Promise<string | null> {
 }
 
 export async function consumeResetToken(token: string, newPassword: string): Promise<void> {
-  const row = await prisma.passwordResetToken.findUnique({ where: { tokenHash: hashToken(token) } });
+  const row = await prisma.passwordResetToken.findUnique({
+    where: { tokenHash: hashToken(token) },
+    include: { customer: { select: { email: true, firstName: true } } }
+  });
   if (!row || row.usedAt || row.expiresAt < new Date()) {
     throw new DomainError("Link di reimpostazione non valido o scaduto.");
   }
@@ -335,5 +339,11 @@ export async function consumeResetToken(token: string, newPassword: string): Pro
     await tx.passwordResetToken.update({ where: { id: row.id }, data: { usedAt: new Date() } });
     // Invalida eventuali sessioni attive dopo il reset.
     await tx.customerSession.deleteMany({ where: { customerId: row.customerId } });
+  });
+  await enqueueEmail({
+    toEmail: row.customer.email,
+    subject: "Password account Sessa 1930 reimpostata",
+    type: "SECURITY_PASSWORD_CHANGED",
+    body: `Ciao ${row.customer.firstName},\n\nla password del tuo account Sessa 1930 è stata reimpostata. Tutte le sessioni precedenti sono state chiuse.\n\nSe non sei stato tu, contatta subito Sessa.`
   });
 }

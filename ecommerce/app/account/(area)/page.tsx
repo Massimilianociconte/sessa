@@ -67,7 +67,7 @@ export default async function AccountOverviewPage() {
         <AccountMetricCard
           label="Sede recente"
           value={latestOrder?.location?.name ?? "Da scegliere"}
-          description={latestOrder ? `Ultimo ordine ${formatDate(latestOrder.placedAt)}` : "Seleziona la sede piu comoda per catalogo e disponibilita."}
+          description={latestOrder ? `Ultimo ordine ${formatDate(latestOrder.placedAt)}` : "Seleziona la sede più comoda per catalogo e disponibilità."}
           href={latestOrder?.location?.slug ? `/sede/${latestOrder.location.slug}` : "/"}
           action={latestOrder ? "Vai al catalogo" : "Scopri le sedi"}
           tone="ceramic"
@@ -83,7 +83,7 @@ export default async function AccountOverviewPage() {
         <AccountMetricCard
           label="Profilo"
           value={`${profileCompletion}/3`}
-          description={profileCompletion >= 3 ? "Dati essenziali completi per checkout piu rapido." : "Completa telefono, indirizzo e preferenze."}
+          description={profileCompletion >= 3 ? "Dati essenziali completi per checkout più rapido." : "Completa telefono, indirizzo e preferenze."}
           href="/account/profilo"
           action="Completa profilo"
           tone="majolica"
@@ -94,7 +94,7 @@ export default async function AccountOverviewPage() {
         <AccountInfoTile
           label="Indirizzo predefinito"
           value={defaultAddress ? `${defaultAddress.line1}, ${defaultAddress.city}` : "Non salvato"}
-          description={defaultAddress ? `${defaultAddress.postalCode} ${defaultAddress.province} · ${addressCount} indirizz${addressCount === 1 ? "o" : "i"}` : "Salvalo per rendere il checkout piu veloce."}
+          description={defaultAddress ? `${defaultAddress.postalCode} ${defaultAddress.province} · ${addressCount} indirizz${addressCount === 1 ? "o" : "i"}` : "Salvalo per rendere il checkout più veloce."}
           tone="terracotta"
         />
         <AccountInfoTile
@@ -125,13 +125,13 @@ export default async function AccountOverviewPage() {
       <AccountPanel
         eyebrow="Storico"
         title="Ultimi ordini"
-        description="Le informazioni piu importanti per riordinare, seguire lo stato e recuperare una ricevuta."
+        description="Le informazioni più importanti per riordinare, seguire lo stato e recuperare una ricevuta."
         action={<Link href="/account/ordini" className="btn-secondary">Tutti gli ordini</Link>}
       >
         {lastOrders.length === 0 ? (
           <AccountEmptyState
             title="Il tuo primo momento Sessa ti aspetta."
-            description="Scegli la sede piu vicina e crea il tuo primo ordine: qui troverai storico, riordino rapido e ricevute."
+            description="Scegli la sede più vicina e crea il tuo primo ordine: qui troverai storico, riordino rapido e ricevute."
             primary={{ href: "/", label: "Scegli una sede" }}
             secondary={{ href: "/account/indirizzi", label: "Salva indirizzo" }}
           />

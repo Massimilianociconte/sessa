@@ -21,7 +21,7 @@ export default async function AccountLayout({ children }: { children: React.Reac
             <p className="script-accent">Ciao {customer.firstName}</p>
             <h1>La tua Sessa personale</h1>
             <span>
-              Ordini, indirizzi, inviti e preferenze raccolti in una dashboard pensata per rendere ogni acquisto piu rapido.
+              Ordini, indirizzi, inviti e preferenze raccolti in una dashboard pensata per rendere ogni acquisto più rapido.
             </span>
           </div>
           <Link href="/" className="btn-secondary account-hero-cta">

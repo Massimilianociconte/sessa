@@ -204,7 +204,7 @@ export function getStoreSeo(location: LocationLike) {
   const h1 = `${name}: ecommerce della sede di ${cityName}`;
   const directAnswer =
     `${name} e la pagina ecommerce locale di Sessa 1930 per ${profile.geoArea}. Qui puoi ordinare online ` +
-    `${profile.signatureProducts.slice(0, 4).join(", ")} e prodotti della pasticceria napoletana, con disponibilita e stock collegati alla sede.`;
+    `${profile.signatureProducts.slice(0, 4).join(", ")} e prodotti della pasticceria napoletana, con disponibilità e stock collegati alla sede.`;
   const narrative =
     `${BRAND_DESCRIPTION} La sede ${name} porta questa identita a ${profile.geoArea}, con un catalogo online pensato per ritiro` +
     `${location.deliveryEnabled ? " e consegna" : ""} dalla sede selezionata.`;
@@ -220,7 +220,7 @@ export function getStoreSeo(location: LocationLike) {
     {
       question: `Il catalogo online cambia in base alla sede?`,
       answer:
-        "Si. Prezzi, disponibilita, prodotti attivi e stock sono collegati alla sede selezionata, cosi il carrello resta coerente con il punto vendita scelto."
+        "Sì. Prezzi, disponibilità, prodotti attivi e stock sono collegati alla sede selezionata, così il carrello resta coerente con il punto vendita scelto."
     }
   ];
 

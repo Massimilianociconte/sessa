@@ -5,6 +5,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { requireCustomer, rotateCustomerSessions } from "@/lib/auth/customer-session";
+import { enqueueEmail } from "@/lib/services/email";
 import { formDataToObject, profileSchema } from "@/lib/validation";
 
 function back(path: string, key: "msg" | "err", value: string): never {
@@ -49,5 +50,11 @@ export async function changeCustomerPasswordAction(formData: FormData): Promise<
     data: { passwordHash: hashPassword(next) }
   });
   await rotateCustomerSessions(customer.id);
+  await enqueueEmail({
+    toEmail: customer.email,
+    subject: "Password account Sessa 1930 aggiornata",
+    type: "SECURITY_PASSWORD_CHANGED",
+    body: `Ciao ${customer.firstName},\n\nla password del tuo account Sessa 1930 è stata aggiornata. Per sicurezza abbiamo disconnesso gli altri dispositivi.\n\nSe non sei stato tu, contatta subito Sessa e usa il recupero password.`
+  });
   back("/account/profilo", "msg", "Password aggiornata. Le altre sessioni sono state disconnesse.");
 }

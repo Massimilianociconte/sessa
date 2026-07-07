@@ -139,7 +139,7 @@ export default async function StoreCatalogPage({ params, searchParams }: Props) 
               <div className="catalog-hero-panel-header">
                 <p className="catalog-hero-panel-kicker">Sessa locale</p>
                 <h2>{seo.keywordCity}</h2>
-                <p>Catalogo ecommerce collegato alla sede, con disponibilita e servizi aggiornati.</p>
+                <p>Catalogo ecommerce collegato alla sede, con disponibilità e servizi aggiornati.</p>
               </div>
 
               <dl className="catalog-hero-facts">
@@ -267,7 +267,7 @@ export default async function StoreCatalogPage({ params, searchParams }: Props) 
             <div className="card py-16 text-center">
               <p className="font-serif text-2xl font-semibold">Nessun prodotto trovato</p>
               <p className="mt-2 text-sm text-ink/55">
-                Prova a cambiare occasione, categoria o ricerca. La disponibilita resta legata alla sede selezionata.
+                Prova a cambiare occasione, categoria o ricerca. La disponibilità resta legata alla sede selezionata.
               </p>
             </div>
           ) : (

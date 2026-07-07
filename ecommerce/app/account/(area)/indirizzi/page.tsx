@@ -75,7 +75,7 @@ export default async function AccountAddressesPage({
   return (
     <div className="account-page-stack">
       <AccountPageIntro
-        kicker="Checkout piu veloce"
+        kicker="Checkout più veloce"
         title="Indirizzi salvati"
         description="Gestisci casa, lavoro o altri recapiti: il checkout li usera per ridurre campi e passaggi."
       />
@@ -133,7 +133,7 @@ export default async function AccountAddressesPage({
           ))}
           {addresses.length === 0 && (
             <AccountEmptyState
-              title="Salva un indirizzo per rendere il checkout piu veloce."
+              title="Salva un indirizzo per rendere il checkout più veloce."
               description="Potrai scegliere il recapito in un tap e ridurre gli errori su telefono, CAP e citofono."
               primary={{ href: "#nuovo-indirizzo", label: "Aggiungi indirizzo" }}
             />

@@ -1,6 +1,7 @@
 "use server";
 
 import { cookies, headers } from "next/headers";
+import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { DomainError } from "@/lib/domain";
@@ -9,6 +10,8 @@ import { verifyPassword } from "@/lib/auth/password";
 import {
   createCustomerSession,
   destroyAllCustomerSessions,
+  destroyCustomerSessionById,
+  destroyOtherCustomerSessions,
   destroyCustomerSession,
   getSessionCustomer,
   pruneExpiredCustomerSessions
@@ -33,6 +36,13 @@ export type AuthState = { error: string | null };
 async function clientIp(): Promise<string> {
   const h = await headers();
   return h.get("x-forwarded-for")?.split(",")[0]?.trim() || h.get("x-real-ip") || "local";
+}
+
+function describeSessionForEmail(session: { ipAddress: string | null; userAgent: string | null }): string {
+  return [
+    session.ipAddress ? `IP: ${session.ipAddress}` : null,
+    session.userAgent ? `Dispositivo/browser: ${session.userAgent}` : null
+  ].filter(Boolean).join("\n");
 }
 
 export async function registerCustomerAction(_prev: AuthState, formData: FormData): Promise<AuthState> {
@@ -88,7 +98,13 @@ export async function loginCustomerAction(_prev: AuthState, formData: FormData):
   }
   clearAttempts(rateKey);
   await pruneExpiredCustomerSessions();
-  await createCustomerSession(customer.id);
+  const session = await createCustomerSession(customer.id);
+  await enqueueEmail({
+    toEmail: customer.email,
+    subject: "Nuovo accesso al tuo account Sessa 1930",
+    type: "SECURITY_LOGIN",
+    body: `Ciao ${customer.firstName},\n\nabbiamo registrato un nuovo accesso al tuo account Sessa 1930.\n${describeSessionForEmail(session)}\n\nSe sei stato tu, non devi fare nulla. Se non riconosci questo accesso, entra nella sezione Sicurezza e chiudi le sessioni attive.`
+  });
   redirect("/account");
 }
 
@@ -103,6 +119,25 @@ export async function logoutAllCustomerSessionsAction(): Promise<void> {
   redirect("/account/login?all=1");
 }
 
+export async function logoutOtherCustomerSessionsAction(): Promise<void> {
+  const customer = await getSessionCustomer();
+  if (!customer) redirect("/account/login");
+  await destroyOtherCustomerSessions(customer.id);
+  revalidatePath("/account/sicurezza");
+  redirect("/account/sicurezza?msg=Sessioni%20degli%20altri%20dispositivi%20chiuse");
+}
+
+export async function logoutCustomerSessionAction(formData: FormData): Promise<void> {
+  const customer = await getSessionCustomer();
+  if (!customer) redirect("/account/login");
+  const sessionId = String(formData.get("sessionId") ?? "");
+  if (!sessionId) redirect("/account/sicurezza?err=Sessione%20non%20valida");
+  const result = await destroyCustomerSessionById(customer.id, sessionId);
+  if (result === "current") redirect("/account/login?all=1");
+  revalidatePath("/account/sicurezza");
+  redirect(result === "missing" ? "/account/sicurezza?err=Sessione%20non%20trovata" : "/account/sicurezza?msg=Sessione%20chiusa");
+}
+
 /**
  * Richiesta reset password. Risposta sempre generica (niente enumerazione account).
  * In sviluppo il link viene incluso nel redirect per poter testare senza SMTP.
@@ -111,7 +146,12 @@ export async function requestResetAction(formData: FormData): Promise<void> {
   const parsed = resetRequestSchema.safeParse({ email: formData.get("email") });
   if (!parsed.success) redirect("/account/recupera?err=Email non valida");
 
-  const token = await createResetToken(parsed.data.email);
+  const email = parsed.data.email.toLowerCase();
+  const resetKey = `cust-reset:${await clientIp()}:${email}`;
+  if (isRateLimited(resetKey) !== null) redirect("/account/recupera?sent=1");
+  registerFailedAttempt(resetKey);
+
+  const token = await createResetToken(email);
   if (token) {
     const link = `${SITE_URL}/account/reset?token=${token}`;
     await enqueueEmail({

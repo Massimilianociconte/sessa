@@ -262,10 +262,14 @@ model CustomerSession {
   tokenHash  String   @unique
   customerId String
   customer   Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  userAgent  String?
+  ipAddress  String?
+  lastSeenAt DateTime @default(now())
   expiresAt  DateTime
   createdAt  DateTime @default(now())
 
   @@index([customerId])
+  @@index([customerId, lastSeenAt])
   @@index([expiresAt])
 }
 
