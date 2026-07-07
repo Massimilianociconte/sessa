@@ -12,6 +12,25 @@ export default function PwaRegister() {
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
 
+    if (process.env.NODE_ENV !== "production") {
+      const cleanLocalWorkerState = async () => {
+        try {
+          const registrations = await navigator.serviceWorker.getRegistrations();
+          await Promise.all(registrations.map((registration) => registration.unregister()));
+
+          if ("caches" in window) {
+            const keys = await caches.keys();
+            await Promise.all(keys.filter((key) => key.startsWith("sessa-shop-")).map((key) => caches.delete(key)));
+          }
+        } catch {
+          // In sviluppo la pulizia e' best-effort: non deve bloccare il rendering locale.
+        }
+      };
+
+      void cleanLocalWorkerState();
+      return;
+    }
+
     let cancelled = false;
     const register = async () => {
       try {

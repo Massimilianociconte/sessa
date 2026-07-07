@@ -1897,6 +1897,104 @@ canvas {
   box-shadow: 0 18px 42px rgba(23, 20, 18, 0.07);
 }
 
+/* 404 -------------------------------------------------------------------- */
+.not-found-page {
+  position: relative;
+  overflow: hidden;
+  min-height: calc(100dvh - 72px);
+  background:
+    radial-gradient(circle at 86% 8%, rgba(216, 90, 31, 0.12), transparent 30%),
+    radial-gradient(circle at 8% 76%, rgba(7, 63, 208, 0.06), transparent 34%),
+    linear-gradient(180deg, rgba(255, 247, 237, 0.96), rgba(250, 246, 239, 1));
+}
+
+.not-found-page::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: url("/patterns/piastrella-napoletana.webp");
+  background-size: min(34vw, 420px);
+  opacity: 0.055;
+  pointer-events: none;
+}
+
+.not-found-shell {
+  position: relative;
+  z-index: 1;
+}
+
+.not-found-copy {
+  position: relative;
+  isolation: isolate;
+}
+
+.not-found-copy::after {
+  content: "";
+  position: absolute;
+  inset: auto auto -1.6rem -1.1rem;
+  z-index: -1;
+  width: clamp(8rem, 24vw, 17rem);
+  aspect-ratio: 1;
+  border-radius: 999px;
+  background: rgba(216, 90, 31, 0.07);
+  filter: blur(14px);
+}
+
+.not-found-trust {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.not-found-trust span {
+  display: inline-flex;
+  min-height: 2.35rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(216, 90, 31, 0.14);
+  border-radius: 999px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.82), rgba(255, 247, 237, 0.74)),
+    url("/patterns/sessa-maiolica-orange.png");
+  background-size: auto, 78px 80px;
+  padding: 0.5rem 0.8rem;
+  color: rgba(23, 20, 18, 0.62);
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-align: center;
+  text-transform: uppercase;
+  box-shadow: 0 12px 26px rgba(23, 20, 18, 0.06);
+}
+
+.not-found-art {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(216, 90, 31, 0.2);
+  border-radius: clamp(24px, 3vw, 36px);
+  background:
+    linear-gradient(135deg, rgba(255, 247, 237, 0.92), rgba(255, 255, 255, 0.64)),
+    url("/patterns/sessa-maiolica-orange.png");
+  background-size: auto, 104px 107px;
+  padding: clamp(0.55rem, 1.2vw, 0.9rem);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 247, 237, 0.74),
+    0 32px 84px rgba(23, 20, 18, 0.16);
+}
+
+.not-found-art::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.2), transparent 45%);
+  pointer-events: none;
+}
+
+.not-found-art img {
+  width: 100%;
+  border-radius: calc(clamp(24px, 3vw, 36px) - 0.55rem);
+  box-shadow: inset 0 0 0 1px rgba(255, 247, 237, 0.5);
+}
+
 /* Drawer carrello -------------------------------------------------------- */
 .cart-trigger {
   isolation: isolate;
@@ -1949,8 +2047,8 @@ canvas {
   height: 100dvh;
   max-width: min(470px, 100vw);
   background:
-    linear-gradient(180deg, rgba(250, 246, 239, 0.98) 0%, rgba(255, 247, 237, 0.98) 48%, rgba(250, 246, 239, 1) 100%);
-  border-left: 1px solid rgba(255, 247, 237, 0.5);
+    linear-gradient(180deg, rgba(250, 246, 239, 0.985) 0%, rgba(255, 247, 237, 0.985) 48%, rgba(250, 246, 239, 1) 100%);
+  border-left: 0;
   box-shadow: -30px 0 90px rgba(23, 20, 18, 0.36);
   transform: translate3d(104%, 0, 0);
   transition:
@@ -1962,13 +2060,17 @@ canvas {
 .cart-drawer-panel::before {
   content: "";
   position: absolute;
-  inset: 0 auto 0 0;
-  z-index: 2;
-  width: 8px;
-  background-image: url("/patterns/sessa-maiolica-blue.png");
-  background-size: 76px 78px;
-  opacity: 0.9;
+  inset: 0;
+  z-index: 0;
+  background-image: url("/patterns/sessa-maiolica-orange.png");
+  background-size: 112px 115px;
+  opacity: 0.045;
   pointer-events: none;
+}
+
+.cart-drawer-panel > * {
+  position: relative;
+  z-index: 1;
 }
 
 .cart-drawer-panel-open {
@@ -1978,7 +2080,7 @@ canvas {
 .cart-drawer-header {
   overflow: hidden;
   background:
-    linear-gradient(135deg, rgba(168, 63, 24, 0.98), rgba(216, 90, 31, 0.95) 48%, rgba(31, 78, 121, 0.96)),
+    linear-gradient(135deg, rgba(131, 45, 18, 0.98), rgba(216, 90, 31, 0.96) 55%, rgba(184, 71, 25, 0.98)),
     url("/patterns/sessa-maiolica-orange.png");
   background-size: auto, 110px 113px;
   box-shadow: 0 16px 36px rgba(23, 20, 18, 0.2);
@@ -1989,10 +2091,9 @@ canvas {
   content: "";
   position: absolute;
   inset: auto 0 0;
-  height: 9px;
-  background-image: url("/patterns/sessa-maiolica-green.png");
-  background-size: 78px 80px;
-  opacity: 0.8;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(255, 247, 237, 0.46), transparent);
+  opacity: 1;
 }
 
 .drawer-stat {
@@ -2014,14 +2115,15 @@ canvas {
 }
 
 .drawer-stat strong {
-  display: block;
+  display: -webkit-box;
   overflow: hidden;
+  min-height: 2.05rem;
   margin-top: 0.25rem;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
   color: #fff7ed;
   font-size: 0.86rem;
   line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .cart-drawer-body {
@@ -2095,7 +2197,7 @@ canvas {
   border: 1px solid rgba(216, 90, 31, 0.13);
   background:
     linear-gradient(90deg, rgba(255, 255, 255, 0.84), rgba(255, 247, 237, 0.78)),
-    url("/patterns/sessa-maiolica-green.png");
+    url("/patterns/sessa-maiolica-orange.png");
   background-size: auto, 84px 86px;
   box-shadow: 0 14px 32px rgba(23, 20, 18, 0.06);
 }
@@ -2161,7 +2263,7 @@ canvas {
 .cart-drawer-footer {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 247, 237, 0.96)),
-    url("/patterns/sessa-maiolica-blue.png");
+    url("/patterns/sessa-maiolica-orange.png");
   background-size: auto, 92px 95px;
   padding-bottom: max(1.25rem, var(--safe-bottom));
   box-shadow: 0 -18px 42px rgba(23, 20, 18, 0.08);
@@ -2204,10 +2306,12 @@ canvas {
   position: absolute;
   inset: 0 0 auto;
   z-index: 2;
-  height: 7px;
-  background-image: var(--tile, url("/patterns/sessa-maiolica-orange.png"));
-  background-size: 84px 86px;
-  opacity: 0.9;
+  height: 5px;
+  background:
+    linear-gradient(90deg, transparent, color-mix(in srgb, var(--product-accent, #d65a1f) 62%, white 38%), transparent),
+    var(--tile, url("/patterns/sessa-maiolica-orange.png"));
+  background-size: auto, 88px 91px;
+  opacity: 0.82;
 }
 
 .product-card::after {
@@ -2238,10 +2342,14 @@ canvas {
 .product-card-image-wrap {
   position: relative;
   overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--product-accent, #d65a1f) 20%, white 80%);
   border-radius: 26px;
   background:
-    radial-gradient(circle at 50% 38%, rgba(255, 255, 255, 0.9), transparent 46%),
-    linear-gradient(180deg, rgba(255, 247, 237, 0.86), rgba(250, 246, 239, 0.82));
+    radial-gradient(circle at 50% 38%, rgba(255, 255, 255, 0.95), transparent 48%),
+    linear-gradient(180deg, rgba(255, 247, 237, 0.9), rgba(250, 246, 239, 0.84));
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.72),
+    0 14px 30px rgba(23, 20, 18, 0.07);
 }
 
 .product-card-image-wrap::after {
@@ -2259,8 +2367,39 @@ canvas {
   display: grid;
   aspect-ratio: 1;
   place-items: center;
-  border-width: clamp(10px, 1.2vw, 15px);
+  border: 0;
   border-radius: 26px;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--product-accent, #d65a1f) 18%, white 82%), rgba(255, 247, 237, 0.72)),
+    var(--tile, url("/patterns/sessa-maiolica-orange.png"));
+  background-size: auto, 92px 95px;
+  padding: clamp(0.58rem, 1vw, 0.78rem);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 247, 237, 0.74),
+    inset 0 0 42px rgba(255, 255, 255, 0.44);
+}
+
+.product-card-image::before {
+  content: "";
+  position: absolute;
+  inset: clamp(0.58rem, 1vw, 0.78rem);
+  z-index: 0;
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 52% 36%, rgba(255, 255, 255, 0.98), rgba(255, 247, 237, 0.86) 52%, rgba(250, 246, 239, 0.92)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(255, 247, 237, 0.9));
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 247, 237, 0.85),
+    inset 0 -16px 28px rgba(23, 20, 18, 0.04);
+  pointer-events: none;
+}
+
+.product-card-image > img,
+.product-card-image > div {
+  position: relative;
+  z-index: 1;
+  border-radius: 16px;
+  filter: drop-shadow(0 16px 18px rgba(23, 20, 18, 0.1));
 }
 
 .product-card-badge {
@@ -2509,11 +2648,38 @@ canvas {
   width: min(320px, 78vw);
   aspect-ratio: 1;
   place-items: center;
-  border-width: clamp(12px, 2vw, 18px);
+  border: 0;
   border-radius: 26px;
+  background:
+    linear-gradient(135deg, rgba(216, 90, 31, 0.2), rgba(255, 247, 237, 0.72)),
+    url("/patterns/sessa-maiolica-orange.png");
+  background-size: auto, 98px 101px;
+  padding: clamp(0.72rem, 1.7vw, 1rem);
   box-shadow:
     inset 0 0 0 1px rgba(255, 247, 237, 0.58),
     0 24px 54px rgba(23, 20, 18, 0.14);
+}
+
+.quick-add-image::before {
+  content: "";
+  position: absolute;
+  inset: clamp(0.72rem, 1.7vw, 1rem);
+  z-index: 0;
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at 50% 36%, rgba(255, 255, 255, 0.98), rgba(255, 247, 237, 0.88) 54%, rgba(250, 246, 239, 0.94)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 247, 237, 0.9));
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 247, 237, 0.86),
+    inset 0 -20px 34px rgba(23, 20, 18, 0.05);
+}
+
+.quick-add-image > img,
+.quick-add-image > span {
+  position: relative;
+  z-index: 1;
+  border-radius: 18px;
+  filter: drop-shadow(0 18px 20px rgba(23, 20, 18, 0.12));
 }
 
 .quick-add-content {
@@ -2609,6 +2775,18 @@ canvas {
 }
 
 	@media (max-width: 760px) {
+	  .not-found-shell {
+	    gap: 2rem;
+	  }
+
+	  .not-found-trust span {
+	    min-height: 3rem;
+	    padding-inline: 0.45rem;
+	    font-size: 0.58rem;
+	    letter-spacing: 0.06em;
+	    line-height: 1.15;
+	  }
+
 	  .shop-home-hero,
 	  .catalog-hero-inner {
 	    grid-template-columns: 1fr;
@@ -2846,7 +3024,7 @@ canvas {
 
 @media (max-width: 420px) {
   .cart-drawer-panel::before {
-    width: 6px;
+    width: auto;
   }
 
   .drawer-stat {
