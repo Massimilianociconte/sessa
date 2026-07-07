@@ -148,8 +148,7 @@ export default async function StoreCatalogPage({ params, searchParams }: Props) 
           className="catalog-hero catalog-hero-premium py-8 md:py-12"
           style={
             {
-              "--location-hero-bg": `url("${heroBackground}")`,
-              "--location-hero-bg-opacity": "0.2"
+              "--location-hero-bg": `url("${heroBackground}")`
             } as CSSProperties
           }
         >

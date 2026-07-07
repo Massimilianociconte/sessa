@@ -1754,37 +1754,38 @@ canvas {
   overflow: hidden;
   min-height: auto;
   --location-hero-bg: none;
-  --location-hero-bg-opacity: 0.18;
+  background:
+    linear-gradient(90deg, rgba(255, 247, 237, 0.95) 0%, rgba(255, 247, 237, 0.84) 30%, rgba(255, 247, 237, 0.6) 58%, rgba(255, 247, 237, 0.34) 100%),
+    var(--location-hero-bg);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: cover;
 }
 
 .catalog-hero-premium::before {
   content: "";
   position: absolute;
-  inset: -0.5rem -8vw -1rem -8vw;
-  z-index: -2;
-  background-image: var(--location-hero-bg);
-  background-repeat: no-repeat;
-  background-position: right clamp(-4rem, -4vw, -1rem) center;
-  background-size: min(980px, 76vw) auto;
-  opacity: var(--location-hero-bg-opacity);
-  filter: grayscale(1) contrast(1.08);
-  mix-blend-mode: multiply;
-  -webkit-mask-image: linear-gradient(90deg, transparent 0%, transparent 16%, #000 48%, #000 100%);
-  mask-image: linear-gradient(90deg, transparent 0%, transparent 16%, #000 48%, #000 100%);
+  inset: 0 auto 0 0;
+  z-index: 0;
+  width: min(54rem, 64%);
+  background-image: url("/patterns/sessa-maiolica-orange.png");
+  background-repeat: repeat;
+  background-position: left top;
+  background-size: 146px 150px;
+  opacity: 0.14;
+  -webkit-mask-image: linear-gradient(90deg, #000 0%, rgba(0, 0, 0, 0.9) 30%, rgba(0, 0, 0, 0.34) 68%, transparent 100%);
+  mask-image: linear-gradient(90deg, #000 0%, rgba(0, 0, 0, 0.9) 30%, rgba(0, 0, 0, 0.34) 68%, transparent 100%);
   pointer-events: none;
 }
 
 .catalog-hero-premium::after {
   content: "";
   position: absolute;
-  inset: 1.5rem 50% 1.2rem auto;
-  z-index: -1;
-  width: 50vw;
-  background-image: url("/patterns/piastrella-napoletana.webp");
-  background-size: 180px 180px;
-  opacity: 0.058;
-  -webkit-mask-image: linear-gradient(90deg, transparent, #000 22%, #000 72%, transparent);
-  mask-image: linear-gradient(90deg, transparent, #000 22%, #000 72%, transparent);
+  inset: 0;
+  z-index: 0;
+  background:
+    radial-gradient(circle at 22% 44%, rgba(255, 255, 255, 0.34), transparent 42%),
+    linear-gradient(180deg, rgba(255, 247, 237, 0.22), transparent 45%, rgba(255, 247, 237, 0.22));
   pointer-events: none;
 }
 
@@ -1805,18 +1806,31 @@ canvas {
   text-align: left;
 }
 
+.catalog-hero-copy .badge {
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  background-color: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 8px 20px rgba(23, 20, 18, 0.06);
+  backdrop-filter: blur(10px);
+}
+
+.catalog-hero-description {
+  text-shadow: 0 1px 0 rgba(255, 255, 255, 0.5);
+}
+
 .catalog-back-link {
   display: inline-flex;
   width: fit-content;
   min-height: 2.2rem;
   align-items: center;
-  border: 1px solid rgba(23, 20, 18, 0.08);
+  border: 1px solid rgba(23, 20, 18, 0.1);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.68);
+  background: rgba(255, 255, 255, 0.88);
   padding: 0.48rem 0.85rem;
   color: rgba(23, 20, 18, 0.54);
   font-size: 0.82rem;
   font-weight: 700;
+  box-shadow: 0 10px 26px rgba(23, 20, 18, 0.07);
+  backdrop-filter: blur(12px);
   transition:
     color 180ms ease,
     background 180ms ease,
@@ -1839,7 +1853,7 @@ canvas {
   gap: 0.95rem;
   border-color: rgba(255, 247, 237, 0.34);
   background:
-    linear-gradient(145deg, rgba(147, 48, 17, 0.97), rgba(216, 90, 31, 0.92) 42%, rgba(31, 78, 121, 0.96)),
+    linear-gradient(145deg, rgba(147, 48, 17, 0.99), rgba(216, 90, 31, 0.95) 42%, rgba(31, 78, 121, 0.98)),
     url("/patterns/sessa-maiolica-blue.png");
   padding: clamp(1rem, 2.6vw, 1.55rem);
   box-shadow:
@@ -1898,7 +1912,7 @@ canvas {
   border: 1px solid rgba(255, 247, 237, 0.42);
   border-radius: 18px;
   background:
-    linear-gradient(135deg, rgba(255, 247, 237, 0.94), rgba(255, 255, 255, 0.83)),
+    linear-gradient(135deg, rgba(255, 247, 237, 0.98), rgba(255, 255, 255, 0.93)),
     #fff7ed;
   padding: 0.78rem 0.9rem;
   box-shadow:
@@ -1916,7 +1930,7 @@ canvas {
 
 .catalog-hero-fact dd {
   margin-top: 0.28rem;
-  color: rgba(23, 20, 18, 0.86);
+  color: rgba(23, 20, 18, 0.9);
   font-size: 0.92rem;
   font-weight: 700;
   line-height: 1.35;
@@ -2930,21 +2944,32 @@ canvas {
 	    padding-top: 1.75rem;
 	  }
 
+	  .catalog-hero-premium {
+	    background:
+	      linear-gradient(90deg, rgba(255, 247, 237, 0.94) 0%, rgba(255, 247, 237, 0.78) 54%, rgba(255, 247, 237, 0.48) 100%),
+	      var(--location-hero-bg);
+	    background-position: center top;
+	    background-size: cover;
+	  }
+
 	  .catalog-hero-premium::before {
-	    inset: -0.5rem -28vw auto -28vw;
-	    height: 18rem;
-	    background-position: top center;
-	    background-size: 128vw auto;
-	    opacity: 0.14;
-	    -webkit-mask-image: linear-gradient(180deg, #000 0%, #000 42%, transparent 100%);
-	    mask-image: linear-gradient(180deg, #000 0%, #000 42%, transparent 100%);
+	    inset: 0 auto auto 0;
+	    width: 78%;
+	    height: 25rem;
+	    background-position: left top;
+	    background-size: 124px 128px;
+	    opacity: 0.115;
+	    -webkit-mask-image: linear-gradient(90deg, #000 0%, rgba(0, 0, 0, 0.68) 52%, transparent 100%);
+	    mask-image: linear-gradient(90deg, #000 0%, rgba(0, 0, 0, 0.68) 52%, transparent 100%);
 	  }
 
 	  .catalog-hero-premium::after {
-	    inset: 0.65rem auto auto -18vw;
-	    width: 92vw;
-	    height: 12rem;
-	    opacity: 0.042;
+	    inset: 0;
+	    width: auto;
+	    height: auto;
+	    background:
+	      radial-gradient(circle at 28% 20%, rgba(255, 255, 255, 0.26), transparent 44%),
+	      linear-gradient(180deg, rgba(255, 247, 237, 0.18), transparent 56%);
 	  }
 
 	  .shop-home-panel,
