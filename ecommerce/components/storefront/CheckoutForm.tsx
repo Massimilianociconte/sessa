@@ -191,21 +191,21 @@ export default function CheckoutForm({
     <form action={formAction} onSubmit={trackSubmit} className="grid gap-10 pb-28 lg:grid-cols-[1fr_360px] lg:pb-0">
       <div className="space-y-8">
         <section className="grid gap-3 sm:grid-cols-3" aria-label="Garanzie checkout">
-          <div className="rounded-2xl border border-ink/10 bg-white p-4">
+          <div className="checkout-trust-card">
             <p className="font-serif text-lg font-semibold">Pagamento tracciato</p>
             <p className="mt-1 text-xs leading-5 text-ink/55">Ogni ordine conserva stato, metodo e riferimento pagamento.</p>
           </div>
-          <div className="rounded-2xl border border-ink/10 bg-white p-4">
+          <div className="checkout-trust-card">
             <p className="font-serif text-lg font-semibold">Fresco su orario</p>
             <p className="mt-1 text-xs leading-5 text-ink/55">Ritiro o consegna vengono preparati sulla fascia scelta.</p>
           </div>
-          <div className="rounded-2xl border border-ink/10 bg-white p-4">
+          <div className="checkout-trust-card">
             <p className="font-serif text-lg font-semibold">Sede chiara</p>
             <p className="mt-1 text-xs leading-5 text-ink/55">Catalogo e stock restano legati a {location.name}.</p>
           </div>
         </section>
 
-        <section className="card space-y-4 p-6">
+        <section className="checkout-section card space-y-4 p-6">
           <h2 className="font-serif text-2xl font-semibold">Contatti</h2>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field
@@ -231,7 +231,7 @@ export default function CheckoutForm({
           )}
         </section>
 
-        <section className="card space-y-3 p-6">
+        <section className="checkout-section card space-y-3 p-6">
           <h2 className="font-serif text-2xl font-semibold">Come vuoi ricevere l'ordine?</h2>
           <input type="hidden" name="fulfillmentType" value={fulfillment} />
           {location.pickupEnabled && (
@@ -278,7 +278,7 @@ export default function CheckoutForm({
         </section>
 
         {isDelivery && (
-          <section className="card space-y-4 p-6">
+          <section className="checkout-section card space-y-4 p-6">
             <h2 className="font-serif text-2xl font-semibold">Indirizzo di consegna</h2>
             {addresses.length > 0 && (
               <div>
@@ -328,7 +328,7 @@ export default function CheckoutForm({
           </section>
         )}
 
-        <section className="card space-y-2 p-6">
+        <section className="checkout-section card space-y-2 p-6">
           <h2 className="font-serif text-2xl font-semibold">Pagamento</h2>
           {stripeEnabled && (
             <div className="rounded-xl border border-majolica/50 bg-majolica/15 px-4 py-3 text-sm text-ink/70">
@@ -381,7 +381,7 @@ export default function CheckoutForm({
           )}
         </section>
 
-        <section className="card space-y-3 p-6">
+        <section className="checkout-section card space-y-3 p-6">
           <label htmlFor="customerNote" className="label-field">
             Note per l'ordine (opzionale)
           </label>

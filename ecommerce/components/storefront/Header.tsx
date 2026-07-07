@@ -18,7 +18,7 @@ export default async function Header({ currentLocation }: { currentLocation?: He
   return (
     <header className="brand-ribbon sticky top-0 z-40 text-ivory backdrop-blur">
       <div className="mx-auto flex min-h-[72px] max-w-6xl items-center justify-between gap-3 px-4 py-3">
-        <Link href="/" className="group flex min-w-0 items-center gap-3 outline-none" aria-label="Sessa 1930 home">
+        <Link href="/" className="brand-mark-link group flex min-w-0 items-center gap-3 outline-none" aria-label="Sessa 1930 home">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/brand/sessa-logo-white.webp" alt="Sessa 1930" className="h-9 w-auto transition group-hover:scale-[1.02] sm:h-10" />
           <span className="hidden min-w-0 flex-col leading-none sm:flex">
@@ -31,8 +31,9 @@ export default async function Header({ currentLocation }: { currentLocation?: He
           {activeLocation && (
             <Link
               href={`/sede/${activeLocation.slug}`}
-              className="hidden rounded-full px-3 py-1.5 text-cream/85 transition hover:bg-white/10 hover:text-white sm:inline-flex"
+              className="location-pill hidden rounded-full px-3 py-1.5 text-cream/85 transition hover:bg-white/10 hover:text-white sm:inline-flex"
             >
+              <span>Sede</span>
               {activeLocation.name}
             </Link>
           )}

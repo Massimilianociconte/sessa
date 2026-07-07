@@ -18,23 +18,37 @@ export default async function HomePage() {
   return (
     <>
       <Header />
-      <main className="mx-auto max-w-6xl px-4">
-        <section className="py-14 text-center md:py-20">
-          <p className="script-accent text-4xl md:text-6xl">Un'esplosione di gusto</p>
-          <h1 className="display-title mx-auto mt-3 max-w-5xl text-balance text-4xl md:text-6xl">
-            Scegli la tua pasticceria Sessa
-          </h1>
-          <p className="mx-auto mt-5 max-w-xl text-ink/60">
-            Ogni sede ha il suo assortimento, i suoi orari e le sue modalità di ritiro o consegna.
-            Seleziona il punto vendita per iniziare a ordinare.
-          </p>
+      <main className="shop-main mx-auto max-w-6xl px-4">
+        <section className="shop-home-hero py-10 md:py-16">
+          <div className="shop-home-copy">
+            <span className="eyebrow-chip">Shop ufficiale Sessa 1930</span>
+            <p className="script-accent mt-5 text-4xl md:text-6xl">Un'esplosione di gusto</p>
+            <h1 className="display-title mt-3 max-w-5xl text-balance text-4xl md:text-6xl">
+              Scegli la tua pasticceria Sessa
+            </h1>
+            <p className="mt-5 max-w-xl text-base leading-7 text-ink/65">
+              Ogni sede ha il suo assortimento, i suoi orari e le sue modalità di ritiro o consegna.
+              Seleziona il punto vendita per iniziare a ordinare.
+            </p>
+          </div>
+          <aside className="shop-home-panel" aria-label="Selezione ecommerce Sessa">
+            <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-cream/70">Napoli nel gesto</p>
+            <h2 className="mt-2 font-serif text-3xl font-semibold leading-tight text-ivory">
+              Laboratorio, sede e catalogo lavorano insieme.
+            </h2>
+            <div className="mt-6 grid gap-2">
+              <span>Prodotti freschi per sede</span>
+              <span>Ritiro e consegna dove disponibili</span>
+              <span>Box regalo e classici Sessa</span>
+            </div>
+          </aside>
         </section>
 
-        <div className="mb-6 flex justify-center">
+        <div className="mb-6 flex justify-center md:justify-start">
           <span className="kicker">I nostri punti vendita</span>
         </div>
 
-        <div className="grid grid-cols-1 gap-6 pb-8 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="location-grid grid grid-cols-1 gap-6 pb-8 sm:grid-cols-2 lg:grid-cols-3">
           {locations.map((location, i) => {
             const theme = ACCENTS[i % ACCENTS.length];
             const style = { "--accent": theme.accent, "--tile": theme.tile } as CSSProperties;
@@ -43,12 +57,9 @@ export default async function HomePage() {
                 key={location.id}
                 href={`/sede/${location.slug}`}
                 style={style}
-                className="accent-card card flex flex-col gap-2 p-6"
+                className="location-card accent-card card flex flex-col gap-2 p-6"
               >
-                <span
-                  className="text-xs font-semibold uppercase tracking-[0.2em]"
-                  style={{ color: theme.accent }}
-                >
+                <span className="location-card-city" style={{ color: theme.accent }}>
                   {location.city}
                 </span>
                 <h2 className="font-serif text-2xl font-semibold">{location.name}</h2>
@@ -62,7 +73,7 @@ export default async function HomePage() {
                     <span className="badge bg-brilliant/15 text-emerald-800">Consegna</span>
                   )}
                 </div>
-                <span className="mt-4 text-sm font-bold" style={{ color: theme.accent }}>
+                <span className="location-card-cta mt-4 text-sm font-bold" style={{ color: theme.accent }}>
                   Ordina qui →
                 </span>
               </Link>

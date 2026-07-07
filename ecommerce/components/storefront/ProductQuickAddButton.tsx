@@ -175,6 +175,21 @@ export default function ProductQuickAddButton({
             {product.shortDescription ?? product.description}
           </p>
 
+          <div className="quick-add-trust mt-4" aria-label="Dettagli di acquisto">
+            <span>
+              <strong>Fresco</strong>
+              Preparato per la fascia scelta
+            </span>
+            <span>
+              <strong>Sede</strong>
+              Disponibile a {locationName}
+            </span>
+            <span>
+              <strong>Regalo</strong>
+              Note e dedica in checkout
+            </span>
+          </div>
+
           {(product.ingredients || product.allergens) && (
             <div className="quick-add-notes mt-4 grid gap-2 text-sm">
               {product.ingredients && (

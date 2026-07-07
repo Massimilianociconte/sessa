@@ -114,27 +114,54 @@ export default async function StoreCatalogPage({ params, searchParams }: Props) 
           }))
         }}
       />
-      <main className="mx-auto max-w-6xl px-4">
-        <section className="catalog-hero py-10 text-center md:py-14">
-          <Link href="/" className="text-sm text-ink/50 transition hover:text-terracotta">
-            ← Tutte le sedi
-          </Link>
-          <p className="script-accent mt-3 text-4xl md:text-5xl">{location.name}</p>
-          <h1 className="catalog-hero-title display-title mx-auto mt-1 max-w-2xl text-3xl md:text-5xl">
-            {activeCategory ? `${activeCategory.name} ${seo.keywordCity}` : seo.h1}
-          </h1>
-          <p className="mx-auto mt-3 max-w-xl text-sm text-ink/60">
-            {seo.address}
-            {seo.cityName ? `, ${seo.cityName}` : ""}
-            {seo.hours ? ` · ${seo.hours}` : ""}
-          </p>
-          <div className="mt-3 flex flex-wrap justify-center gap-2">
-            {location.pickupEnabled && <span className="badge bg-majolica/25 text-ink/70">Ritiro in sede</span>}
-            {location.deliveryEnabled && <span className="badge bg-brilliant/15 text-emerald-800">Consegna</span>}
+      <main className="shop-main mx-auto max-w-6xl px-4">
+        <section className="catalog-hero catalog-hero-premium py-8 md:py-12">
+          <div className="catalog-hero-inner">
+            <div className="catalog-hero-copy">
+              <Link href="/" className="catalog-back-link">
+                ← Tutte le sedi
+              </Link>
+              <p className="script-accent mt-5 text-4xl md:text-5xl">{location.name}</p>
+              <h1 className="catalog-hero-title display-title mt-1 max-w-3xl text-3xl md:text-5xl">
+                {activeCategory ? `${activeCategory.name} ${seo.keywordCity}` : seo.h1}
+              </h1>
+              <p className="catalog-hero-description mt-4 max-w-2xl text-sm leading-6 text-ink/65 md:text-base md:leading-7">
+                {seo.directAnswer}
+              </p>
+              <div className="mt-5 flex flex-wrap gap-2">
+                {location.pickupEnabled && <span className="badge bg-majolica/25 text-ink/70">Ritiro in sede</span>}
+                {location.deliveryEnabled && <span className="badge bg-brilliant/15 text-emerald-800">Consegna</span>}
+                <span className="badge bg-white/70 text-ink/60">{products.length} prodotti</span>
+              </div>
+            </div>
+
+            <aside className="catalog-hero-panel" aria-label={`Informazioni ${seo.name}`}>
+              <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-cream/70">Sessa locale</p>
+              <h2 className="mt-2 font-serif text-3xl font-semibold leading-tight text-ivory">{seo.keywordCity}</h2>
+              <dl className="mt-5 space-y-3 text-sm text-cream/82">
+                <div>
+                  <dt className="text-[10px] font-bold uppercase tracking-[0.2em] text-cream/55">Indirizzo</dt>
+                  <dd className="mt-1">
+                    {seo.address}
+                    {seo.cityName ? `, ${seo.cityName}` : ""}
+                  </dd>
+                </div>
+                {seo.hours && (
+                  <div>
+                    <dt className="text-[10px] font-bold uppercase tracking-[0.2em] text-cream/55">Orari</dt>
+                    <dd className="mt-1">{seo.hours}</dd>
+                  </div>
+                )}
+              </dl>
+              <div className="catalog-hero-mini-grid mt-5">
+                <span>Catalogo sede</span>
+                <strong>{activeCategory?.name ?? activeOccasion?.label ?? "Tutto"}</strong>
+              </div>
+            </aside>
           </div>
         </section>
 
-        <section className="catalog-search-card mb-8 grid gap-4 p-4 md:grid-cols-[1fr_auto]">
+        <section className="catalog-search-card catalog-toolbar mb-8 grid gap-4 p-4 md:grid-cols-[1fr_auto]">
           <form action={`/sede/${slug}`} className="flex flex-col gap-3 sm:flex-row">
             {categoria && <input type="hidden" name="categoria" value={categoria} />}
             {uso && <input type="hidden" name="uso" value={uso} />}
@@ -167,8 +194,8 @@ export default async function StoreCatalogPage({ params, searchParams }: Props) 
           </div>
         </section>
 
-        <section className="mb-8">
-          <div className="mb-4 flex flex-wrap items-end justify-between gap-3">
+        <section className="catalog-filter-section mb-8">
+          <div className="catalog-section-heading mb-4 flex flex-wrap items-end justify-between gap-3">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-terracotta">Catalogo sede</p>
               <h2 className="mt-1 font-serif text-2xl font-semibold text-ink">Scegli una categoria</h2>
@@ -198,8 +225,8 @@ export default async function StoreCatalogPage({ params, searchParams }: Props) 
           </nav>
         </section>
 
-        <section className="mb-10">
-          <div className="mb-4 text-center">
+        <section className="catalog-filter-section mb-10">
+          <div className="catalog-section-heading catalog-section-heading-center mb-4 text-center">
             <p className="text-xs font-semibold uppercase tracking-[0.22em] text-ink/45">Scegli per occasione</p>
           </div>
           <nav className="catalog-filter-grid" aria-label="Occasioni d'acquisto">
@@ -251,7 +278,7 @@ export default async function StoreCatalogPage({ params, searchParams }: Props) 
           )}
         </section>
 
-        <section className="mt-16 border-t border-ink/10 py-12">
+        <section className="local-seo-band mt-16 py-12">
           <div className="grid gap-8 lg:grid-cols-[1.05fr_0.95fr]">
             <div>
               <p className="text-xs font-semibold uppercase tracking-[0.22em] text-terracotta">Sessa locale</p>
@@ -266,7 +293,7 @@ export default async function StoreCatalogPage({ params, searchParams }: Props) 
                 ))}
               </div>
             </div>
-            <div className="rounded-2xl border border-ink/10 bg-white p-5">
+            <div className="local-info-card rounded-2xl border border-ink/10 bg-white p-5">
               <h3 className="font-serif text-2xl font-semibold">Informazioni sede</h3>
               <dl className="mt-4 space-y-3 text-sm">
                 <div>
@@ -305,7 +332,7 @@ export default async function StoreCatalogPage({ params, searchParams }: Props) 
 
           <div className="mt-5 grid gap-3 md:grid-cols-3">
             {seo.faq.map((item) => (
-              <article key={item.question} className="rounded-2xl border border-ink/10 bg-white p-4">
+              <article key={item.question} className="faq-card rounded-2xl border border-ink/10 bg-white p-4">
                 <h3 className="font-serif text-lg font-semibold">{item.question}</h3>
                 <p className="mt-2 text-sm leading-6 text-ink/60">{item.answer}</p>
               </article>

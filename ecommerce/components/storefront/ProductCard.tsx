@@ -12,6 +12,8 @@ const TILES = [
   'url("/patterns/sessa-maiolica-green.png")'
 ];
 
+const ACCENTS = ["#d65a1f", "#1f4e79", "#08c963"];
+
 export default function ProductCard({
   product,
   locationSlug,
@@ -31,7 +33,17 @@ export default function ProductCard({
 }) {
   const soldOut = !product.inStock;
   const tile = TILES[index % TILES.length];
+  const accent = ACCENTS[index % ACCENTS.length];
   const productUrl = `/sede/${locationSlug}/prodotti/${product.slug}`;
+  const availableVariants = product.variants.filter((variant) => variant.stockQty > 0);
+  const lowStock = availableVariants.length > 0 && availableVariants.some((variant) => variant.stockQty <= variant.lowStockThreshold);
+  const availabilityLabel = soldOut
+    ? "Esaurito"
+    : lowStock
+      ? "Ultimi pezzi"
+      : locationName
+        ? `Disponibile a ${locationName}`
+        : "Disponibile";
 
   function trackSelectItem() {
     trackEcommerceEvent("select_item", {
@@ -54,10 +66,13 @@ export default function ProductCard({
   }
 
   return (
-    <article className="card group flex flex-col overflow-hidden transition hover:-translate-y-1 hover:shadow-[0_28px_60px_rgba(23,20,18,0.14)]">
-      <Link href={productUrl} onClick={trackSelectItem} className="block bg-cream">
-        <div className="relative">
-          <div className="tile-frame aspect-square" style={{ ["--tile" as string]: tile }}>
+    <article
+      className="product-card group"
+      style={{ ["--tile" as string]: tile, ["--product-accent" as string]: accent }}
+    >
+      <Link href={productUrl} onClick={trackSelectItem} className="product-card-media block">
+        <div className="product-card-image-wrap">
+          <div className="tile-frame product-card-image" style={{ ["--tile" as string]: tile }}>
             {product.image ? (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -71,24 +86,29 @@ export default function ProductCard({
               </div>
             )}
           </div>
-          {soldOut && <span className="badge absolute left-3 top-3 bg-ink/80 text-ivory">Esaurito</span>}
+          {soldOut && <span className="badge product-card-badge bg-ink/80 text-ivory">Esaurito</span>}
           {product.featured && !soldOut && (
-            <span className="badge absolute left-3 top-3 bg-majolica text-ink">In evidenza</span>
+            <span className="badge product-card-badge bg-majolica text-ink">In evidenza</span>
           )}
         </div>
       </Link>
-      <div className="flex flex-1 flex-col gap-1 p-5">
-        {product.category && (
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-terracotta">
-            {product.category.name}
-          </p>
-        )}
+      <div className="product-card-body">
+        <div className="product-card-tagrow">
+          {product.category && <span>{product.category.name}</span>}
+          <span className={soldOut ? "text-ink/45" : lowStock ? "text-terracotta" : "text-emerald-700"}>
+            {availabilityLabel}
+          </span>
+        </div>
         <Link href={productUrl} onClick={trackSelectItem} className="transition hover:text-terracotta">
-          <h3 className="font-serif text-xl font-semibold">{product.name}</h3>
+          <h3 className="product-card-title">{product.name}</h3>
         </Link>
-        {product.shortDescription && <p className="text-sm text-ink/55">{product.shortDescription}</p>}
-        <div className="mt-auto flex items-end justify-between gap-3 pt-4">
-          <p className="font-serif text-lg font-semibold leading-none">
+        {product.shortDescription && <p className="product-card-copy">{product.shortDescription}</p>}
+        <div className="product-card-meta">
+          <span>Fresco di sede</span>
+          <span>{product.variants.length === 1 ? product.variants[0].name : `${product.variants.length} formati`}</span>
+        </div>
+        <div className="product-card-cta-row">
+          <p className="product-card-price">
             {product.priceMin === product.priceMax
               ? formatCents(product.priceMin)
               : `${formatCents(product.priceMin)} – ${formatCents(product.priceMax)}`}
