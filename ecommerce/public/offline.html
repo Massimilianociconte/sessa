@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Offline - Sessa 1930</title>
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        background: #faf6ef;
+        color: #171412;
+        font-family: system-ui, sans-serif;
+        text-align: center;
+        padding: 1.5rem;
+      }
+      .brand {
+        color: #d65a1f;
+        font-size: 3rem;
+        font-family: Georgia, serif;
+        font-style: italic;
+        margin: 0;
+      }
+      button {
+        margin-top: 1.5rem;
+        border: 0;
+        border-radius: 999px;
+        background: #d65a1f;
+        color: #faf6ef;
+        padding: 0.75rem 2rem;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      p {
+        max-width: 30rem;
+        line-height: 1.6;
+      }
+    </style>
+  </head>
+  <body>
+    <div>
+      <p class="brand">Sessa</p>
+      <h1>Sei offline</h1>
+      <p>Puoi riaprire le pagine già visitate del catalogo, ma carrello, checkout e account richiedono una connessione attiva.</p>
+      <button onclick="location.reload()">Riprova</button>
+    </div>
+  </body>
+</html>

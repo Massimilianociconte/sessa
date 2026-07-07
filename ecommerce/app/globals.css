@@ -1,0 +1,1114 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  --color-terracotta: #d65a1f;
+  --color-terracotta-dark: #a83f18;
+  --color-electric-blue: #073fd0;
+  --color-brilliant-green: #08c963;
+  --color-ceramic: #1f4e79;
+  --color-majolica: #f2b84b;
+  --color-cream: #fff7ed;
+  --color-ivory: #faf6ef;
+  --color-ink: #171412;
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-top: env(safe-area-inset-top, 0px);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html {
+  min-width: 0;
+  scroll-behavior: smooth;
+  scroll-padding-top: 88px;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  min-width: 0;
+  min-height: 100dvh;
+  background:
+    radial-gradient(circle at 84% -4%, rgba(216, 90, 36, 0.08), transparent 34%),
+    radial-gradient(circle at 6% 8%, rgba(7, 63, 208, 0.05), transparent 32%),
+    linear-gradient(180deg, #fff7ed 0%, #faf6ef 60%, #fff7ed 100%);
+  background-attachment: fixed;
+  color: var(--color-ink);
+  overflow-x: hidden;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
+
+img,
+svg,
+video,
+canvas {
+  display: block;
+  max-width: 100%;
+}
+
+::selection {
+  background: rgba(216, 90, 31, 0.22);
+}
+
+@layer components {
+  /* Buttons -------------------------------------------------------------- */
+	  .btn-primary {
+	    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-full bg-terracotta px-6 py-3 text-sm font-bold uppercase tracking-wide text-ivory shadow-[0_14px_30px_rgba(216,90,36,0.28)] transition hover:bg-orangeSoft hover:shadow-[0_18px_38px_rgba(216,90,36,0.34)] active:translate-y-px focus:outline-none focus:ring-2 focus:ring-terracotta focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50;
+	  }
+	  .btn-secondary {
+	    @apply inline-flex min-h-11 items-center justify-center gap-2 rounded-full border border-terracotta/40 bg-white/70 px-6 py-3 text-sm font-semibold text-terracotta transition hover:border-terracotta hover:bg-white active:translate-y-px focus:outline-none focus:ring-2 focus:ring-terracotta focus:ring-offset-2;
+	  }
+	  .btn-ghost {
+	    @apply inline-flex min-h-10 items-center justify-center rounded-full px-4 py-2 text-sm font-medium text-ink/70 transition hover:bg-ink/5 hover:text-terracotta active:translate-y-px focus:outline-none focus:ring-2 focus:ring-terracotta focus:ring-offset-2;
+	  }
+
+	  .btn-primary,
+	  .btn-secondary,
+	  .btn-ghost,
+	  button,
+	  a {
+	    touch-action: manipulation;
+	  }
+
+  /* Form ----------------------------------------------------------------- */
+	  .input-field {
+	    @apply min-h-11 w-full rounded-xl border border-ink/15 bg-white/90 px-4 py-2.5 text-base text-ink placeholder:text-ink/40 focus:border-terracotta focus:outline-none focus:ring-1 focus:ring-terracotta sm:text-sm;
+	  }
+  .label-field {
+    @apply mb-1 block text-xs font-semibold uppercase tracking-wide text-ink/60;
+  }
+
+  /* Cards ---------------------------------------------------------------- */
+  .card {
+    @apply rounded-2xl border border-ink/10 bg-white/85 shadow-[0_18px_48px_rgba(23,20,18,0.08)] backdrop-blur-sm;
+  }
+  .badge {
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold;
+  }
+
+  /* Editorial vocabulary (dal sito vetrina) ------------------------------ */
+  .kicker {
+    @apply inline-flex items-center gap-3 font-serif text-lg italic text-terracotta;
+  }
+  .kicker::after {
+    content: "";
+    display: block;
+    height: 1px;
+    width: clamp(2.5rem, 8vw, 6rem);
+    background: currentColor;
+    opacity: 0.6;
+  }
+  .display-title {
+    @apply font-serif font-semibold leading-tight text-ink;
+  }
+  .script-accent {
+    @apply font-script text-terracotta;
+  }
+
+  /* Cornice a maiolica per le immagini prodotto/sede */
+  .tile-frame {
+    position: relative;
+    overflow: hidden;
+    border: clamp(10px, 1.4vw, 16px) solid transparent;
+    background:
+      linear-gradient(#fff7ed, #fff7ed) padding-box,
+      var(--tile, url("/patterns/sessa-maiolica-orange.png")) border-box;
+    background-size: auto, 96px 99px;
+  }
+
+  /* Card sede/prodotto con accento cromatico */
+  .accent-card {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--accent, #d65a1f) 30%, white 70%);
+    transition:
+      transform 480ms cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 480ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .accent-card::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 0 auto;
+    z-index: -1;
+    width: 42%;
+    background-image: var(--tile, url("/patterns/sessa-maiolica-orange.png"));
+    background-size: 92px 95px;
+    opacity: 0.12;
+    -webkit-mask-image: linear-gradient(90deg, transparent, #000 70%);
+    mask-image: linear-gradient(90deg, transparent, #000 70%);
+    pointer-events: none;
+  }
+	  .accent-card:hover {
+	    transform: translateY(-5px);
+	    box-shadow: 0 28px 60px rgba(23, 20, 18, 0.14);
+	  }
+
+	  /* Catalogo sede ---------------------------------------------------------- */
+	  .catalog-hero {
+	    display: flex;
+	    min-height: clamp(15rem, 25vw, 19rem);
+	    flex-direction: column;
+	    align-items: center;
+	    justify-content: center;
+	  }
+
+	  .catalog-hero-title {
+	    min-height: clamp(5.2rem, 8vw, 7rem);
+	  }
+
+	  .catalog-search-card {
+	    position: relative;
+	    isolation: isolate;
+	    overflow: hidden;
+	    border: 1px solid rgba(23, 20, 18, 0.09);
+	    border-radius: 24px;
+	    background:
+	      linear-gradient(90deg, rgba(255, 255, 255, 0.9), rgba(255, 247, 237, 0.86)),
+	      url("/patterns/sessa-maiolica-green.png");
+	    background-size: auto, 96px 99px;
+	    box-shadow: 0 18px 48px rgba(23, 20, 18, 0.08);
+	    contain: layout paint;
+	  }
+
+	  .catalog-reset-link {
+	    display: inline-flex;
+	    min-height: 2.35rem;
+	    align-items: center;
+	    justify-content: center;
+	    border: 1px solid rgba(216, 90, 31, 0.16);
+	    border-radius: 999px;
+	    background: rgba(255, 255, 255, 0.64);
+	    padding: 0.55rem 0.9rem;
+	    color: rgba(168, 63, 24, 0.9);
+	    font-size: 0.82rem;
+	    font-weight: 700;
+	    transition:
+	      background 220ms ease,
+	      border-color 220ms ease,
+	      color 220ms ease,
+	      transform 220ms ease;
+	  }
+
+	  .catalog-reset-link:hover {
+	    transform: translateY(-1px);
+	    border-color: rgba(216, 90, 31, 0.28);
+	    background: rgba(216, 90, 31, 0.08);
+	    color: var(--color-terracotta);
+	  }
+
+	  .catalog-filter-grid {
+	    display: grid;
+	    grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
+	    grid-auto-rows: minmax(8.75rem, auto);
+	    gap: 0.85rem;
+	    min-height: 8.75rem;
+	    align-content: start;
+	    align-items: stretch;
+	  }
+
+	  .catalog-filter-card {
+	    position: relative;
+	    isolation: isolate;
+	    display: flex;
+	    min-height: 8.75rem;
+	    flex-direction: column;
+	    justify-content: space-between;
+	    overflow: hidden;
+	    border: 1px solid rgba(23, 20, 18, 0.1);
+	    border-radius: 22px;
+	    background:
+	      linear-gradient(135deg, rgba(255, 255, 255, 0.92), rgba(255, 247, 237, 0.82)),
+	      #fff;
+	    padding: 1rem;
+	    box-shadow: 0 14px 34px rgba(23, 20, 18, 0.07);
+	    color: var(--color-ink);
+	    contain: layout paint;
+	    transition:
+	      border-color 320ms ease,
+	      box-shadow 320ms ease,
+	      transform 320ms cubic-bezier(0.22, 1, 0.36, 1);
+	  }
+
+	  .catalog-filter-card::before {
+	    content: "";
+	    position: absolute;
+	    inset: 0 0 0 auto;
+	    z-index: -1;
+	    width: 48%;
+	    background-image: var(--tile, url("/patterns/sessa-maiolica-orange.png"));
+	    background-size: 82px 85px;
+	    opacity: 0.1;
+	    -webkit-mask-image: linear-gradient(90deg, transparent, #000 72%);
+	    mask-image: linear-gradient(90deg, transparent, #000 72%);
+	    pointer-events: none;
+	  }
+
+	  .catalog-filter-card::after {
+	    content: "";
+	    position: absolute;
+	    inset: auto 1rem 0.85rem 1rem;
+	    height: 2px;
+	    border-radius: 999px;
+	    background: var(--accent, var(--color-terracotta));
+	    opacity: 0.38;
+	    transform: scaleX(0.3);
+	    transform-origin: left;
+	    transition:
+	      opacity 320ms ease,
+	      transform 320ms ease;
+	  }
+
+	  .catalog-filter-card:hover,
+	  .catalog-filter-card:focus-visible {
+	    transform: translateY(-3px);
+	    border-color: color-mix(in srgb, var(--accent, #d65a1f) 34%, white 66%);
+	    box-shadow: 0 22px 48px rgba(23, 20, 18, 0.12);
+	    outline: none;
+	  }
+
+	  .catalog-filter-card-active {
+	    border-color: color-mix(in srgb, var(--accent, #d65a1f) 58%, white 42%);
+	    background:
+	      linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(255, 247, 237, 0.9)),
+	      #fff;
+	    box-shadow:
+	      inset 0 0 0 1px color-mix(in srgb, var(--accent, #d65a1f) 18%, transparent),
+	      0 22px 52px rgba(23, 20, 18, 0.13);
+	  }
+
+	  .catalog-filter-card-active::after {
+	    opacity: 0.9;
+	    transform: scaleX(1);
+	  }
+
+	  .catalog-filter-card strong {
+	    display: block;
+	    margin-top: 0.35rem;
+	    font-family: var(--font-playfair), Georgia, serif;
+	    font-size: 1.24rem;
+	    font-weight: 700;
+	    line-height: 1.15;
+	  }
+
+	  .catalog-filter-card span:last-child {
+	    display: block;
+	    margin-top: 0.75rem;
+	    padding-right: 0.4rem;
+	    color: rgba(23, 20, 18, 0.58);
+	    font-size: 0.78rem;
+	    line-height: 1.55;
+	  }
+
+	  .catalog-filter-kicker {
+	    color: color-mix(in srgb, var(--accent, #d65a1f) 84%, black 16%);
+	    font-size: 0.68rem;
+	    font-weight: 800;
+	    letter-spacing: 0.18em;
+	    text-transform: uppercase;
+	  }
+
+	  .catalog-filter-card-occasion {
+	    min-height: 8.25rem;
+	  }
+
+	  .catalog-results {
+	    min-height: clamp(42rem, 78vh, 62rem);
+	    contain: layout paint;
+	  }
+
+	  .catalog-loading-hero {
+	    display: grid;
+	    min-height: clamp(15rem, 25vw, 19rem);
+	    place-items: center;
+	    gap: 1rem;
+	    text-align: center;
+	  }
+
+	  .loading-pill,
+	  .loading-title,
+	  .loading-copy,
+	  .loading-card,
+	  .loading-product-card,
+	  .loading-product-image,
+	  .loading-product-body span,
+	  .loading-product-body strong,
+	  .loading-product-body p {
+	    overflow: hidden;
+	    background:
+	      linear-gradient(90deg, rgba(255, 255, 255, 0.36), rgba(216, 90, 31, 0.12), rgba(255, 255, 255, 0.36)),
+	      rgba(255, 255, 255, 0.64);
+	    background-size: 220% 100%;
+	    animation: shimmer 1.35s ease-in-out infinite;
+	  }
+
+	  .loading-pill {
+	    width: min(13rem, 70vw);
+	    height: 1.1rem;
+	    border-radius: 999px;
+	  }
+
+	  .loading-title {
+	    width: min(40rem, 86vw);
+	    height: clamp(3rem, 7vw, 5.5rem);
+	    border-radius: 24px;
+	  }
+
+	  .loading-copy {
+	    width: min(27rem, 76vw);
+	    height: 1rem;
+	    border-radius: 999px;
+	  }
+
+	  .loading-card {
+	    min-height: 8.75rem;
+	    border: 1px solid rgba(23, 20, 18, 0.08);
+	    border-radius: 22px;
+	    box-shadow: 0 14px 34px rgba(23, 20, 18, 0.05);
+	  }
+
+	  .loading-product-card {
+	    overflow: hidden;
+	    border: 1px solid rgba(23, 20, 18, 0.08);
+	    border-radius: 24px;
+	    background: rgba(255, 255, 255, 0.76);
+	    box-shadow: 0 16px 36px rgba(23, 20, 18, 0.06);
+	  }
+
+	  .loading-product-image {
+	    aspect-ratio: 1;
+	    border-bottom: 1px solid rgba(23, 20, 18, 0.06);
+	  }
+
+	  .loading-product-body {
+	    display: grid;
+	    gap: 0.8rem;
+	    padding: 1.25rem;
+	  }
+
+	  .loading-product-body span,
+	  .loading-product-body strong,
+	  .loading-product-body p {
+	    display: block;
+	    height: 0.8rem;
+	    border-radius: 999px;
+	  }
+
+	  .loading-product-body strong {
+	    width: 72%;
+	    height: 1.4rem;
+	  }
+
+	  .loading-product-body p {
+	    width: 54%;
+	  }
+
+	  .checkout-choice {
+	    display: flex;
+	    min-height: 4.2rem;
+	    cursor: pointer;
+	    align-items: flex-start;
+	    gap: 0.8rem;
+	    border: 1px solid rgba(23, 20, 18, 0.13);
+	    border-radius: 18px;
+	    background: rgba(255, 255, 255, 0.82);
+	    padding: 0.95rem 1rem;
+	    box-shadow: 0 10px 24px rgba(23, 20, 18, 0.04);
+	    transition:
+	      border-color 220ms ease,
+	      box-shadow 220ms ease,
+	      transform 220ms ease,
+	      background 220ms ease;
+	  }
+
+	  .checkout-choice:hover,
+	  .checkout-choice:focus-within {
+	    transform: translateY(-1px);
+	    border-color: rgba(216, 90, 31, 0.34);
+	    background: rgba(255, 255, 255, 0.96);
+	    box-shadow: 0 16px 32px rgba(23, 20, 18, 0.08);
+	  }
+
+	  .checkout-choice-active {
+	    border-color: rgba(216, 90, 31, 0.54);
+	    background:
+	      linear-gradient(90deg, rgba(216, 90, 31, 0.08), rgba(255, 255, 255, 0.94)),
+	      #fff;
+	    box-shadow:
+	      inset 0 0 0 1px rgba(216, 90, 31, 0.08),
+	      0 16px 34px rgba(23, 20, 18, 0.09);
+	  }
+
+	  .checkout-summary {
+	    box-shadow: 0 22px 60px rgba(23, 20, 18, 0.1);
+	  }
+
+	  .checkout-mobile-bar {
+	    position: fixed;
+	    inset: auto 0 0;
+	    z-index: 50;
+	    display: grid;
+	    grid-template-columns: minmax(0, 1fr) auto;
+	    gap: 0.9rem;
+	    align-items: center;
+	    border-top: 1px solid rgba(23, 20, 18, 0.1);
+	    background:
+	      linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(255, 247, 237, 0.98)),
+	      url("/patterns/sessa-maiolica-orange.png");
+	    background-size: auto, 92px 95px;
+	    padding: 0.8rem 1rem max(0.8rem, var(--safe-bottom));
+	    box-shadow: 0 -18px 46px rgba(23, 20, 18, 0.14);
+	    backdrop-filter: blur(14px);
+	  }
+
+	  .cart-page-line {
+	    display: grid;
+	    grid-template-columns: auto minmax(0, 1fr);
+	    gap: 1rem;
+	    border: 1px solid rgba(23, 20, 18, 0.09);
+	    border-radius: 24px;
+	    background: rgba(255, 255, 255, 0.82);
+	    padding: 1rem;
+	    box-shadow: 0 16px 36px rgba(23, 20, 18, 0.06);
+	  }
+
+	  .cart-page-actions {
+	    grid-column: 1 / -1;
+	    display: flex;
+	    flex-wrap: wrap;
+	    align-items: center;
+	    justify-content: space-between;
+	    gap: 0.75rem;
+	  }
+
+	  .cart-page-summary {
+	    position: sticky;
+	    bottom: max(0.75rem, var(--safe-bottom));
+	    z-index: 20;
+	  }
+
+	  .account-mobile-nav,
+	  .admin-mobile-nav {
+	    scroll-snap-type: x proximity;
+	    scrollbar-width: none;
+	    -webkit-overflow-scrolling: touch;
+	  }
+
+	  .account-mobile-nav::-webkit-scrollbar,
+	  .admin-mobile-nav::-webkit-scrollbar {
+	    display: none;
+	  }
+
+	  .account-mobile-nav > *,
+	  .admin-mobile-nav > * {
+	    scroll-snap-align: start;
+	  }
+	}
+
+@keyframes shimmer {
+  0% {
+    background-position: 120% 0;
+  }
+  100% {
+    background-position: -120% 0;
+  }
+}
+
+/* Header a nastro terracotta */
+.brand-ribbon {
+  background: color-mix(in srgb, var(--color-terracotta) 94%, black 6%);
+  box-shadow: 0 12px 40px rgba(23, 20, 18, 0.16);
+}
+
+/* Drawer carrello -------------------------------------------------------- */
+.cart-trigger {
+  isolation: isolate;
+  box-shadow:
+    inset 0 0 0 1px rgba(216, 90, 31, 0.12),
+    0 12px 26px rgba(23, 20, 18, 0.14);
+}
+
+.cart-trigger::before {
+  content: "";
+  position: absolute;
+  inset: 3px;
+  z-index: -1;
+  border-radius: inherit;
+  border: 1px solid rgba(216, 90, 31, 0.14);
+  opacity: 0.8;
+}
+
+.cart-trigger:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 0 0 1px rgba(216, 90, 31, 0.16),
+    0 16px 34px rgba(23, 20, 18, 0.18);
+}
+
+.cart-trigger-count {
+  box-shadow: 0 7px 14px rgba(168, 63, 24, 0.28);
+}
+
+.cart-overlay {
+  pointer-events: none;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 320ms ease;
+}
+
+.cart-overlay-open {
+  pointer-events: auto;
+  opacity: 1;
+}
+
+.cart-overlay-backdrop {
+  background:
+    linear-gradient(90deg, rgba(23, 20, 18, 0.18), rgba(23, 20, 18, 0.54)),
+    rgba(23, 20, 18, 0.2);
+  backdrop-filter: blur(10px) saturate(1.08);
+}
+
+.cart-drawer-panel {
+  height: 100dvh;
+  max-width: min(470px, 100vw);
+  background:
+    linear-gradient(180deg, rgba(250, 246, 239, 0.98) 0%, rgba(255, 247, 237, 0.98) 48%, rgba(250, 246, 239, 1) 100%);
+  border-left: 1px solid rgba(255, 247, 237, 0.5);
+  box-shadow: -30px 0 90px rgba(23, 20, 18, 0.36);
+  transform: translate3d(104%, 0, 0);
+  transition:
+    transform 560ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 560ms cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: transform;
+}
+
+.cart-drawer-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  z-index: 2;
+  width: 8px;
+  background-image: url("/patterns/sessa-maiolica-blue.png");
+  background-size: 76px 78px;
+  opacity: 0.9;
+  pointer-events: none;
+}
+
+.cart-drawer-panel-open {
+  transform: translate3d(0, 0, 0);
+}
+
+.cart-drawer-header {
+  overflow: hidden;
+  background:
+    linear-gradient(135deg, rgba(168, 63, 24, 0.98), rgba(216, 90, 31, 0.95) 48%, rgba(31, 78, 121, 0.96)),
+    url("/patterns/sessa-maiolica-orange.png");
+  background-size: auto, 110px 113px;
+  box-shadow: 0 16px 36px rgba(23, 20, 18, 0.2);
+  padding-top: max(1.25rem, var(--safe-top));
+}
+
+.cart-drawer-header::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: 9px;
+  background-image: url("/patterns/sessa-maiolica-green.png");
+  background-size: 78px 80px;
+  opacity: 0.8;
+}
+
+.drawer-stat {
+  min-width: 0;
+  border: 1px solid rgba(255, 247, 237, 0.22);
+  border-radius: 18px;
+  background: rgba(255, 247, 237, 0.12);
+  padding: 0.75rem 0.8rem;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.drawer-stat span {
+  display: block;
+  color: rgba(255, 247, 237, 0.68);
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.drawer-stat strong {
+  display: block;
+  overflow: hidden;
+  margin-top: 0.25rem;
+  color: #fff7ed;
+  font-size: 0.86rem;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cart-drawer-body {
+  overscroll-behavior: contain;
+  scrollbar-color: rgba(216, 90, 31, 0.38) transparent;
+}
+
+.cart-drawer-body::-webkit-scrollbar {
+  width: 9px;
+}
+
+.cart-drawer-body::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: rgba(216, 90, 31, 0.34);
+  background-clip: padding-box;
+}
+
+.cart-icon-button {
+  display: grid;
+  width: 2.4rem;
+  height: 2.4rem;
+  place-items: center;
+  border-width: 1px;
+  border-style: solid;
+  border-radius: 999px;
+  transition:
+    color 180ms ease,
+    background 180ms ease,
+    border-color 180ms ease,
+    transform 180ms ease;
+}
+
+.cart-icon-button:hover {
+  transform: translateY(-1px);
+}
+
+.cart-icon-button-muted {
+  width: 2rem;
+  height: 2rem;
+  border-color: rgba(23, 20, 18, 0.08);
+  background: rgba(255, 247, 237, 0.66);
+  color: rgba(23, 20, 18, 0.42);
+}
+
+.cart-icon-button-muted:hover {
+  border-color: rgba(216, 90, 31, 0.18);
+  background: rgba(216, 90, 31, 0.1);
+  color: var(--color-terracotta);
+}
+
+.cart-empty-state {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.38), rgba(255, 247, 237, 0.58)),
+    linear-gradient(90deg, transparent, rgba(242, 184, 75, 0.12), transparent);
+}
+
+.cart-empty-medallion {
+  border: 1px solid rgba(216, 90, 31, 0.13);
+  background:
+    linear-gradient(#fff7ed, #fff7ed) padding-box,
+    url("/patterns/sessa-maiolica-orange.png") border-box;
+  background-size: auto, 92px 95px;
+  border: 12px solid transparent;
+  box-shadow:
+    inset 0 0 28px rgba(255, 255, 255, 0.74),
+    0 18px 42px rgba(23, 20, 18, 0.12);
+}
+
+.cart-care-note {
+  border: 1px solid rgba(216, 90, 31, 0.13);
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.84), rgba(255, 247, 237, 0.78)),
+    url("/patterns/sessa-maiolica-green.png");
+  background-size: auto, 84px 86px;
+  box-shadow: 0 14px 32px rgba(23, 20, 18, 0.06);
+}
+
+.cart-line-card {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  gap: 0.85rem;
+  overflow: hidden;
+  border: 1px solid rgba(23, 20, 18, 0.09);
+  border-radius: 24px;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.94), rgba(255, 247, 237, 0.8)),
+    #fff;
+  padding: 0.78rem;
+  box-shadow: 0 16px 36px rgba(23, 20, 18, 0.08);
+  transition:
+    transform 260ms ease,
+    box-shadow 260ms ease,
+    border-color 260ms ease;
+}
+
+.cart-line-card::after {
+  content: "";
+  position: absolute;
+  inset: 0 0 0 auto;
+  z-index: -1;
+  width: 34%;
+  background-image: url("/patterns/sessa-maiolica-orange.png");
+  background-size: 90px 93px;
+  opacity: 0.09;
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000);
+  mask-image: linear-gradient(90deg, transparent, #000);
+}
+
+.cart-line-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(216, 90, 31, 0.18);
+  box-shadow: 0 22px 44px rgba(23, 20, 18, 0.12);
+}
+
+.cart-line-image {
+  border-width: 10px;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 247, 237, 0.5),
+    0 10px 22px rgba(23, 20, 18, 0.09);
+}
+
+.cart-qty-control {
+  min-height: 2.25rem;
+  border: 1px solid rgba(23, 20, 18, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 247, 237, 0.78);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.78);
+}
+
+.cart-qty-control button {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+}
+
+.cart-drawer-footer {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(255, 247, 237, 0.96)),
+    url("/patterns/sessa-maiolica-blue.png");
+  background-size: auto, 92px 95px;
+  padding-bottom: max(1.25rem, var(--safe-bottom));
+  box-shadow: 0 -18px 42px rgba(23, 20, 18, 0.08);
+}
+
+.cart-footer-chip {
+  display: inline-flex;
+  min-height: 2rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(23, 20, 18, 0.08);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+/* Aggiunta rapida prodotto ----------------------------------------------- */
+.quick-add-trigger {
+  flex-shrink: 0;
+  border: 1px solid rgba(216, 90, 31, 0.18);
+  background:
+    linear-gradient(135deg, rgba(216, 90, 31, 0.98), rgba(168, 63, 24, 0.98)),
+    url("/patterns/sessa-maiolica-orange.png");
+  background-size: auto, 76px 78px;
+  color: var(--color-ivory);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 247, 237, 0.16),
+    0 12px 28px rgba(168, 63, 24, 0.2);
+}
+
+.quick-add-trigger:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 247, 237, 0.22),
+    0 18px 34px rgba(168, 63, 24, 0.28);
+}
+
+.quick-add-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  padding: max(0.75rem, var(--safe-top)) clamp(0.75rem, 3vw, 2rem) max(0.75rem, var(--safe-bottom));
+  animation: quick-add-fade-in 180ms ease both;
+}
+
+.quick-add-overlay-closing {
+  animation: quick-add-fade-out 180ms ease both;
+}
+
+.quick-add-backdrop {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(circle at 80% 8%, rgba(216, 90, 31, 0.22), transparent 28%),
+    linear-gradient(120deg, rgba(23, 20, 18, 0.34), rgba(23, 20, 18, 0.66));
+  backdrop-filter: blur(12px) saturate(1.08);
+}
+
+.quick-add-panel {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  width: min(940px, 100%);
+  height: min(780px, calc(100dvh - 1.5rem));
+  max-height: min(780px, calc(100dvh - 1.5rem));
+  grid-template-columns: minmax(270px, 0.9fr) minmax(0, 1.1fr);
+  overflow: hidden;
+  border: 1px solid rgba(255, 247, 237, 0.55);
+  border-radius: 28px;
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(255, 247, 237, 0.98) 48%, rgba(250, 246, 239, 0.98)),
+    url("/patterns/sessa-maiolica-blue.png");
+  background-size: auto, 124px 128px;
+  box-shadow: 0 34px 110px rgba(23, 20, 18, 0.38);
+  animation: quick-add-panel-in 360ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.quick-add-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 0;
+  height: 9px;
+  background-image: url("/patterns/sessa-maiolica-green.png");
+  background-size: 82px 84px;
+}
+
+.quick-add-panel-closing {
+  animation: quick-add-panel-out 180ms ease both;
+}
+
+.quick-add-media {
+  position: relative;
+  display: grid;
+  min-height: 0;
+  height: 100%;
+  place-items: center;
+  overflow: hidden;
+  background:
+    linear-gradient(180deg, rgba(216, 90, 31, 0.1), rgba(242, 184, 75, 0.14)),
+    var(--color-cream);
+  padding: clamp(1.25rem, 3vw, 2rem);
+}
+
+.quick-add-media::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0;
+  height: 34%;
+  background-image: url("/patterns/sessa-maiolica-orange.png");
+  background-size: 110px 113px;
+  opacity: 0.11;
+  -webkit-mask-image: linear-gradient(180deg, transparent, #000 65%);
+  mask-image: linear-gradient(180deg, transparent, #000 65%);
+}
+
+.quick-add-image {
+  z-index: 1;
+  display: grid;
+  width: min(320px, 78vw);
+  aspect-ratio: 1;
+  place-items: center;
+  border-width: clamp(12px, 2vw, 18px);
+  border-radius: 26px;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 247, 237, 0.58),
+    0 24px 54px rgba(23, 20, 18, 0.14);
+}
+
+.quick-add-content {
+  position: relative;
+  z-index: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: clamp(1.25rem, 3vw, 2.2rem);
+  scrollbar-color: rgba(216, 90, 31, 0.38) transparent;
+}
+
+.quick-add-notes {
+  border: 1px solid rgba(216, 90, 31, 0.12);
+  border-radius: 18px;
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.72), rgba(255, 247, 237, 0.84)),
+    url("/patterns/sessa-maiolica-green.png");
+  background-size: auto, 92px 95px;
+  padding: 0.85rem 1rem;
+}
+
+.quick-add-form-footer {
+  position: sticky;
+  bottom: -1px;
+  z-index: 2;
+  margin-inline: -0.35rem;
+  border-top: 1px solid rgba(23, 20, 18, 0.08);
+  background:
+    linear-gradient(180deg, rgba(250, 246, 239, 0.78), rgba(255, 247, 237, 0.98) 30%),
+    url("/patterns/sessa-maiolica-orange.png");
+  background-size: auto, 96px 99px;
+  padding: 1rem 0.35rem 0.25rem;
+  backdrop-filter: blur(10px);
+}
+
+@keyframes quick-add-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes quick-add-fade-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes quick-add-panel-in {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 24px, 0) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes quick-add-panel-out {
+  from {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translate3d(0, 12px, 0) scale(0.99);
+  }
+}
+
+	@media (max-width: 760px) {
+	  .catalog-filter-grid {
+	    grid-template-columns: repeat(2, minmax(0, 1fr));
+	    grid-auto-rows: minmax(5.75rem, auto);
+	    gap: 0.55rem;
+	    min-height: 0;
+	  }
+
+	  .catalog-filter-card,
+	  .catalog-filter-card-occasion {
+	    min-height: 5.75rem;
+	    border-radius: 16px;
+	    padding: 0.72rem;
+	    box-shadow: 0 10px 24px rgba(23, 20, 18, 0.07);
+	  }
+
+	  .catalog-filter-card:hover,
+	  .catalog-filter-card:focus-visible {
+	    transform: translateY(-1px);
+	  }
+
+	  .catalog-filter-card::before {
+	    width: 42%;
+	    background-size: 62px 64px;
+	    opacity: 0.08;
+	  }
+
+	  .catalog-filter-card::after {
+	    inset-inline: 0.72rem;
+	    bottom: 0.52rem;
+	  }
+
+	  .catalog-filter-kicker {
+	    font-size: 0.55rem;
+	    letter-spacing: 0.14em;
+	  }
+
+	  .catalog-filter-card strong {
+	    margin-top: 0.2rem;
+	    font-size: 1rem;
+	    line-height: 1.05;
+	  }
+
+	  .catalog-filter-card span:last-child {
+	    display: -webkit-box;
+	    overflow: hidden;
+	    margin-top: 0.36rem;
+	    padding-right: 0;
+	    -webkit-box-orient: vertical;
+	    -webkit-line-clamp: 2;
+	    font-size: 0.68rem;
+	    line-height: 1.25;
+	  }
+
+	  .quick-add-panel {
+	    height: calc(100dvh - 1rem);
+	    max-height: calc(100dvh - 1rem);
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+    border-radius: 24px;
+  }
+
+  .quick-add-media {
+    height: auto;
+    min-height: auto;
+    padding-block: 1rem;
+  }
+
+  .quick-add-image {
+    width: min(220px, 62vw);
+  }
+
+  .quick-add-content {
+    padding-bottom: max(1.2rem, var(--safe-bottom));
+  }
+}
+
+@media (max-width: 420px) {
+  .cart-drawer-panel::before {
+    width: 6px;
+  }
+
+  .drawer-stat {
+    padding-inline: 0.65rem;
+  }
+
+  .cart-line-card {
+    gap: 0.7rem;
+    border-radius: 20px;
+    padding: 0.68rem;
+  }
+
+  .cart-line-image {
+    width: 76px;
+    height: 76px;
+    border-width: 8px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+	  .cart-trigger,
+	  .cart-overlay,
+	  .cart-drawer-panel,
+	  .cart-line-card,
+	  .cart-icon-button,
+	  .catalog-filter-card,
+	  .catalog-reset-link,
+	  .checkout-choice,
+	  .quick-add-trigger,
+	  .quick-add-overlay,
+	  .quick-add-panel,
+	  .loading-pill,
+	  .loading-title,
+	  .loading-copy,
+	  .loading-card,
+	  .loading-product-card,
+	  .loading-product-image,
+	  .loading-product-body span,
+	  .loading-product-body strong,
+	  .loading-product-body p {
+	    transition: none;
+	    animation: none;
+	  }
+
+	  html {
+	    scroll-behavior: auto;
+	  }
+	}

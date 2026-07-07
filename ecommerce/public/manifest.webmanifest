@@ -1,0 +1,72 @@
+{
+  "name": "Sessa 1930 - Shop",
+  "short_name": "Sessa 1930",
+  "description": "E-commerce Sessa 1930: pasticceria partenopea, sfogliatelle, box regalo e ordini multi-sede.",
+  "id": "/",
+  "start_url": "/?source=pwa",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#FAF6EF",
+  "theme_color": "#D65A1F",
+  "lang": "it",
+  "dir": "ltr",
+  "categories": ["food", "shopping", "business"],
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Scegli sede",
+      "short_name": "Sedi",
+      "url": "/?source=pwa-shortcut",
+      "description": "Seleziona il punto vendita Sessa"
+    },
+    {
+      "name": "Carrello",
+      "short_name": "Carrello",
+      "url": "/carrello?source=pwa-shortcut",
+      "description": "Rivedi il tuo ordine"
+    },
+    {
+      "name": "Area personale",
+      "short_name": "Account",
+      "url": "/account?source=pwa-shortcut",
+      "description": "Accedi a ordini, indirizzi e referral"
+    },
+    {
+      "name": "Gestionale ordini",
+      "short_name": "Ordini",
+      "url": "/admin/ordini",
+      "description": "Gestisci gli ordini"
+    },
+    {
+      "name": "Magazzino",
+      "url": "/admin/magazzino",
+      "description": "Controlla le scorte"
+    }
+  ]
+}

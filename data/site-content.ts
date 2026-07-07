@@ -112,10 +112,10 @@ export const categories: Category[] = [
 
 export const specialties: Specialty[] = [
   {
-    name: "Babbà",
+    name: "Babà",
     image: `${officialImagePath}/product-babba.png`,
     category: "Pasticceria tradizionale",
-    alt: "Babbà Sessa su fondo chiaro"
+    alt: "Babà Sessa su fondo chiaro"
   },
   {
     name: "Caprese",

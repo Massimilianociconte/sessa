@@ -43,8 +43,8 @@ const paletteCards: PaletteCard[] = [
 const framedProducts = [
   {
     accent: "blue" as const,
-    name: "Babba",
-    displayName: "Babbà",
+    name: "Babà",
+    displayName: "Babà",
     subtitle: "Dolce napoletano al rum",
     image: assetPath("/images/official/processed/product-babba.png"),
     tile: assetPath("/patterns/sessa-maiolica-blue.png"),
