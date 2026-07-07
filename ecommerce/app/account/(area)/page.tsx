@@ -1,76 +1,160 @@
 import Link from "next/link";
+import {
+  AccountEmptyState,
+  AccountInfoGrid,
+  AccountInfoTile,
+  AccountMetricCard,
+  AccountPageIntro,
+  AccountPanel
+} from "@/components/account/AccountUi";
 import { OrderStatusBadge } from "@/components/admin/StatusBadge";
+import CopyField from "@/components/account/CopyField";
 import { requireCustomer } from "@/lib/auth/customer-session";
+import { FULFILLMENT_LABELS, type FulfillmentType } from "@/lib/domain";
 import { formatCents } from "@/lib/money";
 import { getAccountOverview } from "@/lib/services/customer-account";
+import { referralLink } from "@/lib/services/referral";
 
 export const metadata = { title: "Il mio account" };
 
+function formatDate(date: Date) {
+  return new Intl.DateTimeFormat("it-IT", { day: "2-digit", month: "short", year: "numeric" }).format(date);
+}
+
 export default async function AccountOverviewPage() {
-  const customer = await requireCustomer();
-  const { orderCount, lastOrders, defaultAddress } = await getAccountOverview(customer.id);
+  const session = await requireCustomer();
+  const {
+    customer,
+    orderCount,
+    lastOrders,
+    latestOrder,
+    defaultAddress,
+    addressCount,
+    totalSpentCents,
+    activeGiftCards,
+    totalGiftCardCents,
+    availableDiscounts
+  } = await getAccountOverview(session.id);
+  const profileCustomer = customer ?? session;
+  const referral = profileCustomer.referralCode ? referralLink(profileCustomer.referralCode) : null;
+  const profileCompletion = [
+    profileCustomer.phone ? "Telefono" : null,
+    defaultAddress ? "Indirizzo" : null,
+    customer?.marketingOptIn ? "Preferenze" : null
+  ].filter(Boolean).length;
 
   return (
-    <div className="space-y-6">
-      <div className="grid gap-4 sm:grid-cols-3">
-        <div className="card p-5">
-          <p className="text-xs font-semibold uppercase tracking-wide text-ink/50">Ordini totali</p>
-          <p className="mt-1 font-serif text-3xl font-semibold">{orderCount}</p>
-        </div>
-        <div className="card p-5">
-          <p className="text-xs font-semibold uppercase tracking-wide text-ink/50">Il tuo codice referral</p>
-          <p className="mt-1 font-mono text-lg font-bold">{customer.referralCode ?? "—"}</p>
-          <p className="mt-1 text-xs text-ink/40">Presto potrai invitare amici e ottenere sconti.</p>
-        </div>
-        <div className="card p-5">
-          <p className="text-xs font-semibold uppercase tracking-wide text-ink/50">Indirizzo predefinito</p>
-          {defaultAddress ? (
-            <p className="mt-1 text-sm">
-              {defaultAddress.line1}, {defaultAddress.postalCode} {defaultAddress.city}
-            </p>
-          ) : (
-            <Link href="/account/indirizzi" className="mt-1 inline-block text-sm font-semibold text-terracotta hover:underline">
-              Aggiungi un indirizzo →
-            </Link>
-          )}
-        </div>
+    <div className="account-page-stack">
+      <AccountPageIntro
+        kicker="Panoramica"
+        title={`Bentornato, ${profileCustomer.firstName}`}
+        description="Tieni sotto controllo ordini, sede, crediti e preferenze per acquistare in meno passaggi."
+      >
+        <Link href={latestOrder?.location?.slug ? `/sede/${latestOrder.location.slug}` : "/"} className="btn-primary">
+          {latestOrder ? "Ordina di nuovo" : "Scegli una sede"}
+        </Link>
+      </AccountPageIntro>
+
+      <div className="account-metric-grid">
+        <AccountMetricCard
+          label="Ordini totali"
+          value={orderCount}
+          description={totalSpentCents > 0 ? `${formatCents(totalSpentCents)} di acquisti confermati` : "Il tuo storico iniziera dal primo ordine."}
+          href="/account/ordini"
+          action="Vedi storico"
+          tone="terracotta"
+        />
+        <AccountMetricCard
+          label="Sede recente"
+          value={latestOrder?.location?.name ?? "Da scegliere"}
+          description={latestOrder ? `Ultimo ordine ${formatDate(latestOrder.placedAt)}` : "Seleziona la sede piu comoda per catalogo e disponibilita."}
+          href={latestOrder?.location?.slug ? `/sede/${latestOrder.location.slug}` : "/"}
+          action={latestOrder ? "Vai al catalogo" : "Scopri le sedi"}
+          tone="ceramic"
+        />
+        <AccountMetricCard
+          label="Crediti attivi"
+          value={activeGiftCards.length > 0 ? formatCents(totalGiftCardCents) : "0"}
+          description={activeGiftCards.length > 0 ? `${activeGiftCards.length} gift card utilizzabili al checkout` : "Gift card e crediti compariranno qui."}
+          href="/account/gift-card"
+          action="Gestisci crediti"
+          tone="brilliant"
+        />
+        <AccountMetricCard
+          label="Profilo"
+          value={`${profileCompletion}/3`}
+          description={profileCompletion >= 3 ? "Dati essenziali completi per checkout piu rapido." : "Completa telefono, indirizzo e preferenze."}
+          href="/account/profilo"
+          action="Completa profilo"
+          tone="majolica"
+        />
       </div>
 
-      <section className="card p-5">
-        <div className="mb-3 flex items-center justify-between">
-          <h2 className="font-serif text-xl font-semibold">Ultimi ordini</h2>
-          <Link href="/account/ordini" className="text-sm font-semibold text-terracotta hover:underline">
-            Tutti →
-          </Link>
-        </div>
+      <AccountInfoGrid>
+        <AccountInfoTile
+          label="Indirizzo predefinito"
+          value={defaultAddress ? `${defaultAddress.line1}, ${defaultAddress.city}` : "Non salvato"}
+          description={defaultAddress ? `${defaultAddress.postalCode} ${defaultAddress.province} · ${addressCount} indirizz${addressCount === 1 ? "o" : "i"}` : "Salvalo per rendere il checkout piu veloce."}
+          tone="terracotta"
+        />
+        <AccountInfoTile
+          label="Codici disponibili"
+          value={availableDiscounts.length > 0 ? String(availableDiscounts.length) : "Nessuno"}
+          description={availableDiscounts.length > 0 ? `${availableDiscounts[0].code} pronto per il checkout` : "I codici personali appariranno nella sezione dedicata."}
+          tone="ceramic"
+        />
+        <AccountInfoTile
+          label="Referral"
+          value={profileCustomer.referralCode ?? "In preparazione"}
+          description="Invita amici e ricevi ricompense tracciate sul tuo account."
+          tone="brilliant"
+        />
+      </AccountInfoGrid>
+
+      {referral && (
+        <AccountPanel
+          eyebrow="Invita amici"
+          title="Il tuo link personale"
+          description="Copialo e condividilo: lo sconto viene associato all'account dell'amico quando si registra."
+          action={<Link href="/account/invita" className="btn-ghost">Regole referral</Link>}
+        >
+          <CopyField value={referral} />
+        </AccountPanel>
+      )}
+
+      <AccountPanel
+        eyebrow="Storico"
+        title="Ultimi ordini"
+        description="Le informazioni piu importanti per riordinare, seguire lo stato e recuperare una ricevuta."
+        action={<Link href="/account/ordini" className="btn-secondary">Tutti gli ordini</Link>}
+      >
         {lastOrders.length === 0 ? (
-          <p className="py-6 text-center text-sm text-ink/50">
-            Non hai ancora ordini.{" "}
-            <Link href="/" className="font-semibold text-terracotta hover:underline">
-              Scegli una sede
-            </Link>
-          </p>
+          <AccountEmptyState
+            title="Il tuo primo momento Sessa ti aspetta."
+            description="Scegli la sede piu vicina e crea il tuo primo ordine: qui troverai storico, riordino rapido e ricevute."
+            primary={{ href: "/", label: "Scegli una sede" }}
+            secondary={{ href: "/account/indirizzi", label: "Salva indirizzo" }}
+          />
         ) : (
-          <table className="w-full text-sm">
-            <tbody>
-              {lastOrders.map((order) => (
-                <tr key={order.id} className="border-t border-ink/5">
-                  <td className="py-2">
-                    <Link href={`/account/ordini/${order.code}`} className="font-semibold hover:text-terracotta">
-                      {order.code}
-                    </Link>
-                  </td>
-                  <td className="py-2 text-xs text-ink/50">{order.placedAt.toLocaleDateString("it-IT")}</td>
-                  <td className="py-2">
-                    <OrderStatusBadge status={order.status} />
-                  </td>
-                  <td className="py-2 text-right font-semibold">{formatCents(order.totalCents)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className="account-order-list">
+            {lastOrders.map((order) => (
+              <article key={order.id} className="account-order-card">
+                <div className="account-order-card-main">
+                  <Link href={`/account/ordini/${order.code}`} className="account-order-code">
+                    {order.code}
+                  </Link>
+                  <p>
+                    {formatDate(order.placedAt)} · {FULFILLMENT_LABELS[order.fulfillmentType as FulfillmentType]}
+                    {order.location ? ` · ${order.location.name}` : ""} · {order.items.reduce((s, i) => s + i.qty, 0)} pz
+                  </p>
+                </div>
+                <OrderStatusBadge status={order.status} />
+                <strong>{formatCents(order.totalCents)}</strong>
+              </article>
+            ))}
+          </div>
         )}
-      </section>
+      </AccountPanel>
     </div>
   );
 }

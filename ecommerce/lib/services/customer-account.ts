@@ -70,28 +70,93 @@ export async function registerCustomer(input: {
 }
 
 export async function getAccountOverview(customerId: string) {
-  const [customer, orderCount, lastOrders, defaultAddress] = await Promise.all([
-    prisma.customer.findUnique({ where: { id: customerId } }),
+  const [
+    customer,
+    orderCount,
+    lastOrders,
+    defaultAddress,
+    addressCount,
+    spent,
+    activeGiftCards,
+    availableDiscounts
+  ] = await Promise.all([
+    prisma.customer.findUnique({
+      where: { id: customerId },
+      select: {
+        id: true,
+        email: true,
+        firstName: true,
+        lastName: true,
+        phone: true,
+        marketingOptIn: true,
+        emailVerified: true,
+        referralCode: true,
+        createdAt: true
+      }
+    }),
     prisma.order.count({ where: { customerId } }),
     prisma.order.findMany({
       where: { customerId },
       orderBy: { placedAt: "desc" },
       take: 3,
-      include: { items: { select: { qty: true } } }
+      include: {
+        items: { select: { qty: true, productName: true, variantName: true } },
+        location: { select: { name: true, slug: true, city: true } }
+      }
     }),
     prisma.address.findFirst({
       where: { customerId },
       orderBy: [{ isDefault: "desc" }, { createdAt: "desc" }]
+    }),
+    prisma.address.count({ where: { customerId } }),
+    prisma.order.aggregate({
+      where: { customerId, paymentStatus: { in: ["PAID", "AUTHORIZED"] } },
+      _sum: { totalCents: true }
+    }),
+    prisma.giftCard.findMany({
+      where: {
+        customerId,
+        isActive: true,
+        balanceCents: { gt: 0 },
+        OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }]
+      },
+      orderBy: { createdAt: "desc" },
+      take: 3
+    }),
+    prisma.discountCode.findMany({
+      where: {
+        customerId,
+        isActive: true,
+        OR: [{ startsAt: null }, { startsAt: { lte: new Date() } }],
+        AND: [{ OR: [{ endsAt: null }, { endsAt: { gt: new Date() } }] }]
+      },
+      include: {
+        redemptions: { where: { customerId }, select: { id: true } }
+      },
+      orderBy: [{ endsAt: "asc" }, { createdAt: "desc" }],
+      take: 3
     })
   ]);
-  return { customer, orderCount, lastOrders, defaultAddress };
+  const totalGiftCardCents = activeGiftCards.reduce((sum, card) => sum + card.balanceCents, 0);
+  return {
+    customer,
+    orderCount,
+    lastOrders,
+    latestOrder: lastOrders[0] ?? null,
+    defaultAddress,
+    addressCount,
+    totalSpentCents: spent._sum.totalCents ?? 0,
+    activeGiftCards,
+    totalGiftCardCents,
+    availableDiscounts
+  };
 }
 
 export async function listCustomerOrders(customerId: string) {
   return prisma.order.findMany({
     where: { customerId },
     orderBy: { placedAt: "desc" },
-    include: { items: true, location: { select: { name: true, slug: true } } }
+    include: { items: true, location: { select: { name: true, slug: true, city: true } } }
   });
 }
 
@@ -109,6 +174,75 @@ export async function listAddresses(customerId: string) {
     where: { customerId },
     orderBy: [{ isDefault: "desc" }, { createdAt: "desc" }]
   });
+}
+
+export async function listCustomerGiftCards(customerId: string) {
+  return prisma.giftCard.findMany({
+    where: { customerId },
+    include: {
+      transactions: {
+        orderBy: { createdAt: "desc" },
+        take: 6
+      }
+    },
+    orderBy: [{ isActive: "desc" }, { updatedAt: "desc" }]
+  });
+}
+
+export async function listCustomerDiscountCodes(customerId: string) {
+  return prisma.discountCode.findMany({
+    where: { customerId },
+    include: {
+      locations: { include: { location: { select: { name: true, city: true } } } },
+      categories: { include: { category: { select: { name: true } } } },
+      products: { include: { product: { select: { name: true } } } },
+      redemptions: {
+        where: { customerId },
+        orderBy: { createdAt: "desc" },
+        select: { id: true, amountCents: true, createdAt: true, order: { select: { code: true } } }
+      }
+    },
+    orderBy: [{ isActive: "desc" }, { endsAt: "asc" }, { createdAt: "desc" }]
+  });
+}
+
+export async function getCustomerPreferenceSnapshot(customerId: string) {
+  const [customer, defaultAddress, latestOrder, locations] = await Promise.all([
+    prisma.customer.findUnique({
+      where: { id: customerId },
+      select: {
+        firstName: true,
+        lastName: true,
+        email: true,
+        phone: true,
+        marketingOptIn: true,
+        emailVerified: true
+      }
+    }),
+    prisma.address.findFirst({
+      where: { customerId },
+      orderBy: [{ isDefault: "desc" }, { createdAt: "desc" }]
+    }),
+    prisma.order.findFirst({
+      where: { customerId },
+      orderBy: { placedAt: "desc" },
+      include: { location: { select: { name: true, slug: true, city: true } } }
+    }),
+    prisma.location.findMany({
+      where: { isActive: true },
+      orderBy: [{ position: "asc" }, { name: "asc" }],
+      select: { id: true, name: true, slug: true, city: true, pickupEnabled: true, deliveryEnabled: true }
+    })
+  ]);
+
+  return {
+    customer,
+    defaultAddress,
+    latestOrder,
+    inferredLocation: latestOrder?.location ?? null,
+    inferredFulfillmentType: latestOrder?.fulfillmentType ?? null,
+    locations
+  };
 }
 
 export async function createAddress(
