@@ -36,7 +36,16 @@ export default function ProductCard({
   const accent = ACCENTS[index % ACCENTS.length];
   const productUrl = `/sede/${locationSlug}/prodotti/${product.slug}`;
   const availableVariants = product.variants.filter((variant) => variant.stockQty > 0);
+  const priceVariants = availableVariants.length > 0 ? availableVariants : product.variants;
   const lowStock = availableVariants.length > 0 && availableVariants.some((variant) => variant.stockQty <= variant.lowStockThreshold);
+  const discountedCompareAt = priceVariants
+    .map((variant) => variant.compareAtCents)
+    .filter((price): price is number => typeof price === "number" && price > product.priceMin)
+    .sort((a, b) => a - b)[0];
+  const discountPercent = discountedCompareAt
+    ? Math.max(1, Math.round(((discountedCompareAt - product.priceMin) / discountedCompareAt) * 100))
+    : null;
+  const hasPriceRange = product.priceMin !== product.priceMax;
   const availabilityLabel = soldOut
     ? "Esaurito"
     : lowStock
@@ -108,11 +117,22 @@ export default function ProductCard({
           <span>{product.variants.length === 1 ? product.variants[0].name : `${product.variants.length} formati`}</span>
         </div>
         <div className="product-card-cta-row">
-          <p className="product-card-price">
-            {product.priceMin === product.priceMax
-              ? formatCents(product.priceMin)
-              : `${formatCents(product.priceMin)} – ${formatCents(product.priceMax)}`}
-          </p>
+          <div className="product-card-price-stack">
+            <span className="product-card-price-eyebrow">{hasPriceRange ? "A partire da" : "Prezzo sede"}</span>
+            <p className="product-card-price-line">
+              <span className="product-card-price-current">{formatCents(product.priceMin)}</span>
+              {discountedCompareAt && (
+                <span className="product-card-price-compare">{formatCents(discountedCompareAt)}</span>
+              )}
+            </p>
+            <span className="product-card-price-note">
+              {discountPercent
+                ? `Risparmi ${discountPercent}%`
+                : hasPriceRange
+                  ? `fino a ${formatCents(product.priceMax)}`
+                  : "IVA inclusa"}
+            </span>
+          </div>
           {locationId && locationName && (
             <ProductQuickAddButton
               product={product}

@@ -82,7 +82,7 @@ export default function RootLayout({
   return (
     // suppressHydrationWarning: alcune estensioni del browser iniettano attributi
     // su <html> (es. crxlauncher) prima dell'idratazione; è innocuo e va ignorato.
-    <html lang="it" suppressHydrationWarning>
+    <html lang="it" data-scroll-behavior="smooth" suppressHydrationWarning>
       <body className={`${serif.variable} ${sans.variable} ${script.variable} font-sans antialiased`}>
         {GA_ID && (
           <>

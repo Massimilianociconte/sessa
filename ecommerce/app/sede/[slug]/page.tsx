@@ -122,7 +122,7 @@ export default async function StoreCatalogPage({ params, searchParams }: Props) 
                 ← Tutte le sedi
               </Link>
               <p className="script-accent mt-5 text-4xl md:text-5xl">{location.name}</p>
-              <h1 className="catalog-hero-title display-title mt-1 max-w-3xl text-3xl md:text-5xl">
+              <h1 className="catalog-hero-title display-title mt-1 max-w-3xl">
                 {activeCategory ? `${activeCategory.name} ${seo.keywordCity}` : seo.h1}
               </h1>
               <p className="catalog-hero-description mt-4 max-w-2xl text-sm leading-6 text-ink/65 md:text-base md:leading-7">
@@ -136,23 +136,33 @@ export default async function StoreCatalogPage({ params, searchParams }: Props) 
             </div>
 
             <aside className="catalog-hero-panel" aria-label={`Informazioni ${seo.name}`}>
-              <p className="text-[10px] font-bold uppercase tracking-[0.3em] text-cream/70">Sessa locale</p>
-              <h2 className="mt-2 font-serif text-3xl font-semibold leading-tight text-ivory">{seo.keywordCity}</h2>
-              <dl className="mt-5 space-y-3 text-sm text-cream/82">
-                <div>
-                  <dt className="text-[10px] font-bold uppercase tracking-[0.2em] text-cream/55">Indirizzo</dt>
-                  <dd className="mt-1">
+              <div className="catalog-hero-panel-header">
+                <p className="catalog-hero-panel-kicker">Sessa locale</p>
+                <h2>{seo.keywordCity}</h2>
+                <p>Catalogo ecommerce collegato alla sede, con disponibilita e servizi aggiornati.</p>
+              </div>
+
+              <dl className="catalog-hero-facts">
+                <div className="catalog-hero-fact">
+                  <dt>Indirizzo</dt>
+                  <dd>
                     {seo.address}
                     {seo.cityName ? `, ${seo.cityName}` : ""}
                   </dd>
                 </div>
                 {seo.hours && (
-                  <div>
-                    <dt className="text-[10px] font-bold uppercase tracking-[0.2em] text-cream/55">Orari</dt>
-                    <dd className="mt-1">{seo.hours}</dd>
+                  <div className="catalog-hero-fact">
+                    <dt>Orari</dt>
+                    <dd>{seo.hours}</dd>
                   </div>
                 )}
               </dl>
+
+              <div className="catalog-hero-services" aria-label="Servizi disponibili">
+                {location.pickupEnabled && <span>Ritiro in sede</span>}
+                {location.deliveryEnabled && <span>Consegna</span>}
+              </div>
+
               <div className="catalog-hero-mini-grid mt-5">
                 <span>Catalogo sede</span>
                 <strong>{activeCategory?.name ?? activeOccasion?.label ?? "Tutto"}</strong>

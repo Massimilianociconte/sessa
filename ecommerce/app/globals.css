@@ -157,9 +157,14 @@ canvas {
 	    justify-content: center;
 	  }
 
-	  .catalog-hero-title {
-	    min-height: clamp(5.2rem, 8vw, 7rem);
-	  }
+.catalog-hero-title {
+  min-height: clamp(5.2rem, 8vw, 7rem);
+  max-width: 100%;
+  font-size: clamp(2.55rem, 5vw, 4.2rem);
+  line-height: 0.98;
+  overflow-wrap: break-word;
+  text-wrap: balance;
+}
 
 	  .catalog-search-card {
 	    position: relative;
@@ -784,21 +789,127 @@ canvas {
   display: flex;
   min-height: clamp(17rem, 28vw, 22rem);
   flex-direction: column;
-  justify-content: flex-end;
-  padding: clamp(1.15rem, 3vw, 1.75rem);
+  justify-content: space-between;
+  gap: 0.95rem;
+  border-color: rgba(255, 247, 237, 0.34);
+  background:
+    linear-gradient(145deg, rgba(147, 48, 17, 0.97), rgba(216, 90, 31, 0.92) 42%, rgba(31, 78, 121, 0.96)),
+    url("/patterns/sessa-maiolica-blue.png");
+  padding: clamp(1rem, 2.6vw, 1.55rem);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 247, 237, 0.12),
+    0 30px 84px rgba(23, 20, 18, 0.24),
+    0 10px 30px rgba(216, 90, 31, 0.13);
+}
+
+.catalog-hero-panel::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background:
+    linear-gradient(180deg, rgba(23, 20, 18, 0.16), rgba(23, 20, 18, 0.04) 46%, rgba(23, 20, 18, 0.24)),
+    radial-gradient(circle at 18% 12%, rgba(255, 247, 237, 0.24), transparent 32%);
+  pointer-events: none;
+}
+
+.catalog-hero-panel-header {
+  display: grid;
+  gap: 0.45rem;
+  padding: 0.15rem 0.15rem 0;
+}
+
+.catalog-hero-panel-kicker {
+  color: rgba(255, 247, 237, 0.76);
+  font-size: 0.62rem;
+  font-weight: 900;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+}
+
+.catalog-hero-panel-header h2 {
+  color: var(--color-ivory);
+  font-family: var(--font-serif), Georgia, serif;
+  font-size: clamp(2rem, 3vw, 2.65rem);
+  font-weight: 700;
+  line-height: 1;
+  text-shadow: 0 10px 24px rgba(23, 20, 18, 0.18);
+}
+
+.catalog-hero-panel-header p {
+  max-width: 24rem;
+  color: rgba(255, 247, 237, 0.76);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.catalog-hero-facts {
+  display: grid;
+  gap: 0.58rem;
+}
+
+.catalog-hero-fact {
+  border: 1px solid rgba(255, 247, 237, 0.42);
+  border-radius: 18px;
+  background:
+    linear-gradient(135deg, rgba(255, 247, 237, 0.94), rgba(255, 255, 255, 0.83)),
+    #fff7ed;
+  padding: 0.78rem 0.9rem;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.55),
+    0 12px 26px rgba(23, 20, 18, 0.11);
+}
+
+.catalog-hero-fact dt {
+  color: rgba(168, 63, 24, 0.9);
+  font-size: 0.58rem;
+  font-weight: 900;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
+
+.catalog-hero-fact dd {
+  margin-top: 0.28rem;
+  color: rgba(23, 20, 18, 0.86);
+  font-size: 0.92rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.catalog-hero-services {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.catalog-hero-services span {
+  display: inline-flex;
+  min-height: 1.8rem;
+  align-items: center;
+  border: 1px solid rgba(255, 247, 237, 0.42);
+  border-radius: 999px;
+  background: rgba(255, 247, 237, 0.18);
+  padding: 0.36rem 0.68rem;
+  color: rgba(255, 247, 237, 0.9);
+  font-size: 0.68rem;
+  font-weight: 850;
+  letter-spacing: 0.04em;
 }
 
 .catalog-hero-mini-grid {
   display: grid;
-  gap: 0.3rem;
-  border: 1px solid rgba(255, 247, 237, 0.16);
-  border-radius: 20px;
-  background: rgba(255, 247, 237, 0.1);
-  padding: 0.85rem 1rem;
+  gap: 0.38rem;
+  border: 1px solid rgba(255, 247, 237, 0.38);
+  border-radius: 18px;
+  background:
+    linear-gradient(135deg, rgba(23, 20, 18, 0.3), rgba(23, 20, 18, 0.1)),
+    rgba(255, 247, 237, 0.14);
+  padding: 0.8rem 0.92rem;
+  box-shadow: inset 0 1px 0 rgba(255, 247, 237, 0.18);
 }
 
 .catalog-hero-mini-grid span {
-  color: rgba(255, 247, 237, 0.55);
+  color: rgba(255, 247, 237, 0.68);
   font-size: 0.62rem;
   font-weight: 800;
   letter-spacing: 0.18em;
@@ -1304,18 +1415,63 @@ canvas {
 
 .product-card-cta-row {
   display: flex;
-  align-items: end;
+  align-items: center;
   justify-content: space-between;
-  gap: 0.75rem;
+  gap: 0.9rem;
   margin-top: auto;
-  padding-top: 0.9rem;
+  border-top: 1px solid rgba(23, 20, 18, 0.07);
+  padding-top: 0.95rem;
 }
 
-.product-card-price {
+.product-card-price-stack {
+  display: grid;
+  min-width: 0;
+  gap: 0.22rem;
+}
+
+.product-card-price-eyebrow {
+  color: rgba(23, 20, 18, 0.45);
+  font-size: 0.58rem;
+  font-weight: 900;
+  letter-spacing: 0.17em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.product-card-price-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.42rem;
+  line-height: 1;
+}
+
+.product-card-price-current {
   color: var(--product-accent, var(--color-terracotta));
   font-family: var(--font-serif), Georgia, serif;
-  font-size: 1.35rem;
+  font-size: clamp(1.55rem, 2.4vw, 1.82rem);
   font-weight: 800;
+  line-height: 1;
+}
+
+.product-card-price-compare {
+  color: rgba(23, 20, 18, 0.38);
+  font-family: var(--font-serif), Georgia, serif;
+  font-size: 1.02rem;
+  font-weight: 700;
+  line-height: 1;
+  text-decoration: line-through;
+  text-decoration-thickness: 1.5px;
+}
+
+.product-card-price-note {
+  width: fit-content;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--product-accent, #d65a1f) 9%, white 91%);
+  padding: 0.22rem 0.5rem;
+  color: color-mix(in srgb, var(--product-accent, #d65a1f) 72%, black 28%);
+  font-size: 0.66rem;
+  font-weight: 850;
   line-height: 1;
 }
 
@@ -1559,21 +1715,46 @@ canvas {
 
 	  .catalog-hero-title {
 	    min-height: 0;
+	    font-size: clamp(2.15rem, 9.2vw, 2.65rem);
+	    line-height: 1;
 	  }
 
 	  .catalog-hero-panel {
 	    min-height: 0;
-	    padding: 1rem;
-	  }
-
-	  .catalog-hero-panel h2 {
-	    font-size: 1.9rem;
-	  }
-
-	  .catalog-hero-panel dl {
-	    margin-top: 0.9rem;
-	    display: grid;
 	    gap: 0.72rem;
+	    padding: 0.9rem;
+	  }
+
+	  .catalog-hero-panel-header {
+	    gap: 0.32rem;
+	  }
+
+	  .catalog-hero-panel-header h2 {
+	    font-size: 1.85rem;
+	  }
+
+	  .catalog-hero-panel-header p {
+	    font-size: 0.76rem;
+	    line-height: 1.38;
+	  }
+
+	  .catalog-hero-facts {
+	    gap: 0.48rem;
+	  }
+
+	  .catalog-hero-fact {
+	    border-radius: 15px;
+	    padding: 0.66rem 0.72rem;
+	  }
+
+	  .catalog-hero-fact dd {
+	    font-size: 0.84rem;
+	  }
+
+	  .catalog-hero-services span {
+	    min-height: 1.62rem;
+	    padding: 0.3rem 0.56rem;
+	    font-size: 0.62rem;
 	  }
 
 	  .catalog-hero-mini-grid {
@@ -1683,13 +1864,26 @@ canvas {
 	  }
 
 	  .product-card-cta-row {
-	    align-items: stretch;
+	    align-items: center;
 	    gap: 0.6rem;
+	  }
+
+	  .product-card-price-current {
+	    font-size: 1.42rem;
+	  }
+
+	  .product-card-price-compare {
+	    font-size: 0.9rem;
+	  }
+
+	  .product-card-price-note {
+	    font-size: 0.6rem;
 	  }
 
 	  .quick-add-trigger {
 	    min-width: 2.8rem;
 	    padding-inline: 0.82rem;
+	    white-space: nowrap;
 	  }
 
 	  .quick-add-trigger svg {
