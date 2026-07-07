@@ -9,7 +9,7 @@ import Header from "@/components/storefront/Header";
 import ProductCard from "@/components/storefront/ProductCard";
 import { buildStoreJsonLd, buildStoreMetadata, getStoreSeo } from "@/lib/seo/sessa-local";
 import { CATALOG_OCCASIONS, listStoreCategories, listStoreProducts } from "@/lib/services/catalog";
-import { getActiveLocationBySlug } from "@/lib/services/locations";
+import { getActiveLocationBySlug, listActiveLocations } from "@/lib/services/locations";
 
 export const dynamic = "force-dynamic";
 
@@ -18,6 +18,14 @@ const CATEGORY_ACCENTS: Record<string, { color: string; tile: string }> = {
   blue: { color: "#073fd0", tile: 'url("/patterns/sessa-maiolica-blue.png")' },
   green: { color: "#08c963", tile: 'url("/patterns/sessa-maiolica-green.png")' }
 };
+
+// Stesso ordine dei colori usati nelle card sede in homepage (app/page.tsx):
+// la sede prende accent/piastrella in base alla sua posizione nell'elenco.
+const LOCATION_ACCENTS = [
+  { accent: "#d65a1f", tile: 'url("/patterns/sessa-maiolica-orange.png")' },
+  { accent: "#1f4e79", tile: 'url("/patterns/sessa-maiolica-blue.png")' },
+  { accent: "#08c963", tile: 'url("/patterns/sessa-maiolica-green.png")' }
+];
 
 const CITY_HERO_BACKGROUNDS: Record<string, string> = {
   firenze: "/images/sfondo-sedi/firenze.webp",
@@ -64,10 +72,16 @@ export default async function StoreCatalogPage({ params, searchParams }: Props) 
   const location = await getActiveLocationBySlug(slug);
   if (!location) notFound();
 
-  const [products, categories] = await Promise.all([
+  const [products, categories, activeLocations] = await Promise.all([
     listStoreProducts(location.id, { categorySlug: categoria, query: q, occasion: uso }),
-    listStoreCategories(location.id)
+    listStoreCategories(location.id),
+    listActiveLocations()
   ]);
+  const locationIndex = Math.max(
+    0,
+    activeLocations.findIndex((item) => item.id === location.id)
+  );
+  const locationAccent = LOCATION_ACCENTS[locationIndex % LOCATION_ACCENTS.length];
   const activeCategory = categories.find((c) => c.slug === categoria);
   const activeOccasion = CATALOG_OCCASIONS.find((o) => o.slug === uso);
   const itemListId = `${slug}${categoria ? `-${categoria}` : ""}${uso ? `-${uso}` : ""}`;
@@ -145,10 +159,12 @@ export default async function StoreCatalogPage({ params, searchParams }: Props) 
       />
       <main className="shop-main mx-auto max-w-6xl px-4">
         <section
-          className="catalog-hero catalog-hero-premium py-8 md:py-12"
+          className="catalog-hero catalog-hero-premium catalog-hero-bleed py-8 md:py-12"
           style={
             {
-              "--location-hero-bg": `url("${heroBackground}")`
+              "--location-hero-bg": `url("${heroBackground}")`,
+              "--hero-tile": locationAccent.tile,
+              "--hero-accent": locationAccent.accent
             } as CSSProperties
           }
         >

@@ -1762,13 +1762,26 @@ canvas {
   background-size: cover;
 }
 
+/* Hero full-bleed: piastrelle e foto partono dal margine sinistro del sito
+   e coprono tutta la larghezza, mentre il contenuto resta allineato al container. */
+.catalog-hero-bleed {
+  width: 100vw;
+  max-width: 100vw;
+  margin-inline: calc(50% - 50vw);
+  border-radius: 0;
+}
+
+.catalog-hero-bleed .catalog-hero-inner {
+  padding-inline: max(1rem, calc(50vw - 35rem));
+}
+
 .catalog-hero-premium::before {
   content: "";
   position: absolute;
   inset: 0 auto 0 0;
   z-index: 0;
   width: min(54rem, 64%);
-  background-image: url("/patterns/sessa-maiolica-orange.png");
+  background-image: var(--hero-tile, url("/patterns/sessa-maiolica-orange.png"));
   background-repeat: repeat;
   background-position: left top;
   background-size: 146px 150px;
