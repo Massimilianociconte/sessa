@@ -154,6 +154,36 @@ async function main() {
     check("test fallimento Stripe locale saltato: Stripe configurato", true);
   }
 
+  // ---- 3d. Concorrenza: due checkout validi devono ricevere codici ordine distinti ----
+  console.log("3d. Concorrenza su sequenza ordine");
+  const seqStockBefore = (await prisma.storeVariant.findUnique({ where: { id: sv.id } }))!.stockQty;
+  await prisma.storeVariant.update({ where: { id: sv.id }, data: { stockQty: Math.max(seqStockBefore, 4) } });
+  const seqEmails = ["seq-a@example.com", "seq-b@example.com"];
+  const tokenSeqA = `verify-seq-a-${sv.id.slice(0, 6)}`;
+  const tokenSeqB = `verify-seq-b-${sv.id.slice(0, 6)}`;
+  const cartSeqA = await getOrCreateCartForLocation(tokenSeqA, ottaviano.id);
+  const cartSeqB = await getOrCreateCartForLocation(tokenSeqB, ottaviano.id);
+  await addItemToCart(cartSeqA.id, sv.id, 1);
+  await addItemToCart(cartSeqB.id, sv.id, 1);
+  const [freshSeqA, freshSeqB] = await Promise.all([getCartByToken(tokenSeqA), getCartByToken(tokenSeqB)]);
+  const seqRace = await Promise.allSettled([
+    placeOrder(freshSeqA!, { ...BASE, email: seqEmails[0] }),
+    placeOrder(freshSeqB!, { ...BASE, email: seqEmails[1] })
+  ]);
+  const seqCodes = seqRace.flatMap((result) => (result.status === "fulfilled" ? [result.value.code] : []));
+  check("due checkout validi completano", seqCodes.length === 2);
+  check("codici ordine distinti sotto concorrenza", new Set(seqCodes).size === seqCodes.length);
+  check(
+    "stock scalato una volta per ordine valido",
+    (await prisma.storeVariant.findUnique({ where: { id: sv.id } }))!.stockQty === Math.max(seqStockBefore, 4) - 2
+  );
+  const seqOrders = await prisma.order.findMany({ where: { email: { in: seqEmails } }, select: { id: true } });
+  await prisma.discountRedemption.deleteMany({ where: { orderId: { in: seqOrders.map((o) => o.id) } } });
+  await prisma.emailMessage.deleteMany({ where: { toEmail: { in: seqEmails } } });
+  await prisma.order.deleteMany({ where: { email: { in: seqEmails } } });
+  await prisma.customer.deleteMany({ where: { email: { in: seqEmails } } });
+  await prisma.storeVariant.update({ where: { id: sv.id }, data: { stockQty: seqStockBefore } });
+
   // ---- 4. Macchina a stati (percorso ritiro) + restock su annullo ----
   console.log("4. Transizioni ritiro + restock");
   await transitionOrder(order!.id, "PAID", "test@admin");

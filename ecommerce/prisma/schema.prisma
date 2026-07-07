@@ -20,26 +20,28 @@ datasource db {
 // ---------------------------------------------------------------------------
 
 model Location {
-  id              String         @id @default(cuid())
+  id              String             @id @default(cuid())
   name            String
-  slug            String         @unique
+  slug            String             @unique
   city            String
   address         String
-  province        String         @default("")
-  postalCode      String         @default("")
+  province        String             @default("")
+  postalCode      String             @default("")
   phone           String?
   hours           String? // testo libero orari
   image           String?
-  pickupEnabled   Boolean        @default(true)
-  deliveryEnabled Boolean        @default(true)
-  isActive        Boolean        @default(true)
-  position        Int            @default(0)
+  pickupEnabled   Boolean            @default(true)
+  deliveryEnabled Boolean            @default(true)
+  isActive        Boolean            @default(true)
+  position        Int                @default(0)
   storeVariants   StoreVariant[]
   carts           Cart[]
   orders          Order[]
   discountLinks   DiscountLocation[]
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+
+  @@index([isActive, position])
 }
 
 // ---------------------------------------------------------------------------
@@ -47,18 +49,18 @@ model Location {
 // ---------------------------------------------------------------------------
 
 model Category {
-  id                String             @id @default(cuid())
-  name              String
-  slug              String             @unique
-  description       String?
-  image             String?
-  accent            String             @default("terracotta") // terracotta | blue | green (brand)
-  position          Int                @default(0)
-  isActive          Boolean            @default(true)
-  products          Product[]
-  discountLinks     DiscountCategory[]
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
+  id            String             @id @default(cuid())
+  name          String
+  slug          String             @unique
+  description   String?
+  image         String?
+  accent        String             @default("terracotta") // terracotta | blue | green (brand)
+  position      Int                @default(0)
+  isActive      Boolean            @default(true)
+  products      Product[]
+  discountLinks DiscountCategory[]
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
 }
 
 model Product {
@@ -112,6 +114,8 @@ model ProductImage {
   url       String
   alt       String  @default("")
   position  Int     @default(0)
+
+  @@index([productId, position])
 }
 
 // Assortimento di una variante in una sede: prezzo/stock/disponibilità per sede.
@@ -134,6 +138,8 @@ model StoreVariant {
 
   @@unique([locationId, variantId])
   @@index([locationId, isAvailable])
+  @@index([variantId])
+  @@index([isAvailable, stockQty])
 }
 
 // ---------------------------------------------------------------------------
@@ -172,6 +178,7 @@ model Cart {
   updatedAt      DateTime      @updatedAt
 
   @@index([locationId])
+  @@index([status, updatedAt])
 }
 
 model CartItem {
@@ -185,6 +192,7 @@ model CartItem {
   updatedAt      DateTime     @updatedAt
 
   @@unique([cartId, storeVariantId])
+  @@index([storeVariantId])
 }
 
 // ---------------------------------------------------------------------------
@@ -212,6 +220,9 @@ model Customer {
   referralUsed   Referral?            @relation("Invited")
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
+
+  @@index([createdAt])
+  @@index([marketingOptIn])
 }
 
 model PasswordResetToken {
@@ -224,6 +235,8 @@ model PasswordResetToken {
   createdAt  DateTime  @default(now())
 
   @@index([customerId])
+  @@index([expiresAt])
+  @@index([usedAt])
 }
 
 // Coda email (outbox): l'invio reale si collega a un provider SMTP in Fase 5.
@@ -240,6 +253,8 @@ model EmailMessage {
   sentAt    DateTime?
 
   @@index([status, createdAt])
+  @@index([reference])
+  @@index([toEmail, createdAt])
 }
 
 model CustomerSession {
@@ -251,6 +266,7 @@ model CustomerSession {
   createdAt  DateTime @default(now())
 
   @@index([customerId])
+  @@index([expiresAt])
 }
 
 model Address {
@@ -268,6 +284,9 @@ model Address {
   phone      String?
   isDefault  Boolean   @default(false)
   createdAt  DateTime  @default(now())
+
+  @@index([customerId, isDefault])
+  @@index([customerId, createdAt])
 }
 
 // ---------------------------------------------------------------------------
@@ -275,18 +294,18 @@ model Address {
 // ---------------------------------------------------------------------------
 
 model Order {
-  id          String    @id @default(cuid())
-  code        String    @unique // es. SES-2026-000042 (leggibile, sequenziale)
-  publicToken String    @unique // per il link di tracking pubblico
-  status      String    @default("PENDING_PAYMENT")
+  id          String @id @default(cuid())
+  code        String @unique // es. SES-2026-000042 (leggibile, sequenziale)
+  publicToken String @unique // per il link di tracking pubblico
+  status      String @default("PENDING_PAYMENT")
   // PENDING_PAYMENT | PAID | PROCESSING | READY | SHIPPED | DELIVERED | CANCELLED | REFUNDED
 
   // Sede + modalità di evasione
-  locationId       String?
-  location         Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
-  locationName     String    @default("")
-  fulfillmentType  String    @default("DELIVERY") // PICKUP | DELIVERY
-  fulfillmentAt    DateTime? // data/ora di ritiro o consegna desiderata (fondamentale per il fresco)
+  locationId      String?
+  location        Location? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  locationName    String    @default("")
+  fulfillmentType String    @default("DELIVERY") // PICKUP | DELIVERY
+  fulfillmentAt   DateTime? // data/ora di ritiro o consegna desiderata (fondamentale per il fresco)
 
   customerId String?
   customer   Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
@@ -320,7 +339,7 @@ model Order {
   paymentProvider    String  @default("manual") // manual | stripe | ...
   paymentMethod      String? // bank_transfer | cash_on_pickup | card ...
   paymentStatus      String  @default("PENDING") // PENDING | AUTHORIZED | PAID | REFUNDED | FAILED
-  paymentRef         String?
+  paymentRef         String? @unique
 
   customerNote    String?
   adminNote       String?
@@ -339,10 +358,26 @@ model Order {
   updatedAt   DateTime  @updatedAt
 
   @@index([status, placedAt])
+  @@index([placedAt])
   @@index([locationId, status])
+  @@index([locationId, placedAt])
+  @@index([customerId, placedAt])
   @@index([email])
   @@index([phone])
-  @@index([paymentStatus])
+  @@index([paymentStatus, placedAt])
+  @@index([paymentMethod])
+  @@index([fulfillmentType, placedAt])
+  @@index([discountCodeSnapshot])
+  @@index([giftCardCodeSnapshot])
+  @@index([referralCodeSnapshot])
+}
+
+// Contatore atomico per codici ordine leggibili per anno.
+// Evita sequenze in JSON dentro Setting e rende il checkout più robusto sotto concorrenza.
+model OrderCounter {
+  year      Int      @id
+  value     Int      @default(0)
+  updatedAt DateTime @updatedAt
 }
 
 model OrderItem {
@@ -359,6 +394,10 @@ model OrderItem {
   qty         Int
   totalCents  Int
   taxRateBps  Int             @default(1000)
+
+  @@index([orderId])
+  @@index([variantId])
+  @@index([productName])
 }
 
 model OrderEvent {
@@ -407,6 +446,10 @@ model DiscountCode {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+
+  @@index([isActive, startsAt, endsAt])
+  @@index([customerId])
+  @@index([scope])
 }
 
 model DiscountLocation {
@@ -417,6 +460,7 @@ model DiscountLocation {
   location   Location     @relation(fields: [locationId], references: [id], onDelete: Cascade)
 
   @@unique([discountId, locationId])
+  @@index([locationId])
 }
 
 model DiscountCategory {
@@ -427,6 +471,7 @@ model DiscountCategory {
   category   Category     @relation(fields: [categoryId], references: [id], onDelete: Cascade)
 
   @@unique([discountId, categoryId])
+  @@index([categoryId])
 }
 
 model DiscountProduct {
@@ -437,22 +482,25 @@ model DiscountProduct {
   product    Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
 
   @@unique([discountId, productId])
+  @@index([productId])
 }
 
 // Riscatto: chi/quando/quale ordine ha usato un codice (per perUserLimit e tracciamento).
 model DiscountRedemption {
-  id         String       @id @default(cuid())
-  discountId String
-  discount   DiscountCode @relation(fields: [discountId], references: [id], onDelete: Cascade)
-  customerId String?
-  customer   Customer?    @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  orderId    String?
-  order      Order?       @relation(fields: [orderId], references: [id], onDelete: SetNull)
-  amountCents Int         @default(0)
-  createdAt  DateTime     @default(now())
+  id          String       @id @default(cuid())
+  discountId  String
+  discount    DiscountCode @relation(fields: [discountId], references: [id], onDelete: Cascade)
+  customerId  String?
+  customer    Customer?    @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  orderId     String?
+  order       Order?       @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  amountCents Int          @default(0)
+  createdAt   DateTime     @default(now())
 
   @@index([discountId])
   @@index([customerId])
+  @@index([orderId])
+  @@index([discountId, customerId])
 }
 
 // ---------------------------------------------------------------------------
@@ -472,6 +520,9 @@ model GiftCard {
   transactions GiftCardTransaction[]
   createdAt    DateTime              @default(now())
   updatedAt    DateTime              @updatedAt
+
+  @@index([customerId])
+  @@index([isActive, expiresAt])
 }
 
 model GiftCardTransaction {
@@ -484,6 +535,7 @@ model GiftCardTransaction {
   createdAt  DateTime @default(now())
 
   @@index([giftCardId, createdAt])
+  @@index([reference])
 }
 
 // ---------------------------------------------------------------------------
@@ -503,6 +555,8 @@ model Referral {
   createdAt         DateTime  @default(now())
 
   @@index([referrerId])
+  @@index([status, createdAt])
+  @@index([redeemedOrderId])
 }
 
 // ---------------------------------------------------------------------------
@@ -527,6 +581,8 @@ model ShippingRate {
   freeAboveCents Int?
   position       Int          @default(0)
   isActive       Boolean      @default(true)
+
+  @@index([zoneId, isActive, position])
 }
 
 // ---------------------------------------------------------------------------
@@ -556,6 +612,7 @@ model AdminSession {
   createdAt DateTime  @default(now())
 
   @@index([userId])
+  @@index([expiresAt])
 }
 
 model AuditLog {
@@ -568,6 +625,8 @@ model AuditLog {
   createdAt  DateTime @default(now())
 
   @@index([createdAt])
+  @@index([actorEmail, createdAt])
+  @@index([entity, entityId])
 }
 
 model Setting {

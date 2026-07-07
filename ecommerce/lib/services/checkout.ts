@@ -53,6 +53,67 @@ const txCartInclude = {
   }
 } satisfies Prisma.CartInclude;
 
+function prismaErrorCode(error: unknown): string | null {
+  return typeof error === "object" && error !== null && "code" in error
+    ? String((error as { code?: unknown }).code)
+    : null;
+}
+
+function parseSequenceFromCode(code?: string | null): number {
+  const match = code?.match(/^SES-\d{4}-(\d{6,})$/);
+  return match ? Number(match[1]) || 0 : 0;
+}
+
+async function nextOrderSequenceInTx(tx: Prisma.TransactionClient, year: number): Promise<number> {
+  const latestOrder = await tx.order.findFirst({
+    where: { code: { startsWith: `SES-${year}-` } },
+    orderBy: { code: "desc" },
+    select: { code: true }
+  });
+  const latestExistingSequence = parseSequenceFromCode(latestOrder?.code);
+
+  try {
+    await tx.orderCounter.create({
+      data: { year, value: latestExistingSequence }
+    });
+  } catch (error) {
+    if (prismaErrorCode(error) !== "P2002") throw error;
+  }
+
+  if (latestExistingSequence > 0) {
+    await tx.orderCounter.updateMany({
+      where: { year, value: { lt: latestExistingSequence } },
+      data: { value: latestExistingSequence }
+    });
+  }
+
+  const counter = await tx.orderCounter.update({
+    where: { year },
+    data: { value: { increment: 1 } }
+  });
+  return counter.value;
+}
+
+async function attachPaymentReference(
+  orderId: string,
+  reference: string,
+  providerLabel: string
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  try {
+    await prisma.order.update({ where: { id: orderId }, data: { paymentRef: reference } });
+    return { ok: true };
+  } catch (error) {
+    if (prismaErrorCode(error) !== "P2002") throw error;
+    const message =
+      "Riferimento pagamento duplicato: l'ordine e stato annullato per evitare una riconciliazione ambigua.";
+    await transitionOrder(orderId, "CANCELLED", "system", {
+      paymentStatus: "FAILED",
+      note: `${message} Provider: ${providerLabel}.`
+    });
+    return { ok: false, error: message };
+  }
+}
+
 /**
  * Cuore del checkout. Unica transazione con tutte le guardie:
  * idempotenza anti-doppio ordine, ricalcolo da DB, sconto granulare con gating
@@ -217,15 +278,9 @@ export async function placeOrder(cart: CartWithItems, input: CheckoutInput): Pro
       }
     }
 
-    // 7. Codice ordine sequenziale
-    const seqRow = await tx.setting.findUnique({ where: { key: "orders.sequence" } });
-    const seq = (seqRow ? (JSON.parse(seqRow.value) as number) : 0) + 1;
-    await tx.setting.upsert({
-      where: { key: "orders.sequence" },
-      update: { value: JSON.stringify(seq) },
-      create: { key: "orders.sequence", value: JSON.stringify(seq) }
-    });
+    // 7. Codice ordine sequenziale e concorrenza-safe.
     const now = new Date();
+    const seq = await nextOrderSequenceInTx(tx, now.getFullYear());
     const code = `SES-${now.getFullYear()}-${String(seq).padStart(6, "0")}`;
     const publicToken = randomBytes(16).toString("hex");
 
@@ -362,14 +417,20 @@ export async function placeOrder(cart: CartWithItems, input: CheckoutInput): Pro
       method: order.paymentMethod
     });
     if (init.ok) {
-      paymentInstructions = init.instructions ?? null;
-      redirectUrl = init.redirectUrl ?? null;
-      await prisma.order.update({ where: { id: order.id }, data: { paymentRef: init.reference } });
+      const attached = await attachPaymentReference(order.id, init.reference, provider.label);
+      if (!attached.ok) {
+        paymentInitError = attached.error;
+      } else {
+        paymentInstructions = init.instructions ?? null;
+        redirectUrl = init.redirectUrl ?? null;
+      }
       await prisma.orderEvent.create({
         data: {
           orderId: order.id,
           type: "PAYMENT",
-          message: `Pagamento inizializzato (${provider.label}).`,
+          message: attached.ok
+            ? `Pagamento inizializzato (${provider.label}).`
+            : `Pagamento non collegato: ${attached.error}`,
           actor: "system"
         }
       });

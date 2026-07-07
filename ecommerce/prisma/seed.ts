@@ -10,6 +10,14 @@ import { randomBytes, scryptSync } from "node:crypto";
 
 const prisma = new PrismaClient();
 
+function getSeedPassword(envKey: string, fallback: string): string {
+  const value = process.env[envKey] ?? fallback;
+  if (process.env.NODE_ENV === "production" && !process.env[envKey]) {
+    throw new Error(`${envKey} deve essere configurata per eseguire il seed in produzione.`);
+  }
+  return value;
+}
+
 function hashPassword(password: string): string {
   const salt = randomBytes(16).toString("hex");
   const hash = scryptSync(password, salt, 64, { N: 16384, r: 8, p: 1 }).toString("hex");
@@ -138,6 +146,8 @@ const productExtra: Record<string, { allergens: string; ingredients: string }> =
 
 async function main() {
   console.log("Seeding piattaforma multi-sede Sessa 1930…");
+  const adminPassword = getSeedPassword("SEED_ADMIN_PASSWORD", "sessa1930!admin");
+  const customerPassword = getSeedPassword("SEED_CUSTOMER_PASSWORD", "cliente1930!");
 
   // Sedi
   const locationIds = new Map<string, string>();
@@ -258,7 +268,7 @@ async function main() {
   await prisma.adminUser.upsert({
     where: { email: "admin@sessa1930.com" },
     update: {},
-    create: { email: "admin@sessa1930.com", name: "Amministratore", passwordHash: hashPassword("sessa1930!admin"), role: "OWNER" }
+    create: { email: "admin@sessa1930.com", name: "Amministratore", passwordHash: hashPassword(adminPassword), role: "OWNER" }
   });
 
   // Cliente demo (per provare l'area personale)
@@ -270,7 +280,7 @@ async function main() {
       firstName: "Mario",
       lastName: "Cliente",
       phone: "081 000 0000",
-      passwordHash: hashPassword("cliente1930!"),
+      passwordHash: hashPassword(customerPassword),
       referralCode: "MARIO-DEMO01",
       marketingOptIn: true
     }
@@ -284,7 +294,6 @@ async function main() {
     "store.address": "Piazza Municipio, 27, 80044 Ottaviano (NA)",
     "store.vat": "P.iva 11751160968",
     "store.currency": "EUR",
-    "orders.sequence": 0,
     "payments.provider": "manual",
     "payments.manualMethods": ["bank_transfer", "cash_on_pickup"],
     "payments.bankTransferInstructions": "Bonifico intestato a Sessa 1930 — IBAN da configurare nelle impostazioni. L'ordine viene preparato alla ricezione del pagamento.",
@@ -311,8 +320,8 @@ async function main() {
   }
 
   console.log(`Seed completato: ${activeLocationSlugs.length} sedi attive, ${products.length} prodotti.`);
-  console.log("Admin: admin@sessa1930.com / sessa1930!admin (da cambiare)");
-  console.log("Cliente demo: cliente@demo.it / cliente1930!");
+  console.log("Admin: admin@sessa1930.com / password da SEED_ADMIN_PASSWORD (fallback locale: sessa1930!admin)");
+  console.log("Cliente demo: cliente@demo.it / password da SEED_CUSTOMER_PASSWORD (fallback locale: cliente1930!)");
   console.log("Gift card demo: GIFT-DEMO-2025 (50€)");
 }
 

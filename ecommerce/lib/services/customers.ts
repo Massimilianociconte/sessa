@@ -11,19 +11,45 @@ export async function listCustomers(query?: string) {
           ]
         }
       : undefined,
-    include: {
-      orders: { select: { totalCents: true, status: true } }
-    },
     orderBy: { createdAt: "desc" },
     take: 200
   });
+
+  const customerIds = customers.map((customer) => customer.id);
+  const [orderCounts, lifetimeTotals] = customerIds.length
+    ? await Promise.all([
+        prisma.order.groupBy({
+          by: ["customerId"],
+          where: { customerId: { in: customerIds } },
+          _count: { _all: true }
+        }),
+        prisma.order.groupBy({
+          by: ["customerId"],
+          where: {
+            customerId: { in: customerIds },
+            status: { notIn: ["CANCELLED", "REFUNDED"] }
+          },
+          _sum: { totalCents: true }
+        })
+      ])
+    : [[], []];
+
+  const orderCountByCustomer = new Map(
+    orderCounts
+      .filter((row) => row.customerId)
+      .map((row) => [row.customerId!, row._count._all])
+  );
+  const lifetimeByCustomer = new Map(
+    lifetimeTotals
+      .filter((row) => row.customerId)
+      .map((row) => [row.customerId!, row._sum.totalCents ?? 0])
+  );
+
   return customers.map((c) => ({
     ...c,
-    orderCount: c.orders.length,
+    orderCount: orderCountByCustomer.get(c.id) ?? 0,
     // Il valore cliente esclude ordini annullati/rimborsati
-    lifetimeCents: c.orders
-      .filter((o) => o.status !== "CANCELLED" && o.status !== "REFUNDED")
-      .reduce((sum, o) => sum + o.totalCents, 0)
+    lifetimeCents: lifetimeByCustomer.get(c.id) ?? 0
   }));
 }
 

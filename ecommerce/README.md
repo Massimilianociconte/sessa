@@ -3,7 +3,7 @@
 Applicazione **standalone** (non tocca il sito vetrina nella cartella padre). Contiene
 lo **storefront** (negozio online) e il **gestionale** `/admin`, una **PWA** installabile.
 
-Stack: **Next.js 16 (App Router, Server Actions)** · **Prisma + SQLite** (dev) ·
+Stack: **Next.js 16 (App Router, Server Actions)** · **Prisma + SQLite** (dev, con migrazioni tracciate) ·
 **TypeScript strict** · **Tailwind** · **Zod** · pagamenti con astrazione provider.
 
 > Base tecnica solida e sicura. L'estetica è volutamente minimale e coerente col brand
@@ -23,14 +23,14 @@ npm run dev          # http://localhost:3001
 
 - Storefront: `http://localhost:3001`
 - Gestionale: `http://localhost:3001/admin`
-- Credenziali admin iniziali: **admin@sessa1930.com** / **sessa1930!admin**
-  — cambiale subito da _Impostazioni → Cambia password_.
+- Credenziali admin iniziali: **admin@sessa1930.com** / valore di `SEED_ADMIN_PASSWORD`
+  (fallback locale: **sessa1930!admin**) — cambiale subito da _Impostazioni → Cambia password_.
 
 Verifica dei flussi critici (ordini, stock, transizioni):
 
 ```bash
 npm run build              # type-check + build produzione
-npx tsx prisma/verify-flow.ts   # 17 controlli di sicurezza end-to-end
+npx tsx prisma/verify-flow.ts   # 45 controlli di sicurezza end-to-end
 ```
 
 ---
@@ -60,6 +60,7 @@ lib/
   actions/                server actions (storefront + admin)
 prisma/
   schema.prisma           modello dati
+  migrations/             baseline SQL tracciata
   seed.ts                 catalogo reale Sessa
   verify-flow.ts          test d'integrazione di sicurezza
 public/
@@ -68,9 +69,11 @@ public/
 
 ## Modello dati (sintesi)
 
-`Category · Product · ProductVariant · ProductImage · StockMovement · Cart · CartItem ·
-Customer · Address · Order · OrderItem · OrderEvent · DiscountCode · ShippingZone ·
-ShippingRate · AdminUser · AdminSession · AuditLog · Setting`
+`Location · Category · Product · ProductVariant · ProductImage · StoreVariant ·
+StockMovement · Cart · CartItem · Customer · PasswordResetToken · CustomerSession ·
+Address · Order · OrderCounter · OrderItem · OrderEvent · DiscountCode ·
+DiscountRedemption · GiftCard · GiftCardTransaction · Referral · ShippingZone ·
+ShippingRate · EmailMessage · AdminUser · AdminSession · AuditLog · Setting`
 
 Principi:
 - **Prezzi in centesimi** (`Int`), IVA inclusa (scorporo informativo su `Order.taxCents`).
@@ -78,6 +81,10 @@ Principi:
   al momento dell'acquisto (righe storiche non cambiano se il catalogo cambia).
 - **Magazzino a ledger**: ogni variazione di stock genera uno `StockMovement`.
   Nessuna modifica silenziosa di `stockQty`.
+- **Sequenza ordini dedicata**: `OrderCounter` evita contatori JSON in `Setting`
+  e genera codici ordine leggibili in modo robusto sotto checkout concorrenti.
+- **Riferimenti pagamento univoci**: `Order.paymentRef` è unico; collisioni da
+  retry/webhook vengono bloccate e annotate invece di creare riconciliazioni ambigue.
 
 ---
 
@@ -107,6 +114,8 @@ Principi:
 - Ogni azione admin che cambia il catalogo chiama `revalidatePath("/", "layout")`:
   **le modifiche dal gestionale sono immediatamente visibili sul negozio**.
 - Il seed è **idempotente** (upsert su slug/SKU/codice): rilanciabile senza duplicati.
+- Il seed accetta `SEED_ADMIN_PASSWORD` e `SEED_CUSTOMER_PASSWORD`; in produzione
+  fallisce se non sono configurate, evitando credenziali demo involontarie.
 
 ---
 

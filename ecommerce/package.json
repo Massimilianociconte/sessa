@@ -12,9 +12,6 @@
     "db:studio": "prisma studio",
     "db:reset": "rm -f prisma/dev.db && prisma db push && tsx prisma/seed.ts"
   },
-  "prisma": {
-    "seed": "tsx prisma/seed.ts"
-  },
   "dependencies": {
     "@prisma/client": "^6.7.0",
     "@types/nodemailer": "^8.0.1",
@@ -31,10 +28,14 @@
     "@types/react": "19.2.17",
     "@types/react-dom": "19.2.3",
     "autoprefixer": "10.4.20",
+    "dotenv": "^16.6.1",
     "postcss": "8.5.10",
     "prisma": "^6.7.0",
     "tailwindcss": "3.4.14",
     "tsx": "^4.19.2",
     "typescript": "5.6.3"
+  },
+  "overrides": {
+    "postcss": "8.5.10"
   }
 }

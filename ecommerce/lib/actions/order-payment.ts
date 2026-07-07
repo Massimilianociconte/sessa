@@ -5,6 +5,12 @@ import { prisma } from "@/lib/db";
 import { getPaymentProvider } from "@/lib/payments";
 import { getOrderForTracking } from "@/lib/services/orders";
 
+function prismaErrorCode(error: unknown): string | null {
+  return typeof error === "object" && error !== null && "code" in error
+    ? String((error as { code?: unknown }).code)
+    : null;
+}
+
 export async function retryOrderPaymentAction(formData: FormData): Promise<void> {
   const code = String(formData.get("code") ?? "");
   const publicToken = String(formData.get("publicToken") ?? "");
@@ -45,13 +51,27 @@ export async function retryOrderPaymentAction(formData: FormData): Promise<void>
     redirect(`${backUrl}&payment=failed`);
   }
 
-  await prisma.order.update({
-    where: { id: order.id },
-    data: {
-      paymentStatus: "PENDING",
-      paymentRef: init.reference
-    }
-  });
+  try {
+    await prisma.order.update({
+      where: { id: order.id },
+      data: {
+        paymentStatus: "PENDING",
+        paymentRef: init.reference
+      }
+    });
+  } catch (error) {
+    if (prismaErrorCode(error) !== "P2002") throw error;
+    await prisma.order.update({ where: { id: order.id }, data: { paymentStatus: "FAILED" } });
+    await prisma.orderEvent.create({
+      data: {
+        orderId: order.id,
+        type: "PAYMENT",
+        message: "Nuovo tentativo non collegato: riferimento pagamento gia associato a un altro ordine.",
+        actor: "storefront"
+      }
+    });
+    redirect(`${backUrl}&payment=failed`);
+  }
   await prisma.orderEvent.create({
     data: {
       orderId: order.id,

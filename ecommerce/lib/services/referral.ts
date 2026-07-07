@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { getSettings } from "@/lib/services/settings";
 import { enqueueEmail } from "@/lib/services/email";
@@ -44,7 +45,7 @@ export function referralLink(referralCode: string): string {
 }
 
 /** Codice sconto univoco riservato a un cliente. */
-async function issueReservedDiscount(input: {
+async function issueReservedDiscountInTx(tx: Prisma.TransactionClient, input: {
   prefix: string;
   customerId: string;
   type: "PERCENT" | "FIXED";
@@ -56,13 +57,13 @@ async function issueReservedDiscount(input: {
   let code = "";
   for (let i = 0; i < 6; i++) {
     const candidate = `${input.prefix}-${randomBytes(3).toString("hex").toUpperCase()}`;
-    if (!(await prisma.discountCode.findUnique({ where: { code: candidate } }))) {
+    if (!(await tx.discountCode.findUnique({ where: { code: candidate } }))) {
       code = candidate;
       break;
     }
   }
   if (!code) code = `${input.prefix}-${randomBytes(5).toString("hex").toUpperCase()}`;
-  await prisma.discountCode.create({
+  await tx.discountCode.create({
     data: {
       code,
       description: input.description,
@@ -95,41 +96,47 @@ export async function linkReferralOnSignup(
   if (referrer.id === newCustomerId) return; // auto-invito
   if (referrer.email.toLowerCase() === newEmail.toLowerCase()) return; // stessa persona
 
-  // Un cliente può essere invitato una sola volta.
-  const already = await prisma.referral.findUnique({ where: { invitedCustomerId: newCustomerId } });
-  if (already) return;
-
   const config = await getReferralConfig();
-  const friendCode = await issueReservedDiscount({
-    prefix: "BENV",
-    customerId: newCustomerId,
-    type: config.friendType,
-    value: config.friendValue,
-    minSubtotalCents: config.minSubtotalCents,
-    firstOrderOnly: true,
-    description: `Benvenuto: invitato da ${referrer.firstName}`
-  });
 
   try {
-    await prisma.referral.create({
-      data: {
-        code: `REF-${randomBytes(5).toString("hex").toUpperCase()}`,
-        referrerId: referrer.id,
-        invitedCustomerId: newCustomerId,
-        status: "SIGNED_UP"
-      }
+    const friendCode = await prisma.$transaction(async (tx) => {
+      // Un cliente può essere invitato una sola volta.
+      const already = await tx.referral.findUnique({ where: { invitedCustomerId: newCustomerId } });
+      if (already) return null;
+
+      const code = await issueReservedDiscountInTx(tx, {
+        prefix: "BENV",
+        customerId: newCustomerId,
+        type: config.friendType,
+        value: config.friendValue,
+        minSubtotalCents: config.minSubtotalCents,
+        firstOrderOnly: true,
+        description: `Benvenuto: invitato da ${referrer.firstName}`
+      });
+
+      await tx.referral.create({
+        data: {
+          code: `REF-${randomBytes(5).toString("hex").toUpperCase()}`,
+          referrerId: referrer.id,
+          invitedCustomerId: newCustomerId,
+          status: "SIGNED_UP"
+        }
+      });
+
+      return code;
+    });
+    if (!friendCode) return;
+
+    await enqueueEmail({
+      toEmail: newEmail,
+      subject: "Benvenuto in Sessa 1930 — hai uno sconto",
+      body: `Ti diamo il benvenuto! Usa il codice ${friendCode} al tuo primo ordine.`,
+      type: "REFERRAL_WELCOME"
     });
   } catch {
-    // corsa: già creato altrove, si ignora
+    // Corsa: referral già creato altrove o codice sconto collisione; la transazione rollbacka tutto.
     return;
   }
-
-  await enqueueEmail({
-    toEmail: newEmail,
-    subject: "Benvenuto in Sessa 1930 — hai uno sconto",
-    body: `Ti diamo il benvenuto! Usa il codice ${friendCode} al tuo primo ordine.`,
-    type: "PASSWORD_RESET"
-  });
 }
 
 /**
@@ -138,34 +145,39 @@ export async function linkReferralOnSignup(
  * condizionale su status="SIGNED_UP" garantisce ricompensa una sola volta.
  */
 export async function maybeConvertReferral(invitedCustomerId: string, orderId: string): Promise<void> {
-  const referral = await prisma.referral.findUnique({
-    where: { invitedCustomerId },
-    include: { referrer: true }
-  });
-  if (!referral || referral.status !== "SIGNED_UP") return;
-
-  const converted = await prisma.referral.updateMany({
-    where: { id: referral.id, status: "SIGNED_UP" },
-    data: { status: "REDEEMED", redeemedOrderId: orderId, redeemedAt: new Date() }
-  });
-  if (converted.count === 0) return; // già convertito da una richiesta concorrente
-
   const config = await getReferralConfig();
-  const rewardCode = await issueReservedDiscount({
-    prefix: "GRAZIE",
-    customerId: referral.referrerId,
-    type: config.referrerType,
-    value: config.referrerValue,
-    minSubtotalCents: config.minSubtotalCents,
-    firstOrderOnly: false,
-    description: "Ricompensa referral: un amico ha ordinato"
+  const reward = await prisma.$transaction(async (tx) => {
+    const referral = await tx.referral.findUnique({
+      where: { invitedCustomerId },
+      include: { referrer: true }
+    });
+    if (!referral || referral.status !== "SIGNED_UP") return null;
+
+    const converted = await tx.referral.updateMany({
+      where: { id: referral.id, status: "SIGNED_UP" },
+      data: { status: "REDEEMED", redeemedOrderId: orderId, redeemedAt: new Date() }
+    });
+    if (converted.count === 0) return null; // già convertito da una richiesta concorrente
+
+    const rewardCode = await issueReservedDiscountInTx(tx, {
+      prefix: "GRAZIE",
+      customerId: referral.referrerId,
+      type: config.referrerType,
+      value: config.referrerValue,
+      minSubtotalCents: config.minSubtotalCents,
+      firstOrderOnly: false,
+      description: "Ricompensa referral: un amico ha ordinato"
+    });
+
+    return { toEmail: referral.referrer.email, rewardCode };
   });
+  if (!reward) return;
 
   await enqueueEmail({
-    toEmail: referral.referrer.email,
+    toEmail: reward.toEmail,
     subject: "Un amico ha ordinato — ecco il tuo premio",
-    body: `Grazie per aver invitato un amico! Usa il codice ${rewardCode} sul tuo prossimo ordine.`,
-    type: "PASSWORD_RESET"
+    body: `Grazie per aver invitato un amico! Usa il codice ${reward.rewardCode} sul tuo prossimo ordine.`,
+    type: "REFERRAL_REWARD"
   });
 }
 

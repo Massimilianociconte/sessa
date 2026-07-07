@@ -7,7 +7,11 @@ import { prisma } from "@/lib/db";
  * così il flusso funziona anche senza credenziali. Per attivare l'invio reale
  * impostare SMTP_HOST/PORT/USER/PASS/FROM in .env.
  */
-export type EmailType = "ORDER_CONFIRMATION" | "PASSWORD_RESET";
+export type EmailType =
+  | "ORDER_CONFIRMATION"
+  | "PASSWORD_RESET"
+  | "REFERRAL_WELCOME"
+  | "REFERRAL_REWARD";
 
 let transporter: nodemailer.Transporter | null = null;
 function getTransport(): nodemailer.Transporter | null {

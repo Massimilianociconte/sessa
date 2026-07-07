@@ -19,6 +19,12 @@ function paymentIntentRef(session: Stripe.Checkout.Session): string | undefined 
   return session.payment_intent?.id ?? session.id;
 }
 
+function prismaErrorCode(error: unknown): string | null {
+  return typeof error === "object" && error !== null && "code" in error
+    ? String((error as { code?: unknown }).code)
+    : null;
+}
+
 async function findOrderForStripeSession(session: Stripe.Checkout.Session) {
   const orderId = session.metadata?.orderId || undefined;
   const orderCode = session.metadata?.orderCode || session.client_reference_id || undefined;
@@ -92,7 +98,17 @@ export async function POST(request: NextRequest) {
           paymentRef: paymentIntentRef(session),
           note: "Pagamento Stripe confermato"
         });
-      } catch {
+      } catch (error) {
+        if (prismaErrorCode(error) === "P2002") {
+          await prisma.orderEvent.create({
+            data: {
+              orderId: order.id,
+              type: "PAYMENT",
+              message: "Webhook Stripe ignorato: riferimento pagamento gia associato a un altro ordine.",
+              actor: "stripe"
+            }
+          });
+        }
         // transizione non valida (già pagato): evento duplicato, si ignora
       }
     }

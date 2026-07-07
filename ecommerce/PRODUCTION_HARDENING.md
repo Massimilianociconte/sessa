@@ -10,8 +10,11 @@ Questo documento mappa i controlli gia presenti e le prossime decisioni necessar
 - Stock per sede su `StoreVariant`.
 - Scarico stock con `updateMany` condizionale `stockQty >= qty`.
 - Ledger magazzino `StockMovement`.
+- Sequenza ordine per anno su `OrderCounter`, non piu in JSON dentro `Setting`.
+- `Order.paymentRef` univoco per impedire riconciliazioni doppie tra ordine e pagamento.
 - Sconti con `usedCount`, `maxUses`, `perUserLimit` e `DiscountRedemption`.
 - Gift card con saldo e ledger, decremento condizionale atomico.
+- Referral creati/convertiti in transazione insieme ai codici sconto riservati.
 - State machine ordini centralizzata in `transitionOrder`.
 - Webhook Stripe con firma verificata.
 - Fallimento/scadenza Stripe collegati ad annullamento e rilascio stock se l'ordine e ancora `PENDING_PAYMENT`.
@@ -26,6 +29,7 @@ Questo documento mappa i controlli gia presenti e le prossime decisioni necessar
 - idempotenza anti doppio ordine;
 - anti-oversell;
 - due checkout simultanei sullo stesso stock;
+- due checkout validi simultanei con codici ordine distinti;
 - pagamento esterno non inizializzato con rilascio stock;
 - transizioni ordine valide/non valide;
 - sconti per categoria e sede;
@@ -37,28 +41,38 @@ Questo documento mappa i controlli gia presenti e le prossime decisioni necessar
 ## Requisiti prima della produzione reale
 
 1. Passare da SQLite a Postgres gestito.
-2. Aggiungere indici Postgres mirati per:
-   - `Order(code)`, `Order(paymentRef)`, `Order(locationId, status, placedAt)`;
-   - `StoreVariant(locationId, isAvailable, stockQty)`;
-   - `Cart(token, status)`;
-   - `DiscountRedemption(discountId, customerId)`;
-   - `GiftCard(code, balanceCents)`.
-3. Usare rate limit condiviso, preferibilmente Redis o database, non memoria di processo.
-4. Configurare backup automatici e restore testato.
-5. Spostare invio email, ricevute, analytics e sync secondari su job/outbox retryable.
-6. Aggiungere osservabilita:
+2. Rigenerare/verificare le migrazioni contro provider `postgresql` prima del deploy reale.
+   La cartella `prisma/migrations` contiene ora una baseline SQLite tracciata per nuovi
+   ambienti locali; non va applicata alla cieca su un database produzione gia popolato.
+3. Verificare in Postgres gli indici gia dichiarati nello schema per catalogo, ordini,
+   pagamenti, gift card, referral, sessioni, admin e audit log.
+4. Usare rate limit condiviso, preferibilmente Redis o database, non memoria di processo.
+5. Configurare backup automatici e restore testato.
+6. Spostare invio email, ricevute, analytics e sync secondari su job/outbox retryable.
+7. Aggiungere osservabilita:
    - errori checkout;
    - pagamento fallito;
    - webhook duplicato/fallito;
    - stock insufficiente;
    - login sospetto;
    - azioni admin critiche.
-7. Abilitare alert su:
+8. Abilitare alert su:
    - ordini `PENDING_PAYMENT` troppo vecchi;
    - pagamenti Stripe completati senza ordine;
    - ordini cancellati con stock non ripristinato;
    - email in `FAILED`;
    - gift card con ledger incoerente.
+
+## Migrazioni e script database
+
+- `prisma.config.ts` dichiara schema, cartella migrazioni e seed senza usare la
+  configurazione deprecata `package.json#prisma`.
+- Il seed e rilanciabile: usa upsert su sedi, categorie, prodotti, varianti, sconti
+  e dati demo; non ricrea stock o gift card gia presenti.
+- `SEED_ADMIN_PASSWORD` e `SEED_CUSTOMER_PASSWORD` sono opzionali solo in sviluppo.
+  Con `NODE_ENV=production`, il seed fallisce se non sono valorizzate.
+- Prima di introdurre dati produzione esistenti, verificare duplicati su campi che
+  hanno vincoli unici (`Order.paymentRef`, codici sconto, gift card, referral).
 
 ## Stato pagamento e stock
 
