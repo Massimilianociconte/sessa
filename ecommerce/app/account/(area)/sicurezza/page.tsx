@@ -4,7 +4,10 @@ import {
   logoutCustomerSessionAction,
   logoutOtherCustomerSessionsAction
 } from "@/lib/actions/account/auth";
+import { deleteAccountAction } from "@/lib/actions/account/privacy";
+import { TwoFactorEnroll, TwoFactorManage } from "@/components/account/TwoFactorSetup";
 import { getSessionCustomer, listCustomerSessions } from "@/lib/auth/customer-session";
+import { getTwoFactorStatus } from "@/lib/services/customer-2fa";
 
 export const metadata = { title: "Sicurezza" };
 
@@ -52,7 +55,9 @@ export default async function AccountSecurityPage({
   searchParams: Promise<{ msg?: string; err?: string }>;
 }) {
   const [{ msg, err }, customer] = await Promise.all([searchParams, getSessionCustomer()]);
-  const sessions = customer ? await listCustomerSessions(customer.id) : [];
+  const [sessions, twoFactor] = customer
+    ? await Promise.all([listCustomerSessions(customer.id), getTwoFactorStatus(customer.id)])
+    : [[], { enabled: false, enabledAt: null, backupRemaining: 0, backupTotal: 0 }];
   const otherSessions = sessions.filter((session) => !session.isCurrent);
 
   return (
@@ -68,9 +73,34 @@ export default async function AccountSecurityPage({
 
       <AccountInfoGrid>
         <AccountInfoTile label="Sessioni attive" value={String(sessions.length)} description={`${otherSessions.length} dispositiv${otherSessions.length === 1 ? "o" : "i"} oltre a questo.`} tone="terracotta" />
-        <AccountInfoTile label="Protezione login" value="Attiva" description="Rate limit per login e recupero password, più avviso email a ogni nuovo accesso." tone="ceramic" />
+        <AccountInfoTile
+          label="Verifica in 2 passaggi"
+          value={twoFactor.enabled ? "Attiva" : "Non attiva"}
+          description={
+            twoFactor.enabled
+              ? `Codice app richiesto al login · ${twoFactor.backupRemaining} codici di recupero rimasti.`
+              : "Aggiungi il codice dell'app authenticator al login."
+          }
+          tone="ceramic"
+        />
         <AccountInfoTile label="Password" value="Protetta" description="Hash server-side e rotazione sessioni dopo cambio o reset." tone="brilliant" />
       </AccountInfoGrid>
+
+      <AccountPanel
+        eyebrow="Autenticazione forte"
+        title="Verifica in due passaggi (2FA)"
+        description={
+          twoFactor.enabled
+            ? "Attiva: oltre alla password serve il codice dell'app authenticator. Gestisci qui codici di recupero e disattivazione."
+            : "Proteggi l'account con un codice temporaneo generato dal tuo telefono (TOTP standard: Google Authenticator, 1Password, Aegis…)."
+        }
+      >
+        {twoFactor.enabled ? (
+          <TwoFactorManage backupRemaining={twoFactor.backupRemaining} />
+        ) : (
+          <TwoFactorEnroll />
+        )}
+      </AccountPanel>
 
       <AccountPanel
         eyebrow="Dispositivi"
@@ -126,20 +156,57 @@ export default async function AccountSecurityPage({
       </AccountPanel>
 
       <AccountPanel
+        eyebrow="Privacy"
+        title="I tuoi dati"
+        description="Scarica una copia completa dei tuoi dati o elimina definitivamente l'account. Gli ordini restano conservati in forma anonima per gli obblighi fiscali."
+      >
+        <div className="space-y-6">
+          <div>
+            <a href="/account/esporta-dati" className="btn-secondary" download>
+              Scarica i miei dati (JSON)
+            </a>
+            <p className="mt-2 text-xs text-ink/45">
+              Include profilo, indirizzi, storico ordini, gift card, sconti usati e referral.
+            </p>
+          </div>
+          <form action={deleteAccountAction} className="space-y-3 rounded-2xl border border-terracotta/30 bg-terracotta/5 p-4">
+            <p className="text-sm font-semibold text-terracotta">Elimina account</p>
+            <p className="text-xs leading-5 text-ink/60">
+              Azione definitiva: i dati personali vengono anonimizzati e tutte le sessioni chiuse.
+              Le gift card restano spendibili tramite codice.
+            </p>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label htmlFor="deletePassword" className="label-field">Password</label>
+                <input id="deletePassword" name="password" type="password" required autoComplete="current-password" className="input-field" />
+              </div>
+              <div>
+                <label htmlFor="deleteConfirm" className="label-field">Scrivi ELIMINA per confermare</label>
+                <input id="deleteConfirm" name="confirm" required placeholder="ELIMINA" className="input-field uppercase" />
+              </div>
+            </div>
+            <button type="submit" className="btn-secondary !border-terracotta !text-terracotta">
+              Elimina definitivamente il mio account
+            </button>
+          </form>
+        </div>
+      </AccountPanel>
+
+      <AccountPanel
         eyebrow="Protezione avanzata"
-        title="Prossime protezioni consigliate"
-        description="Queste funzioni restano il passo successivo naturale: sono gratuite per l'utente, ma richiedono un modulo dedicato per gestire segreti, QR code e WebAuthn senza simulazioni."
+        title="Protezioni dell'account"
+        description="Lo stato delle difese attive su questo account. La passkey resta il prossimo passo naturale."
       >
         <div className="account-security-grid">
           {[
-            ["App authenticator", "TOTP gratuito con QR code, conferma iniziale e codici di recupero monouso."],
-            ["Passkey", "Accesso moderno con Face ID, Touch ID o chiave dispositivo compatibile."],
-            ["Avvisi sensibili", "Gli avvisi per login e cambio password sono già collegati alla coda email."]
-          ].map(([title, copy]) => (
+            ["App authenticator", "TOTP con QR code, conferma iniziale e codici di recupero monouso.", twoFactor.enabled ? "Attivo" : "Attivabile qui sopra"],
+            ["Passkey", "Accesso moderno con Face ID, Touch ID o chiave dispositivo compatibile.", "Modulo successivo"],
+            ["Avvisi sensibili", "Email automatica per nuovi accessi, cambio password, cambio email e 2FA.", "Attivo"]
+          ].map(([title, copy, status]) => (
             <div key={title}>
               <strong>{title}</strong>
               <p>{copy}</p>
-              <span>{title === "Avvisi sensibili" ? "Attivo" : "Modulo successivo"}</span>
+              <span>{status}</span>
             </div>
           ))}
         </div>

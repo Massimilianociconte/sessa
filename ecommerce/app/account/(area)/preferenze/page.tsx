@@ -6,54 +6,132 @@ import {
   AccountPageIntro,
   AccountPanel
 } from "@/components/account/AccountUi";
+import { updatePreferencesAction } from "@/lib/actions/account/preferences";
 import { requireCustomer } from "@/lib/auth/customer-session";
 import { FULFILLMENT_LABELS, type FulfillmentType } from "@/lib/domain";
 import { getCustomerPreferenceSnapshot } from "@/lib/services/customer-account";
 
+export const dynamic = "force-dynamic";
+
 export const metadata = { title: "Preferenze" };
 
-export default async function AccountPreferencesPage() {
-  const customer = await requireCustomer();
+function toDateInput(date: Date | null | undefined): string {
+  if (!date) return "";
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+export default async function AccountPreferencesPage({
+  searchParams
+}: {
+  searchParams: Promise<{ msg?: string; err?: string }>;
+}) {
+  const [{ msg, err }, customer] = await Promise.all([searchParams, requireCustomer()]);
   const snapshot = await getCustomerPreferenceSnapshot(customer.id);
-  const preferredFulfillment = snapshot.inferredFulfillmentType
-    ? FULFILLMENT_LABELS[snapshot.inferredFulfillmentType as FulfillmentType]
+  const effectiveFulfillment = snapshot.effectiveFulfillment
+    ? FULFILLMENT_LABELS[snapshot.effectiveFulfillment as FulfillmentType]
     : "Da scegliere";
+  const isSavedLocation = Boolean(snapshot.savedLocation);
+  const isSavedFulfillment = Boolean(snapshot.customer?.preferredFulfillment);
 
   return (
     <div className="account-page-stack">
       <AccountPageIntro
         kicker="Esperienza"
         title="Preferenze"
-        description="Una base pronta per checkout più rapido, promo locali, riordino intelligente e comunicazioni più pertinenti."
+        description="Sede, modalità e ricorrenze salvate qui guidano checkout, suggerimenti e promozioni locali."
       >
         <Link href="/account/profilo" className="btn-secondary">Aggiorna dati</Link>
       </AccountPageIntro>
 
+      {msg && <p className="rounded-xl bg-brilliant/10 px-4 py-3 text-sm font-semibold text-emerald-800">{decodeURIComponent(msg)}</p>}
+      {err && <p className="rounded-xl bg-terracotta/10 px-4 py-3 text-sm font-semibold text-terracotta">{decodeURIComponent(err)}</p>}
+
       <AccountInfoGrid>
         <AccountInfoTile
           label="Sede preferita"
-          value={snapshot.inferredLocation?.name ?? "Da scegliere"}
-          description={snapshot.inferredLocation ? "Derivata dal tuo ultimo ordine." : "Scegli una sede per catalogo e stock locali."}
+          value={snapshot.effectiveLocation?.name ?? "Da scegliere"}
+          description={
+            isSavedLocation
+              ? "Scelta da te: guida catalogo e suggerimenti."
+              : snapshot.effectiveLocation
+                ? "Derivata dal tuo ultimo ordine. Salvala per fissarla."
+                : "Scegli una sede per catalogo e stock locali."
+          }
           tone="terracotta"
         />
         <AccountInfoTile
-          label="Modalita preferita"
-          value={preferredFulfillment}
-          description="Usata per suggerire il percorso più rapido al checkout."
+          label="Modalità preferita"
+          value={effectiveFulfillment}
+          description={
+            isSavedFulfillment
+              ? "Scelta da te: preimpostata al checkout."
+              : "Dedotta dagli ordini; salvala per fissarla."
+          }
           tone="ceramic"
         />
         <AccountInfoTile
-          label="Newsletter"
-          value={snapshot.customer?.marketingOptIn ? "Attiva" : "Non attiva"}
-          description="Novita, promo locali e ricorrenze Sessa."
+          label="Compleanno"
+          value={snapshot.customer?.birthday ? toDateInput(snapshot.customer.birthday).split("-").reverse().join("/") : "Non indicato"}
+          description="Ci permette di riservarti attenzioni e promo di compleanno."
           tone="brilliant"
         />
       </AccountInfoGrid>
 
       <AccountPanel
+        eyebrow="Le tue scelte"
+        title="Imposta le preferenze"
+        description="Valgono su tutto l'ecommerce: catalogo suggerito, checkout precompilato e comunicazioni locali."
+      >
+        <form action={updatePreferencesAction} className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label htmlFor="preferredLocationId" className="label-field">Sede preferita</label>
+              <select
+                id="preferredLocationId"
+                name="preferredLocationId"
+                defaultValue={snapshot.customer?.preferredLocationId ?? ""}
+                className="input-field"
+              >
+                <option value="">Nessuna preferenza</option>
+                {snapshot.locations.map((location) => (
+                  <option key={location.id} value={location.id}>
+                    {location.name} — {location.city}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="preferredFulfillment" className="label-field">Modalità preferita</label>
+              <select
+                id="preferredFulfillment"
+                name="preferredFulfillment"
+                defaultValue={snapshot.customer?.preferredFulfillment ?? ""}
+                className="input-field"
+              >
+                <option value="">Nessuna preferenza</option>
+                <option value="PICKUP">{FULFILLMENT_LABELS.PICKUP}</option>
+                <option value="DELIVERY">{FULFILLMENT_LABELS.DELIVERY}</option>
+              </select>
+            </div>
+          </div>
+          <div className="sm:max-w-xs">
+            <label htmlFor="birthday" className="label-field">Compleanno</label>
+            <input
+              id="birthday"
+              name="birthday"
+              type="date"
+              defaultValue={toDateInput(snapshot.customer?.birthday)}
+              className="input-field"
+            />
+          </div>
+          <button type="submit" className="btn-primary">Salva preferenze</button>
+        </form>
+      </AccountPanel>
+
+      <AccountPanel
         eyebrow="Checkout"
-        title="Preferenze operative"
-        description="Questi dati migliorano velocità e precisione nei flussi futuri."
+        title="Come le usiamo"
+        description="Questi dati riducono i passaggi nei flussi d'acquisto."
       >
         <div className="account-preference-grid">
           <div>
@@ -72,20 +150,23 @@ export default async function AccountPreferencesPage() {
           </div>
           <div>
             <p>Sede suggerita</p>
-            <strong>{snapshot.inferredLocation?.name ?? "Sessa 1930"}</strong>
+            <strong>{snapshot.effectiveLocation?.name ?? "Sessa 1930"}</strong>
             <span>
-              {snapshot.inferredLocation
-                ? `Catalogo locale di ${snapshot.inferredLocation.city}.`
+              {snapshot.effectiveLocation
+                ? `Catalogo locale di ${snapshot.effectiveLocation.city}.`
                 : "Scegli la sede da cui vuoi ordinare più spesso."}
             </span>
-            <Link href={snapshot.inferredLocation?.slug ? `/sede/${snapshot.inferredLocation.slug}` : "/"} className="btn-ghost">
+            <Link
+              href={snapshot.effectiveLocation?.slug ? `/sede/${snapshot.effectiveLocation.slug}` : "/"}
+              className="btn-ghost"
+            >
               Apri catalogo
             </Link>
           </div>
           <div>
-            <p>Regali e ricorrenze</p>
-            <strong>Predisposto</strong>
-            <span>Spazio pronto per compleanni, note regalo, preferenze packaging e reminder stagionali.</span>
+            <p>Modalità al checkout</p>
+            <strong>{effectiveFulfillment}</strong>
+            <span>Preimpostata quando arrivi al checkout: la puoi sempre cambiare lì.</span>
             <Link href="/account/gift-card" className="btn-ghost">Vedi crediti</Link>
           </div>
         </div>

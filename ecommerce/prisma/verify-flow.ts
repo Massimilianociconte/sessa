@@ -13,9 +13,41 @@ import { effectivePrice } from "@/lib/services/catalog";
 import {
   consumeResetToken,
   createResetToken,
+  getEffectiveFulfillmentPreference,
   listCustomerOrders,
   registerCustomer
 } from "@/lib/services/customer-account";
+import {
+  consumeCustomerToken,
+  requestEmailChange,
+  sendVerificationEmail
+} from "@/lib/services/customer-verification";
+import { deleteCustomerAccount, exportCustomerData } from "@/lib/services/customer-gdpr";
+import {
+  confirmTotpEnrollment,
+  disableTotp,
+  startTotpEnrollment,
+  verifySecondFactor
+} from "@/lib/services/customer-2fa";
+import { currentTotpStep, verifyTotpCode } from "@/lib/auth/totp";
+import { createHmac } from "node:crypto";
+import { base32Decode } from "@/lib/auth/totp";
+
+/** Genera il codice TOTP atteso per un dato step (stessa logica RFC 6238 del server). */
+function totpCodeFor(secret: string, step: number): string {
+  const key = base32Decode(secret);
+  const msg = Buffer.alloc(8);
+  msg.writeBigUInt64BE(BigInt(step));
+  const digest = createHmac("sha1", key).update(msg).digest();
+  const offset = digest[digest.length - 1]! & 0x0f;
+  const code =
+    (((digest[offset]! & 0x7f) << 24) |
+      ((digest[offset + 1]! & 0xff) << 16) |
+      ((digest[offset + 2]! & 0xff) << 8) |
+      (digest[offset + 3]! & 0xff)) %
+    1_000_000;
+  return String(code).padStart(6, "0");
+}
 import { verifyPassword } from "@/lib/auth/password";
 import { attachGiftCard } from "@/lib/services/cart";
 import { issueGiftCard } from "@/lib/services/giftcards";
@@ -47,8 +79,40 @@ const BASE = {
   fulfillmentAt: "2030-01-01T10:00"
 };
 
+/** Rimuove i residui di run precedenti interrotte (rende il test rieseguibile sempre). */
+async function cleanupLeftovers() {
+  const testEmails = [
+    BASE.email,
+    "gift-test@example.com",
+    "ref-a@example.com",
+    "ref-b@example.com",
+    "acct-ent@example.com",
+    "acct-ent-2@example.com",
+    "acct-2fa@example.com"
+  ];
+  await prisma.cart.deleteMany({ where: { token: { startsWith: "verify-" } } });
+  const customers = await prisma.customer.findMany({
+    where: { email: { in: testEmails } },
+    select: { id: true }
+  });
+  const ids = customers.map((c) => c.id);
+  const orders = await prisma.order.findMany({
+    where: { OR: [{ email: { in: testEmails } }, { customerId: { in: ids } }] },
+    select: { id: true }
+  });
+  await prisma.discountRedemption.deleteMany({ where: { orderId: { in: orders.map((o) => o.id) } } });
+  await prisma.order.deleteMany({ where: { id: { in: orders.map((o) => o.id) } } });
+  await prisma.emailMessage.deleteMany({ where: { toEmail: { in: testEmails } } });
+  await prisma.referral.deleteMany({
+    where: { OR: [{ referrerId: { in: ids } }, { invitedCustomerId: { in: ids } }] }
+  });
+  await prisma.discountCode.deleteMany({ where: { customerId: { in: ids } } });
+  await prisma.customer.deleteMany({ where: { id: { in: ids } } });
+}
+
 async function main() {
   console.log("Verifica flussi critici multi-sede\n");
+  await cleanupLeftovers();
 
   const ottaviano = await prisma.location.findUnique({ where: { slug: "ottaviano" } });
   const merlata = await prisma.location.findUnique({ where: { slug: "merlata-bloom" } });
@@ -343,6 +407,139 @@ async function main() {
   await prisma.discountCode.deleteMany({ where: { customerId: { in: gcRefCustomerIds } } });
   await prisma.customer.deleteMany({ where: { id: { in: gcRefCustomerIds } } });
   await prisma.giftCard.deleteMany({ where: { id: { in: [gc.id, gc2.id] } } });
+
+  // ---- 11. Account enterprise: verifica email, preferenze, annullo cliente, GDPR ----
+  console.log("11. Account enterprise");
+  const entEmail = "acct-ent@example.com";
+  const entId = await registerCustomer({
+    email: entEmail,
+    password: "passwordlunga1",
+    firstName: "Enter",
+    lastName: "Prise",
+    marketingOptIn: false
+  });
+
+  // Verifica email: link → token → emailVerified
+  const verifyLink = await sendVerificationEmail(entId);
+  const verifyToken = verifyLink?.split("token=")[1] ?? "";
+  await consumeCustomerToken(verifyToken);
+  let entCustomer = await prisma.customer.findUnique({ where: { id: entId } });
+  check("email verificata via token", entCustomer?.emailVerified === true);
+  let tokenReplayBlocked = false;
+  try {
+    await consumeCustomerToken(verifyToken);
+  } catch (e) {
+    tokenReplayBlocked = e instanceof DomainError;
+  }
+  check("token verifica monouso", tokenReplayBlocked);
+
+  // Cambio email con conferma dal nuovo indirizzo
+  const entEmail2 = "acct-ent-2@example.com";
+  const changeLink = await requestEmailChange(entId, entEmail2);
+  await consumeCustomerToken(changeLink.split("token=")[1] ?? "");
+  entCustomer = await prisma.customer.findUnique({ where: { id: entId } });
+  check("cambio email confermato", entCustomer?.email === entEmail2 && entCustomer.emailVerified === true);
+
+  // Preferenze effettive: la scelta salvata vince sull'inferenza
+  await prisma.customer.update({
+    where: { id: entId },
+    data: { preferredLocationId: merlata.id, preferredFulfillment: "DELIVERY" }
+  });
+  check("preferenza modalità salvata vince", (await getEffectiveFulfillmentPreference(entId)) === "DELIVERY");
+
+  // Annullo ordine lato cliente: stock ripristinato
+  const stockBeforeEnt = (await prisma.storeVariant.findUnique({ where: { id: sv.id } }))!.stockQty;
+  const tokenEnt = `verify-ent-${sv.id.slice(0, 8)}`;
+  const cartEnt = await getOrCreateCartForLocation(tokenEnt, ottaviano.id);
+  await addItemToCart(cartEnt.id, sv.id, 2);
+  const freshEnt = await getCartByToken(tokenEnt);
+  const entOrder = await placeOrder(freshEnt!, { ...BASE, email: entEmail2, firstName: "Enter", lastName: "Prise" });
+  const entOrderRow = await prisma.order.findUnique({ where: { code: entOrder.code }, select: { id: true } });
+  const stockDuringEnt = (await prisma.storeVariant.findUnique({ where: { id: sv.id } }))!.stockQty;
+  await transitionOrder(entOrderRow!.id, "CANCELLED", entEmail2, { note: "Annullato dal cliente (test)." });
+  const stockAfterEnt = (await prisma.storeVariant.findUnique({ where: { id: sv.id } }))!.stockQty;
+  check("annullo cliente ripristina stock", stockDuringEnt === stockBeforeEnt - 2 && stockAfterEnt === stockBeforeEnt);
+
+  // GDPR: export completo
+  const exported = await exportCustomerData(entId);
+  check(
+    "export dati completo",
+    exported.profile.email === entEmail2 && exported.orders.length === 1 && exported.orders[0]!.items.length === 1
+  );
+
+  // GDPR: eliminazione → anonimizzazione, ordini conservati
+  await deleteCustomerAccount(entId);
+  entCustomer = await prisma.customer.findUnique({ where: { id: entId } });
+  const entOrdersKept = await prisma.order.count({ where: { customerId: entId } });
+  check(
+    "account anonimizzato e ordini conservati",
+    entCustomer?.anonymizedAt !== null &&
+      entCustomer?.passwordHash === null &&
+      entCustomer?.email.endsWith(".invalid") === true &&
+      entOrdersKept === 1
+  );
+  let exportAfterDeleteBlocked = false;
+  try {
+    await exportCustomerData(entId);
+  } catch (e) {
+    exportAfterDeleteBlocked = e instanceof DomainError;
+  }
+  check("export bloccato dopo eliminazione", exportAfterDeleteBlocked);
+
+  // ---- 12. 2FA TOTP: enrollment, anti-replay, backup code monouso ----
+  console.log("12. 2FA TOTP");
+  const totpEmail = "acct-2fa@example.com";
+  const totpId = await registerCustomer({
+    email: totpEmail,
+    password: "passwordlunga1",
+    firstName: "Due",
+    lastName: "Fattori",
+    marketingOptIn: false
+  });
+
+  const { secret } = await startTotpEnrollment(totpId);
+  check("codice errato rifiutato in conferma", await confirmTotpEnrollment(totpId, "000000").then(() => false).catch((e) => e instanceof DomainError));
+  const step0 = currentTotpStep();
+  const goodCode = totpCodeFor(secret, step0);
+  check("verifyTotpCode accetta il codice corrente", verifyTotpCode(secret, goodCode) !== null);
+  const backupCodesList = await confirmTotpEnrollment(totpId, totpCodeFor(secret, step0));
+  const totpCustomer = await prisma.customer.findUnique({ where: { id: totpId } });
+  check("2FA attivata con 10 backup codes", totpCustomer?.totpEnabledAt !== null && backupCodesList.length === 10);
+
+  // Anti-replay: lo stesso step usato per la conferma non è riutilizzabile al login
+  check("anti-replay stesso step", (await verifySecondFactor(totpId, totpCodeFor(secret, step0))) === false);
+  check("step successivo accettato", (await verifySecondFactor(totpId, totpCodeFor(secret, step0 + 1))) === true);
+
+  // Backup code: monouso
+  const oneBackup = backupCodesList[0]!;
+  check("backup code valido", (await verifySecondFactor(totpId, oneBackup)) === true);
+  check("backup code monouso", (await verifySecondFactor(totpId, oneBackup)) === false);
+
+  // Disattivazione con un secondo backup code (il TOTP corrente è già stato consumato dall'anti-replay)
+  await disableTotp(totpId, backupCodesList[1]!);
+  const totpAfter = await prisma.customer.findUnique({ where: { id: totpId } });
+  check(
+    "2FA disattivata e ripulita",
+    totpAfter?.totpSecret === null &&
+      totpAfter?.totpEnabledAt === null &&
+      (await prisma.customerBackupCode.count({ where: { customerId: totpId } })) === 0
+  );
+
+  // Pulizia sezione 12
+  await prisma.emailMessage.deleteMany({ where: { toEmail: totpEmail } });
+  await prisma.referral.deleteMany({ where: { OR: [{ referrerId: totpId }, { invitedCustomerId: totpId }] } });
+  await prisma.discountCode.deleteMany({ where: { customerId: totpId } });
+  await prisma.customer.deleteMany({ where: { id: totpId } });
+
+  // Pulizia sezione 11
+  const entOrders = await prisma.order.findMany({ where: { customerId: entId }, select: { id: true } });
+  await prisma.discountRedemption.deleteMany({ where: { orderId: { in: entOrders.map((o) => o.id) } } });
+  await prisma.order.deleteMany({ where: { customerId: entId } });
+  await prisma.emailMessage.deleteMany({ where: { toEmail: { in: [entEmail, entEmail2] } } });
+  await prisma.referral.deleteMany({ where: { OR: [{ referrerId: entId }, { invitedCustomerId: entId }] } });
+  await prisma.discountCode.deleteMany({ where: { customerId: entId } });
+  await prisma.customer.deleteMany({ where: { id: entId } });
+  await prisma.stockMovement.deleteMany({ where: { storeVariantId: sv.id, reference: entOrder.code } });
 
   // ---- Pulizia ----
   console.log("\nPulizia dati di test…");

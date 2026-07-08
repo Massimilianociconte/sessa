@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AccountInfoGrid, AccountInfoTile, AccountPageIntro, AccountPanel } from "@/components/account/AccountUi";
 import { OrderStatusBadge, PaymentStatusBadge } from "@/components/admin/StatusBadge";
+import { cancelCustomerOrderAction } from "@/lib/actions/account/orders";
 import { reorderAction } from "@/lib/actions/account/reorder";
 import {
   FULFILLMENT_LABELS,
@@ -35,15 +36,18 @@ function completedSteps(status: string, paymentStatus: string) {
 }
 
 export default async function AccountOrderDetailPage({
-  params
+  params,
+  searchParams
 }: {
   params: Promise<{ code: string }>;
+  searchParams: Promise<{ msg?: string; err?: string }>;
 }) {
-  const [{ code }, customer] = await Promise.all([params, requireCustomer()]);
+  const [{ code }, { msg, err }, customer] = await Promise.all([params, searchParams, requireCustomer()]);
   const order = await getCustomerOrderByCode(customer.id, code);
   if (!order) notFound();
 
   const isPickup = order.fulfillmentType === "PICKUP";
+  const cancellable = order.status === "PENDING_PAYMENT" || order.status === "PAID";
   const steps = completedSteps(order.status, order.paymentStatus);
   const shippingAddress = [order.shipLine1, order.shipLine2, `${order.shipPostalCode} ${order.shipCity}`.trim(), order.shipProvince]
     .filter(Boolean)
@@ -65,6 +69,9 @@ export default async function AccountOrderDetailPage({
         <OrderStatusBadge status={order.status} />
         <PaymentStatusBadge status={order.paymentStatus} />
       </AccountPageIntro>
+
+      {msg && <p className="rounded-xl bg-brilliant/10 px-4 py-3 text-sm font-semibold text-emerald-800">{decodeURIComponent(msg)}</p>}
+      {err && <p className="rounded-xl bg-terracotta/10 px-4 py-3 text-sm font-semibold text-terracotta">{decodeURIComponent(err)}</p>}
 
       <AccountInfoGrid>
         <AccountInfoTile
@@ -187,7 +194,21 @@ export default async function AccountOrderDetailPage({
         <Link href={`/ordine/${order.code}?t=${order.publicToken}`} className="btn-secondary">
           Apri ricevuta
         </Link>
+        {cancellable && (
+          <form action={cancelCustomerOrderAction}>
+            <input type="hidden" name="code" value={order.code} />
+            <button type="submit" className="btn-ghost !text-terracotta">
+              Annulla ordine
+            </button>
+          </form>
+        )}
       </div>
+      {cancellable && (
+        <p className="text-xs text-ink/45">
+          Puoi annullare finché la sede non inizia la preparazione. Lo stock viene ripristinato subito
+          {order.paymentStatus === "PAID" ? " e il pagamento verrà rimborsato dalla sede" : ""}.
+        </p>
+      )}
     </div>
   );
 }

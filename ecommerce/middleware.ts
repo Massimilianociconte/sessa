@@ -12,7 +12,8 @@ const PUBLIC_ACCOUNT = new Set([
   "/account/login",
   "/account/registrati",
   "/account/recupera",
-  "/account/reset"
+  "/account/reset",
+  "/account/verifica-email" // il token nel link è l'autenticazione
 ]);
 
 export function middleware(request: NextRequest) {
@@ -20,7 +21,9 @@ export function middleware(request: NextRequest) {
 
   // Area gestionale
   if (pathname.startsWith("/admin")) {
-    if (pathname === "/admin/login") return NextResponse.next();
+    // /admin/setup è il bootstrap del primo account: si autodisattiva a DB
+    // (redirect a login se esiste già un admin) + token env in produzione.
+    if (pathname === "/admin/login" || pathname === "/admin/setup") return NextResponse.next();
     if (!request.cookies.has(SESSION_COOKIE)) {
       return NextResponse.redirect(new URL("/admin/login", request.url));
     }

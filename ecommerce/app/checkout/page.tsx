@@ -8,7 +8,7 @@ import { formatCents } from "@/lib/money";
 import { isStripeConfigured } from "@/lib/payments";
 import { getCartGiftCard } from "@/lib/services/cart";
 import { getCurrentCartView } from "@/lib/services/cart-session";
-import { listAddresses } from "@/lib/services/customer-account";
+import { getEffectiveFulfillmentPreference, listAddresses } from "@/lib/services/customer-account";
 import { quoteRatesForCountry } from "@/lib/services/shipping";
 
 export const dynamic = "force-dynamic";
@@ -38,7 +38,9 @@ export default async function CheckoutPage() {
     name: r.name,
     effectiveCents: r.effectiveCents
   }));
-  const addresses: SavedAddress[] = customer ? await listAddresses(customer.id) : [];
+  const [addresses, fulfillmentPreference] = customer
+    ? await Promise.all([listAddresses(customer.id), getEffectiveFulfillmentPreference(customer.id)])
+    : [[] as SavedAddress[], null];
   const cartGiftCard = await getCartGiftCard(view.cart, customer?.id);
   const giftCard = cartGiftCard && cartGiftCard.valid ? { code: cartGiftCard.code, balanceCents: cartGiftCard.balanceCents } : null;
   const now = new Date().getTime();
@@ -104,6 +106,11 @@ export default async function CheckoutPage() {
           stripeEnabled={isStripeConfigured()}
           minWhen={minWhen}
           defaultWhen={defaultWhen}
+          preferredFulfillment={
+            fulfillmentPreference === "PICKUP" || fulfillmentPreference === "DELIVERY"
+              ? fulfillmentPreference
+              : null
+          }
         />
       </main>
       <Footer />

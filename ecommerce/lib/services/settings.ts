@@ -1,8 +1,18 @@
 import { prisma } from "@/lib/db";
 
-/** Impostazioni chiave/valore con valori JSON tipizzati dal chiamante. */
+/**
+ * Impostazioni chiave/valore con valori JSON tipizzati dal chiamante.
+ * Letture FAULT-TOLERANT: se il database non è raggiungibile (build della 404,
+ * hiccup transitorio) l'interfaccia degrada ai default invece di rompere la pagina.
+ * Le scritture (setSetting) restano rigorose e propagano gli errori.
+ */
 export async function getSetting<T>(key: string, fallback: T): Promise<T> {
-  const row = await prisma.setting.findUnique({ where: { key } });
+  let row: { value: string } | null = null;
+  try {
+    row = await prisma.setting.findUnique({ where: { key } });
+  } catch {
+    return fallback;
+  }
   if (!row) return fallback;
   try {
     return JSON.parse(row.value) as T;
@@ -12,7 +22,12 @@ export async function getSetting<T>(key: string, fallback: T): Promise<T> {
 }
 
 export async function getSettings(keys: string[]): Promise<Record<string, unknown>> {
-  const rows = await prisma.setting.findMany({ where: { key: { in: keys } } });
+  let rows: { key: string; value: string }[] = [];
+  try {
+    rows = await prisma.setting.findMany({ where: { key: { in: keys } } });
+  } catch {
+    return {};
+  }
   const out: Record<string, unknown> = {};
   for (const row of rows) {
     try {

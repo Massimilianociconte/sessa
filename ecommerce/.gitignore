@@ -12,3 +12,4 @@ prisma/dev.db-journal
 # env
 .env
 .env.local
+.netlify

@@ -217,7 +217,11 @@ export async function getCustomerPreferenceSnapshot(customerId: string) {
         email: true,
         phone: true,
         marketingOptIn: true,
-        emailVerified: true
+        emailVerified: true,
+        preferredLocationId: true,
+        preferredFulfillment: true,
+        birthday: true,
+        preferredLocation: { select: { id: true, name: true, slug: true, city: true, isActive: true } }
       }
     }),
     prisma.address.findFirst({
@@ -236,14 +240,37 @@ export async function getCustomerPreferenceSnapshot(customerId: string) {
     })
   ]);
 
+  // Risoluzione preferenza: quella salvata dal cliente vince; l'ultimo ordine è il fallback.
+  const savedLocation = customer?.preferredLocation?.isActive ? customer.preferredLocation : null;
+  const effectiveLocation = savedLocation ?? latestOrder?.location ?? null;
+  const effectiveFulfillment = customer?.preferredFulfillment ?? latestOrder?.fulfillmentType ?? null;
+
   return {
     customer,
     defaultAddress,
     latestOrder,
+    savedLocation,
     inferredLocation: latestOrder?.location ?? null,
     inferredFulfillmentType: latestOrder?.fulfillmentType ?? null,
+    effectiveLocation,
+    effectiveFulfillment,
     locations
   };
+}
+
+/** Preferenza effettiva per il checkout (salvata, altrimenti dedotta dall'ultimo ordine). */
+export async function getEffectiveFulfillmentPreference(customerId: string): Promise<string | null> {
+  const customer = await prisma.customer.findUnique({
+    where: { id: customerId },
+    select: { preferredFulfillment: true }
+  });
+  if (customer?.preferredFulfillment) return customer.preferredFulfillment;
+  const lastOrder = await prisma.order.findFirst({
+    where: { customerId },
+    orderBy: { placedAt: "desc" },
+    select: { fulfillmentType: true }
+  });
+  return lastOrder?.fulfillmentType ?? null;
 }
 
 export async function createAddress(

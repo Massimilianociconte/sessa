@@ -4,7 +4,14 @@ import {
   deleteShippingRateAction,
   updateShippingRateAction
 } from "@/lib/actions/admin/shipping";
-import { changeOwnPasswordAction, saveStoreSettingsAction } from "@/lib/actions/admin/settings";
+import {
+  changeOwnPasswordAction,
+  createAdminUserAction,
+  resetAdminUserPasswordAction,
+  saveStoreSettingsAction,
+  toggleAdminUserAction
+} from "@/lib/actions/admin/settings";
+import { requireAdmin } from "@/lib/auth/session";
 import { prisma } from "@/lib/db";
 import { getSettings } from "@/lib/services/settings";
 
@@ -18,7 +25,9 @@ export default async function AdminSettingsPage({
   searchParams: Promise<{ msg?: string; err?: string }>;
 }) {
   const { msg, err } = await searchParams;
-  const [settings, zones] = await Promise.all([
+  const currentUser = await requireAdmin();
+  const isOwner = currentUser.role === "OWNER";
+  const [settings, zones, adminUsers] = await Promise.all([
     getSettings([
       "store.name",
       "store.email",
@@ -30,7 +39,13 @@ export default async function AdminSettingsPage({
     prisma.shippingZone.findMany({
       include: { rates: { orderBy: { position: "asc" } } },
       orderBy: { position: "asc" }
-    })
+    }),
+    isOwner
+      ? prisma.adminUser.findMany({
+          orderBy: [{ role: "asc" }, { createdAt: "asc" }],
+          select: { id: true, name: true, email: true, role: true, isActive: true, lastLoginAt: true }
+        })
+      : Promise.resolve([])
   ]);
 
   const toEuro = (cents: number) => (cents / 100).toFixed(2).replace(".", ",");
@@ -230,6 +245,97 @@ export default async function AdminSettingsPage({
               </button>
             </form>
           </section>
+
+          {isOwner && (
+            <section className="card p-6">
+              <h2 className="mb-1 font-serif text-xl font-semibold">Utenti gestionale</h2>
+              <p className="mb-4 text-xs text-ink/50">
+                Solo il proprietario vede questa sezione. Disattivare un utente revoca subito le sue sessioni.
+              </p>
+
+              <ul className="space-y-3">
+                {adminUsers.map((adminUser) => (
+                  <li key={adminUser.id} className="rounded-2xl border border-ink/10 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="font-semibold">
+                          {adminUser.name}{" "}
+                          <span className={`badge ml-1 ${adminUser.role === "OWNER" ? "bg-terracotta/15 text-terracotta" : "bg-cream text-ink/60"}`}>
+                            {adminUser.role}
+                          </span>
+                          {!adminUser.isActive && <span className="badge ml-1 bg-ink/10 text-ink/50">Disattivato</span>}
+                        </p>
+                        <p className="text-xs text-ink/50">
+                          {adminUser.email}
+                          {adminUser.lastLoginAt &&
+                            ` · ultimo accesso ${adminUser.lastLoginAt.toLocaleString("it-IT", { dateStyle: "short", timeStyle: "short" })}`}
+                        </p>
+                      </div>
+                      {adminUser.role !== "OWNER" && (
+                        <form action={toggleAdminUserAction}>
+                          <input type="hidden" name="userId" value={adminUser.id} />
+                          <button type="submit" className="btn-ghost text-xs">
+                            {adminUser.isActive ? "Disattiva" : "Riattiva"}
+                          </button>
+                        </form>
+                      )}
+                    </div>
+                    {adminUser.role !== "OWNER" && (
+                      <details className="mt-2">
+                        <summary className="cursor-pointer text-xs font-semibold text-ink/50">
+                          Reimposta password
+                        </summary>
+                        <form action={resetAdminUserPasswordAction} className="mt-2 flex flex-wrap items-end gap-2">
+                          <input type="hidden" name="userId" value={adminUser.id} />
+                          <div className="min-w-56 flex-1">
+                            <label className="label-field">Nuova password (min 12)</label>
+                            <input name="password" type="password" required minLength={12} autoComplete="new-password" className="input-field" />
+                          </div>
+                          <button type="submit" className="btn-secondary !py-2 text-xs">
+                            Reimposta
+                          </button>
+                        </form>
+                      </details>
+                    )}
+                  </li>
+                ))}
+              </ul>
+
+              <details className="mt-5">
+                <summary className="cursor-pointer text-sm font-semibold text-terracotta">
+                  + Aggiungi utente
+                </summary>
+                <form action={createAdminUserAction} className="mt-3 space-y-3">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="label-field">Nome e cognome</label>
+                      <input name="name" required autoComplete="off" className="input-field" />
+                    </div>
+                    <div>
+                      <label className="label-field">Email</label>
+                      <input name="email" type="email" required autoComplete="off" className="input-field" />
+                    </div>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div>
+                      <label className="label-field">Password iniziale (min 12)</label>
+                      <input name="password" type="password" required minLength={12} autoComplete="new-password" className="input-field" />
+                    </div>
+                    <div>
+                      <label className="label-field">Ruolo</label>
+                      <select name="role" className="input-field" defaultValue="STAFF">
+                        <option value="STAFF">Staff (operativo)</option>
+                        <option value="ADMIN">Admin (completo)</option>
+                      </select>
+                    </div>
+                  </div>
+                  <button type="submit" className="btn-primary">
+                    Crea utente
+                  </button>
+                </form>
+              </details>
+            </section>
+          )}
         </div>
       </div>
     </>

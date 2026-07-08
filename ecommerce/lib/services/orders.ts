@@ -27,10 +27,14 @@ export type OrderFilter = {
   paymentMethod?: string;
   fulfillmentType?: string;
   discountCode?: string;
+  placedFrom?: Date; // ordini piazzati da (incluso)
+  placedTo?: Date; // ordini piazzati fino a (escluso: passare il giorno dopo)
+  fulfillmentOn?: Date; // giorno di ritiro/consegna richiesto
+  page?: number; // 1-based
   take?: number;
 };
 
-export async function listOrders(filter?: OrderFilter) {
+export function buildOrderWhere(filter?: OrderFilter): Prisma.OrderWhereInput {
   const where: Prisma.OrderWhereInput = {};
   if (filter?.status) where.status = filter.status;
   if (filter?.locationId) where.locationId = filter.locationId;
@@ -38,6 +42,21 @@ export async function listOrders(filter?: OrderFilter) {
   if (filter?.paymentMethod) where.paymentMethod = filter.paymentMethod;
   if (filter?.fulfillmentType) where.fulfillmentType = filter.fulfillmentType;
   if (filter?.discountCode) where.discountCodeSnapshot = { contains: filter.discountCode.toUpperCase() };
+  if (filter?.placedFrom || filter?.placedTo) {
+    where.placedAt = {
+      ...(filter.placedFrom ? { gte: filter.placedFrom } : {}),
+      ...(filter.placedTo ? { lt: filter.placedTo } : {})
+    };
+  }
+  if (filter?.fulfillmentOn) {
+    const dayStart = new Date(
+      filter.fulfillmentOn.getFullYear(),
+      filter.fulfillmentOn.getMonth(),
+      filter.fulfillmentOn.getDate()
+    );
+    const dayEnd = new Date(dayStart.getTime() + 24 * 60 * 60 * 1000);
+    where.fulfillmentAt = { gte: dayStart, lt: dayEnd };
+  }
   if (filter?.query) {
     const q = filter.query.trim();
     where.OR = [
@@ -55,11 +74,56 @@ export async function listOrders(filter?: OrderFilter) {
       { referralCodeSnapshot: { contains: q.toUpperCase() } }
     ];
   }
+  return where;
+}
+
+export async function listOrders(filter?: OrderFilter) {
+  const where = buildOrderWhere(filter);
+  const take = filter?.take ?? 50;
+  const page = Math.max(1, filter?.page ?? 1);
+  const [orders, total] = await Promise.all([
+    prisma.order.findMany({
+      where,
+      include: { items: true, location: { select: { name: true } } },
+      orderBy: { placedAt: "desc" },
+      skip: (page - 1) * take,
+      take
+    }),
+    prisma.order.count({ where })
+  ]);
+  return { orders, total, page, pageCount: Math.max(1, Math.ceil(total / take)), take };
+}
+
+/** Aggregati sull'INTERO filtro (non solo la pagina corrente) per i KPI operativi. */
+export async function orderFilterStats(filter?: OrderFilter) {
+  const where = buildOrderWhere(filter);
+  const [paid, failed, pickup, total] = await Promise.all([
+    prisma.order.aggregate({
+      _sum: { totalCents: true },
+      _count: { _all: true },
+      where: { ...where, paymentStatus: "PAID" }
+    }),
+    prisma.order.count({ where: { ...where, paymentStatus: "FAILED" } }),
+    prisma.order.count({ where: { ...where, fulfillmentType: "PICKUP" } }),
+    prisma.order.count({ where })
+  ]);
+  return {
+    total,
+    paidCount: paid._count._all,
+    revenueCents: paid._sum.totalCents ?? 0,
+    failedCount: failed,
+    pickupCount: pickup,
+    deliveryCount: total - pickup
+  };
+}
+
+/** Export operativo: tutti gli ordini del filtro (cap alto di sicurezza), righe incluse. */
+export async function listOrdersForExport(filter?: OrderFilter) {
   return prisma.order.findMany({
-    where,
+    where: buildOrderWhere(filter),
     include: { items: true, location: { select: { name: true } } },
     orderBy: { placedAt: "desc" },
-    take: filter?.take ?? 100
+    take: 5000
   });
 }
 

@@ -22,6 +22,8 @@ import {
   createResetToken,
   registerCustomer
 } from "@/lib/services/customer-account";
+import { sendVerificationEmail } from "@/lib/services/customer-verification";
+import { verifySecondFactor } from "@/lib/services/customer-2fa";
 import { enqueueEmail } from "@/lib/services/email";
 import { SITE_URL } from "@/lib/site";
 import {
@@ -31,7 +33,11 @@ import {
   resetSchema
 } from "@/lib/validation";
 
-export type AuthState = { error: string | null };
+export type AuthState = {
+  error: string | null;
+  /** true quando l'account ha la 2FA attiva: la form deve chiedere il codice. */
+  needsTotp?: boolean;
+};
 
 async function clientIp(): Promise<string> {
   const h = await headers();
@@ -73,6 +79,9 @@ export async function registerCustomerAction(_prev: AuthState, formData: FormDat
     cookieStore.delete(REFERRAL_COOKIE);
   }
 
+  // Verifica indirizzo: parte subito, ma la registrazione non fallisce se l'invio ha problemi.
+  await sendVerificationEmail(customerId).catch(() => null);
+
   await createCustomerSession(customerId);
   redirect("/account");
 }
@@ -96,6 +105,27 @@ export async function loginCustomerAction(_prev: AuthState, formData: FormData):
     registerFailedAttempt(rateKey);
     return { error: "Credenziali non valide." };
   }
+
+  // Secondo fattore: se attivo, la password da sola non basta.
+  if (customer.totpEnabledAt) {
+    const totpCode = String(formData.get("totp") ?? "").trim();
+    if (!totpCode) {
+      // Password corretta → la form mostra il campo codice (nessuna sessione creata).
+      return { error: null, needsTotp: true };
+    }
+    const totpKey = `cust-totp:${await clientIp()}:${customer.id}`;
+    const totpBlocked = isRateLimited(totpKey);
+    if (totpBlocked !== null) {
+      const minutes = Math.ceil(totpBlocked / 60000);
+      return { error: `Troppi codici errati. Riprova tra ${minutes} minut${minutes === 1 ? "o" : "i"}.`, needsTotp: true };
+    }
+    if (!(await verifySecondFactor(customer.id, totpCode))) {
+      registerFailedAttempt(totpKey);
+      return { error: "Codice di verifica non valido.", needsTotp: true };
+    }
+    clearAttempts(totpKey);
+  }
+
   clearAttempts(rateKey);
   await pruneExpiredCustomerSessions();
   const session = await createCustomerSession(customer.id);

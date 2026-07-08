@@ -55,6 +55,16 @@ export default async function AccountOverviewPage() {
         </Link>
       </AccountPageIntro>
 
+      {customer && !customer.emailVerified && (
+        <p className="rounded-xl bg-majolica/20 px-4 py-3 text-sm font-semibold text-ink/80">
+          La tua email non è ancora verificata.{" "}
+          <Link href="/account/profilo" className="text-terracotta underline">
+            Verifica ora
+          </Link>{" "}
+          per proteggere recupero password e comunicazioni d'ordine.
+        </p>
+      )}
+
       <div className="account-metric-grid">
         <AccountMetricCard
           label="Ordini totali"

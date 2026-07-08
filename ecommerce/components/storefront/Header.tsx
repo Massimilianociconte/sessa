@@ -10,7 +10,11 @@ type HeaderLocationContext = {
 
 /** Header a nastro terracotta, coerente col sito vetrina. */
 export default async function Header({ currentLocation }: { currentLocation?: HeaderLocationContext }) {
-  const [cartView, customer] = await Promise.all([getCurrentCartView(), getSessionCustomer()]);
+  // Fault-tolerant: senza DB (prerender 404, hiccup) l'header degrada a "ospite, carrello vuoto".
+  const [cartView, customer] = await Promise.all([
+    getCurrentCartView().catch(() => null),
+    getSessionCustomer().catch(() => null)
+  ]);
   const count = cartView?.itemCount ?? 0;
 
   return (

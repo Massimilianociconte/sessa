@@ -1,10 +1,14 @@
 [build]
-  command = "npm run build"
+  command = "npx prisma generate && npm run build"
   publish = ".next"
 
 [build.environment]
   NODE_VERSION = "22"
   NEXT_TELEMETRY_DISABLED = "1"
+
+# Runtime Next.js ufficiale (App Router, Server Actions, middleware).
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
 
 # Netlify applica questi header agli asset serviti direttamente dalla propria CDN.
 # Le route dinamiche Next continuano a ricevere anche gli header definiti in next.config.mjs.

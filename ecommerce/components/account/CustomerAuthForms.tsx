@@ -29,9 +29,28 @@ export function CustomerLoginForm() {
         <label htmlFor="password" className="label-field">Password</label>
         <input id="password" name="password" type="password" required autoComplete="current-password" className="input-field" />
       </div>
+      {state.needsTotp && (
+        <div className="rounded-2xl border border-ceramic/30 bg-ceramic/5 p-4">
+          <label htmlFor="totp" className="label-field">Codice di verifica</label>
+          <input
+            id="totp"
+            name="totp"
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            placeholder="Codice a 6 cifre o codice di recupero"
+            required
+            autoFocus
+            className="input-field"
+          />
+          <p className="mt-2 text-xs text-ink/50">
+            Questo account è protetto dalla verifica in due passaggi: inserisci il codice
+            dell'app authenticator oppure un codice di recupero.
+          </p>
+        </div>
+      )}
       <ErrorBox error={state.error} />
       <button type="submit" disabled={pending} className="btn-primary w-full">
-        {pending ? "Accesso…" : "Accedi"}
+        {pending ? "Accesso…" : state.needsTotp ? "Verifica e accedi" : "Accedi"}
       </button>
     </form>
   );

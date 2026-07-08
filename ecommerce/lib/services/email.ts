@@ -13,7 +13,11 @@ export type EmailType =
   | "REFERRAL_WELCOME"
   | "REFERRAL_REWARD"
   | "SECURITY_LOGIN"
-  | "SECURITY_PASSWORD_CHANGED";
+  | "SECURITY_PASSWORD_CHANGED"
+  | "EMAIL_VERIFICATION"
+  | "EMAIL_CHANGE"
+  | "ACCOUNT_DELETED"
+  | "SECURITY_2FA";
 
 let transporter: nodemailer.Transporter | null = null;
 function getTransport(): nodemailer.Transporter | null {

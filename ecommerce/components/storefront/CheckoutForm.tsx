@@ -49,6 +49,8 @@ type Props = {
   stripeEnabled: boolean;
   minWhen: string;
   defaultWhen: string;
+  /** Preferenza salvata in area personale (o dedotta dall'ultimo ordine). */
+  preferredFulfillment?: "PICKUP" | "DELIVERY" | null;
 };
 
 function Field({
@@ -101,12 +103,16 @@ export default function CheckoutForm({
   giftCard,
   stripeEnabled,
   minWhen,
-  defaultWhen
+  defaultWhen,
+  preferredFulfillment
 }: Props) {
   const [state, formAction, pending] = useActionState(placeOrderAction, initialCheckoutState);
-  const [fulfillment, setFulfillment] = useState<"PICKUP" | "DELIVERY">(
-    location.pickupEnabled ? "PICKUP" : "DELIVERY"
-  );
+  const [fulfillment, setFulfillment] = useState<"PICKUP" | "DELIVERY">(() => {
+    // La preferenza del cliente vince, se la sede la supporta.
+    if (preferredFulfillment === "PICKUP" && location.pickupEnabled) return "PICKUP";
+    if (preferredFulfillment === "DELIVERY" && location.deliveryEnabled) return "DELIVERY";
+    return location.pickupEnabled ? "PICKUP" : "DELIVERY";
+  });
   const [rateId, setRateId] = useState(rates[0]?.id ?? "");
   const [paymentMethod, setPaymentMethod] = useState<"bank_transfer" | "cash_on_pickup" | "card">("bank_transfer");
   const trackedCheckoutStart = useRef(false);

@@ -9,17 +9,24 @@ import {
   PAYMENT_METHODS,
   PAYMENT_STATUS_LABELS,
   PAYMENT_STATUSES,
+  type FulfillmentType,
   type OrderStatus,
   type PaymentMethod,
   type PaymentStatus
 } from "@/lib/domain";
 import { prisma } from "@/lib/db";
 import { formatCents } from "@/lib/money";
-import { listOrders } from "@/lib/services/orders";
+import { listOrders, orderFilterStats, type OrderFilter } from "@/lib/services/orders";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = { title: "Ordini" };
+
+function parseDay(value?: string): Date | undefined {
+  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return undefined;
+  const date = new Date(`${value}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? undefined : date;
+}
 
 export default async function AdminOrdersPage({
   searchParams
@@ -32,6 +39,10 @@ export default async function AdminOrdersPage({
     metodo?: string;
     evasione?: string;
     codice?: string;
+    da?: string;
+    a?: string;
+    giorno?: string;
+    pagina?: string;
     msg?: string;
     err?: string;
   }>;
@@ -44,24 +55,59 @@ export default async function AdminOrdersPage({
   const paymentMethod = PAYMENT_METHODS.includes(sp.metodo as PaymentMethod) ? sp.metodo : undefined;
   const fulfillmentType = sp.evasione === "PICKUP" || sp.evasione === "DELIVERY" ? sp.evasione : undefined;
   const locationId = locations.find((l) => l.id === sp.sede)?.id;
+  const placedFrom = parseDay(sp.da);
+  const placedToDay = parseDay(sp.a);
+  const page = Math.max(1, Number.parseInt(sp.pagina ?? "1", 10) || 1);
 
-  const orders = await listOrders({
+  const filter: OrderFilter = {
     status,
     query: sp.q,
     locationId,
     paymentStatus,
     paymentMethod,
     fulfillmentType,
-    discountCode: sp.codice
-  });
-  const paidOrders = orders.filter((order) => order.paymentStatus === "PAID");
-  const failedOrders = orders.filter((order) => order.paymentStatus === "FAILED");
-  const pickupOrders = orders.filter((order) => order.fulfillmentType === "PICKUP");
-  const revenueCents = paidOrders.reduce((sum, order) => sum + order.totalCents, 0);
+    discountCode: sp.codice,
+    placedFrom,
+    placedTo: placedToDay ? new Date(placedToDay.getTime() + 24 * 60 * 60 * 1000) : undefined,
+    fulfillmentOn: parseDay(sp.giorno),
+    page
+  };
+  const [{ orders, total, pageCount }, stats] = await Promise.all([
+    listOrders(filter),
+    orderFilterStats(filter)
+  ]);
+
+  // Query string corrente (senza pagina) riusata per export e paginazione.
+  const currentParams = new URLSearchParams();
+  for (const [key, value] of Object.entries({
+    stato: sp.stato,
+    q: sp.q,
+    sede: sp.sede,
+    pagamento: sp.pagamento,
+    metodo: sp.metodo,
+    evasione: sp.evasione,
+    codice: sp.codice,
+    da: sp.da,
+    a: sp.a,
+    giorno: sp.giorno
+  })) {
+    if (value) currentParams.set(key, value);
+  }
+  const exportHref = `/admin/ordini/export${currentParams.size ? `?${currentParams.toString()}` : ""}`;
+  function pageHref(next: number) {
+    const params = new URLSearchParams(currentParams);
+    if (next > 1) params.set("pagina", String(next));
+    return `/admin/ordini${params.size ? `?${params.toString()}` : ""}`;
+  }
 
   return (
     <>
-      <h1 className="font-serif text-3xl font-semibold">Ordini</h1>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <h1 className="font-serif text-3xl font-semibold">Ordini</h1>
+        <a href={exportHref} className="btn-secondary" download>
+          Esporta CSV ({stats.total})
+        </a>
+      </div>
       <div className="mt-4">
         <Flash msg={sp.msg} err={sp.err} />
       </div>
@@ -69,20 +115,22 @@ export default async function AdminOrdersPage({
       <div className="mt-6 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div className="rounded-2xl border border-ink/10 bg-white p-4">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink/45">Ordini filtrati</p>
-          <p className="mt-1 font-serif text-3xl font-semibold">{orders.length}</p>
+          <p className="mt-1 font-serif text-3xl font-semibold">{stats.total}</p>
         </div>
         <div className="rounded-2xl border border-ink/10 bg-white p-4">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink/45">Incasso pagato</p>
-          <p className="mt-1 font-serif text-3xl font-semibold">{formatCents(revenueCents)}</p>
+          <p className="mt-1 font-serif text-3xl font-semibold">{formatCents(stats.revenueCents)}</p>
+          <p className="text-xs text-ink/40">{stats.paidCount} ordini pagati</p>
         </div>
         <div className="rounded-2xl border border-ink/10 bg-white p-4">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink/45">Da verificare</p>
-          <p className="mt-1 font-serif text-3xl font-semibold">{failedOrders.length}</p>
+          <p className="mt-1 font-serif text-3xl font-semibold">{stats.failedCount}</p>
+          <p className="text-xs text-ink/40">pagamenti falliti</p>
         </div>
         <div className="rounded-2xl border border-ink/10 bg-white p-4">
           <p className="text-xs font-semibold uppercase tracking-[0.18em] text-ink/45">Ritiro / consegna</p>
           <p className="mt-1 font-serif text-3xl font-semibold">
-            {pickupOrders.length} / {orders.length - pickupOrders.length}
+            {stats.pickupCount} / {stats.deliveryCount}
           </p>
         </div>
       </div>
@@ -148,7 +196,19 @@ export default async function AdminOrdersPage({
             <option value="DELIVERY">{FULFILLMENT_LABELS.DELIVERY}</option>
           </select>
         </div>
-        <div className="flex items-end gap-2 sm:col-span-2 lg:col-span-4">
+        <div>
+          <label className="label-field">Ritiro/consegna del</label>
+          <input type="date" name="giorno" defaultValue={sp.giorno} className="input-field" />
+        </div>
+        <div>
+          <label className="label-field">Ordinato dal</label>
+          <input type="date" name="da" defaultValue={sp.da} className="input-field" />
+        </div>
+        <div>
+          <label className="label-field">Ordinato fino al</label>
+          <input type="date" name="a" defaultValue={sp.a} className="input-field" />
+        </div>
+        <div className="flex items-end gap-2 sm:col-span-2 lg:col-span-2">
           <button type="submit" className="btn-primary">
             Filtra
           </button>
@@ -166,6 +226,7 @@ export default async function AdminOrdersPage({
               <th className="px-4 py-3">Data</th>
               <th className="px-4 py-3">Sede</th>
               <th className="px-4 py-3">Cliente</th>
+              <th className="px-4 py-3">Evasione</th>
               <th className="px-4 py-3">Pagamento</th>
               <th className="px-4 py-3">Stato</th>
               <th className="px-4 py-3 text-right">Totale</th>
@@ -174,7 +235,7 @@ export default async function AdminOrdersPage({
           <tbody>
             {orders.length === 0 && (
               <tr>
-                <td colSpan={7} className="px-4 py-10 text-center text-ink/50">
+                <td colSpan={8} className="px-4 py-10 text-center text-ink/50">
                   Nessun ordine trovato.
                 </td>
               </tr>
@@ -196,6 +257,16 @@ export default async function AdminOrdersPage({
                 </td>
                 <td className="px-4 py-3 text-xs text-ink/60">
                   <p className="font-semibold text-ink">
+                    {FULFILLMENT_LABELS[order.fulfillmentType as FulfillmentType] ?? order.fulfillmentType}
+                  </p>
+                  <p>
+                    {order.fulfillmentAt
+                      ? order.fulfillmentAt.toLocaleString("it-IT", { dateStyle: "short", timeStyle: "short" })
+                      : "Da concordare"}
+                  </p>
+                </td>
+                <td className="px-4 py-3 text-xs text-ink/60">
+                  <p className="font-semibold text-ink">
                     {PAYMENT_METHOD_LABELS[order.paymentMethod as PaymentMethod] ?? order.paymentMethod ?? "—"}
                   </p>
                   <p>{PAYMENT_STATUS_LABELS[order.paymentStatus as PaymentStatus] ?? order.paymentStatus}</p>
@@ -210,6 +281,30 @@ export default async function AdminOrdersPage({
           </tbody>
         </table>
       </div>
+
+      {pageCount > 1 && (
+        <nav className="mt-4 flex items-center justify-between text-sm" aria-label="Paginazione ordini">
+          <p className="text-ink/50">
+            Pagina {page} di {pageCount} · {total} ordini
+          </p>
+          <div className="flex gap-2">
+            {page > 1 ? (
+              <Link href={pageHref(page - 1)} className="btn-ghost">
+                ← Precedente
+              </Link>
+            ) : (
+              <span className="btn-ghost opacity-40">← Precedente</span>
+            )}
+            {page < pageCount ? (
+              <Link href={pageHref(page + 1)} className="btn-ghost">
+                Successiva →
+              </Link>
+            ) : (
+              <span className="btn-ghost opacity-40">Successiva →</span>
+            )}
+          </div>
+        </nav>
+      )}
     </>
   );
 }

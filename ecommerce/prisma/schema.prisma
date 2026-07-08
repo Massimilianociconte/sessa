@@ -11,7 +11,7 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "postgresql"
   url      = env("DATABASE_URL")
 }
 
@@ -38,6 +38,7 @@ model Location {
   carts           Cart[]
   orders          Order[]
   discountLinks   DiscountLocation[]
+  preferredBy     Customer[]         @relation("PreferredLocation")
   createdAt       DateTime           @default(now())
   updatedAt       DateTime           @updatedAt
 
@@ -210,10 +211,23 @@ model Customer {
   passwordHash   String? // null = ospite (checkout senza registrazione)
   emailVerified  Boolean              @default(false)
   referralCode   String?              @unique
+  // Preferenze effettive (usate da checkout/header; fallback: inferenza da ultimo ordine)
+  preferredLocationId   String?
+  preferredLocation     Location?    @relation("PreferredLocation", fields: [preferredLocationId], references: [id], onDelete: SetNull)
+  preferredFulfillment  String? // PICKUP | DELIVERY
+  birthday              DateTime?
+  // Account anonimizzato (GDPR): dati personali rimossi, ordini snapshot conservati
+  anonymizedAt          DateTime?
+  // 2FA TOTP (RFC 6238): secret base32; enabledAt null = non attiva (secret in attesa di conferma)
+  totpSecret            String?
+  totpEnabledAt         DateTime?
+  totpLastStep          Int? // anti-replay: ultimo time-step accettato
+  backupCodes           CustomerBackupCode[]
   orders         Order[]
   addresses      Address[]
   sessions       CustomerSession[]
   resetTokens    PasswordResetToken[]
+  actionTokens   CustomerToken[]
   redemptions    DiscountRedemption[]
   giftCards      GiftCard[]
   referralsMade  Referral[]           @relation("Referrer")
@@ -223,6 +237,35 @@ model Customer {
 
   @@index([createdAt])
   @@index([marketingOptIn])
+  @@index([preferredLocationId])
+}
+
+// Codici di recupero 2FA monouso (mostrati in chiaro solo alla generazione).
+model CustomerBackupCode {
+  id         String    @id @default(cuid())
+  customerId String
+  customer   Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  codeHash   String    @unique
+  usedAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([customerId])
+}
+
+// Token monouso per azioni sensibili account: verifica email e conferma cambio email.
+model CustomerToken {
+  id         String    @id @default(cuid())
+  tokenHash  String    @unique
+  customerId String
+  customer   Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  type       String // VERIFY_EMAIL | CHANGE_EMAIL
+  payload    String? // per CHANGE_EMAIL: la nuova email da confermare
+  expiresAt  DateTime
+  usedAt     DateTime?
+  createdAt  DateTime  @default(now())
+
+  @@index([customerId, type])
+  @@index([expiresAt])
 }
 
 model PasswordResetToken {

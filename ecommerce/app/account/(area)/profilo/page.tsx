@@ -3,6 +3,8 @@ import { requireCustomer } from "@/lib/auth/customer-session";
 import { AccountInfoGrid, AccountInfoTile, AccountPageIntro, AccountPanel } from "@/components/account/AccountUi";
 import {
   changeCustomerPasswordAction,
+  requestEmailChangeAction,
+  resendVerificationAction,
   updateProfileAction
 } from "@/lib/actions/account/profile";
 
@@ -52,8 +54,9 @@ export default async function AccountProfilePage({
             </div>
           </div>
           <div>
-            <label htmlFor="email" className="label-field">Email (non modificabile)</label>
+            <label htmlFor="email" className="label-field">Email</label>
             <input id="email" value={customer.email} disabled autoComplete="email" className="input-field bg-cream/60" />
+            <p className="mt-1 text-xs text-ink/45">Per cambiarla usa la sezione qui sotto: serve la conferma dal nuovo indirizzo.</p>
           </div>
           <div>
             <label htmlFor="phone" className="label-field">Telefono</label>
@@ -64,6 +67,38 @@ export default async function AccountProfilePage({
             Voglio ricevere novita, promozioni locali e comunicazioni Sessa.
           </label>
           <button type="submit" className="btn-primary">Salva dati</button>
+        </form>
+      </AccountPanel>
+
+      {!customer.emailVerified && (
+        <AccountPanel
+          eyebrow="Verifica"
+          title="Email da verificare"
+          description="Verificare l'email protegge il recupero password e sblocca le comunicazioni d'ordine affidabili."
+        >
+          <form action={resendVerificationAction}>
+            <button type="submit" className="btn-primary">Invia email di verifica</button>
+          </form>
+        </AccountPanel>
+      )}
+
+      <AccountPanel
+        eyebrow="Email"
+        title="Cambia email"
+        description="Ti inviamo un link di conferma al nuovo indirizzo; l'email attuale riceve un avviso. Il cambio avviene solo dopo la conferma."
+      >
+        <form action={requestEmailChangeAction} className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label htmlFor="newEmail" className="label-field">Nuova email</label>
+              <input id="newEmail" name="newEmail" type="email" required autoComplete="email" className="input-field" />
+            </div>
+            <div>
+              <label htmlFor="emailChangePassword" className="label-field">Password attuale</label>
+              <input id="emailChangePassword" name="password" type="password" required autoComplete="current-password" className="input-field" />
+            </div>
+          </div>
+          <button type="submit" className="btn-secondary">Richiedi cambio email</button>
         </form>
       </AccountPanel>
 

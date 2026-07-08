@@ -32,15 +32,38 @@ export async function adjustStock(
   await audit(actorEmail, "inventory.adjust", "StoreVariant", storeVariantId, { delta, reason, note });
 }
 
-export async function listInventory(locationId?: string) {
-  return prisma.storeVariant.findMany({
-    where: locationId ? { locationId } : undefined,
+export type InventoryFilter = {
+  locationId?: string;
+  query?: string; // nome prodotto, nome variante o SKU
+  lowOnly?: boolean; // solo varianti sotto soglia
+};
+
+export async function listInventory(filter?: InventoryFilter | string) {
+  // Retro-compatibile: accetta il vecchio parametro posizionale locationId.
+  const f: InventoryFilter = typeof filter === "string" ? { locationId: filter } : (filter ?? {});
+  const rows = await prisma.storeVariant.findMany({
+    where: {
+      ...(f.locationId ? { locationId: f.locationId } : {}),
+      ...(f.query
+        ? {
+            variant: {
+              OR: [
+                { name: { contains: f.query } },
+                { sku: { contains: f.query } },
+                { product: { name: { contains: f.query } } }
+              ]
+            }
+          }
+        : {})
+    },
     include: {
       location: { select: { name: true, slug: true } },
       variant: { include: { product: { select: { name: true, slug: true, status: true } } } }
     },
     orderBy: [{ location: { position: "asc" } }, { variant: { product: { position: "asc" } } }, { position: "asc" }]
   });
+  // SQLite/Prisma non confrontano due colonne in where: filtro applicativo.
+  return f.lowOnly ? rows.filter((sv) => sv.stockQty <= sv.lowStockThreshold) : rows;
 }
 
 export async function listRecentMovements(take = 50, locationId?: string) {

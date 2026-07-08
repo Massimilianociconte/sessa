@@ -14,39 +14,79 @@ export const metadata = { title: "Magazzino" };
 export default async function AdminInventoryPage({
   searchParams
 }: {
-  searchParams: Promise<{ sede?: string; msg?: string; err?: string }>;
+  searchParams: Promise<{ sede?: string; q?: string; soglia?: string; msg?: string; err?: string }>;
 }) {
-  const { sede, msg, err } = await searchParams;
+  const { sede, q, soglia, msg, err } = await searchParams;
   const locations = await prisma.location.findMany({ orderBy: { position: "asc" } });
   const locationId = locations.find((l) => l.id === sede)?.id;
+  const lowOnly = soglia === "1";
   const [variants, movements] = await Promise.all([
-    listInventory(locationId),
+    listInventory({ locationId, query: q, lowOnly }),
     listRecentMovements(40, locationId)
   ]);
-  const backParam = locationId ? `?sede=${locationId}` : "";
+  const backParams = new URLSearchParams();
+  if (locationId) backParams.set("sede", locationId);
+  if (q) backParams.set("q", q);
+  if (lowOnly) backParams.set("soglia", "1");
+  const backParam = backParams.size ? `?${backParams.toString()}` : "";
+  const exportHref = `/admin/magazzino/export${backParam}`;
+
+  function sedeHref(id?: string) {
+    const params = new URLSearchParams(backParams);
+    if (id) params.set("sede", id);
+    else params.delete("sede");
+    return `/admin/magazzino${params.size ? `?${params.toString()}` : ""}`;
+  }
 
   return (
     <>
-      <h1 className="font-serif text-3xl font-semibold">Magazzino</h1>
-      <p className="mt-1 text-sm text-ink/50">Stock per sede. Ogni variazione genera un movimento tracciato.</p>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="font-serif text-3xl font-semibold">Magazzino</h1>
+          <p className="mt-1 text-sm text-ink/50">Stock per sede. Ogni variazione genera un movimento tracciato.</p>
+        </div>
+        <a href={exportHref} className="btn-secondary" download>
+          Esporta CSV ({variants.length})
+        </a>
+      </div>
       <div className="mt-4">
         <Flash msg={msg} err={err} />
       </div>
 
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <Link href="/admin/magazzino" className={`badge ${!locationId ? "bg-terracotta text-ivory" : "bg-white text-ink/60"}`}>
+        <Link href={sedeHref()} className={`badge ${!locationId ? "bg-terracotta text-ivory" : "bg-white text-ink/60"}`}>
           Tutte le sedi
         </Link>
         {locations.map((l) => (
           <Link
             key={l.id}
-            href={`/admin/magazzino?sede=${l.id}`}
+            href={sedeHref(l.id)}
             className={`badge ${locationId === l.id ? "bg-terracotta text-ivory" : "bg-white text-ink/60"}`}
           >
             {l.name}
           </Link>
         ))}
       </div>
+
+      <form className="card mt-4 flex flex-wrap items-end gap-3 p-4">
+        {locationId && <input type="hidden" name="sede" value={locationId} />}
+        <div className="min-w-56 flex-1">
+          <label className="label-field">Cerca prodotto</label>
+          <input name="q" defaultValue={q} className="input-field" placeholder="Nome, variante o SKU" />
+        </div>
+        <label className="flex items-center gap-2 pb-2 text-sm font-semibold text-ink/70">
+          <input type="checkbox" name="soglia" value="1" defaultChecked={lowOnly} className="h-4 w-4" />
+          Solo sotto soglia
+        </label>
+        <button type="submit" className="btn-primary">
+          Filtra
+        </button>
+        {(q || lowOnly) && (
+          <Link href={`/admin/magazzino${locationId ? `?sede=${locationId}` : ""}`} className="btn-ghost text-sm">
+            Azzera
+          </Link>
+        )}
+      </form>
 
       <div className="card mt-6 overflow-x-auto">
         <table className="w-full text-sm">
