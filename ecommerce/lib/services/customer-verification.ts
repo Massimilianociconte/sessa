@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import { prisma } from "@/lib/db";
 import { DomainError } from "@/lib/domain";
-import { enqueueEmail } from "@/lib/services/email";
+import { enqueueEmail, type EmailDeliveryResult } from "@/lib/services/email";
 import { SITE_URL } from "@/lib/site";
 
 const VERIFY_TTL_MS = 24 * 60 * 60 * 1000; // 24 ore
@@ -34,8 +34,13 @@ async function issueToken(
   return token;
 }
 
+export type VerificationEmailResult = {
+  link: string;
+  delivery: EmailDeliveryResult;
+};
+
 /** Invia (o reinvia) l'email di verifica indirizzo. Ritorna il link (utile in dev senza SMTP). */
-export async function sendVerificationEmail(customerId: string): Promise<string | null> {
+export async function sendVerificationEmail(customerId: string): Promise<VerificationEmailResult | null> {
   const customer = await prisma.customer.findUnique({
     where: { id: customerId },
     select: { email: true, firstName: true, emailVerified: true, anonymizedAt: true }
@@ -45,13 +50,13 @@ export async function sendVerificationEmail(customerId: string): Promise<string 
 
   const token = await issueToken(customerId, "VERIFY_EMAIL", VERIFY_TTL_MS);
   const link = `${SITE_URL}/account/verifica-email?token=${token}`;
-  await enqueueEmail({
+  const delivery = await enqueueEmail({
     toEmail: customer.email,
     subject: "Conferma la tua email — Sessa 1930",
     type: "EMAIL_VERIFICATION",
     body: `Ciao ${customer.firstName},\n\nconferma il tuo indirizzo email aprendo questo link (valido 24 ore):\n${link}\n\nSe non hai creato tu l'account, ignora questa email.`
   });
-  return link;
+  return { link, delivery };
 }
 
 /** Consuma il token di verifica: marca l'email come verificata. */
@@ -70,7 +75,7 @@ export async function consumeVerifyEmailToken(token: string): Promise<void> {
  * Richiede il cambio email: il token viene spedito al NUOVO indirizzo; la vecchia
  * email riceve un avviso. Il cambio avviene solo alla conferma del link.
  */
-export async function requestEmailChange(customerId: string, newEmail: string): Promise<string> {
+export async function requestEmailChange(customerId: string, newEmail: string): Promise<VerificationEmailResult> {
   const email = newEmail.toLowerCase();
   const [customer, clash] = await Promise.all([
     prisma.customer.findUnique({
@@ -85,7 +90,7 @@ export async function requestEmailChange(customerId: string, newEmail: string): 
 
   const token = await issueToken(customerId, "CHANGE_EMAIL", CHANGE_TTL_MS, email);
   const link = `${SITE_URL}/account/verifica-email?token=${token}`;
-  await enqueueEmail({
+  const delivery = await enqueueEmail({
     toEmail: email,
     subject: "Conferma il cambio email — Sessa 1930",
     type: "EMAIL_CHANGE",
@@ -97,7 +102,7 @@ export async function requestEmailChange(customerId: string, newEmail: string): 
     type: "EMAIL_CHANGE",
     body: `Ciao ${customer.firstName},\n\nè stata richiesta la modifica dell'email del tuo account verso ${email}. Se non sei stato tu, cambia subito la password dalla sezione Sicurezza.`
   });
-  return link;
+  return { link, delivery };
 }
 
 /** Consuma il token di cambio email: sposta l'account sul nuovo indirizzo (già verificato dal click). */

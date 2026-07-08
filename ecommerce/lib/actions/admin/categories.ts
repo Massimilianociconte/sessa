@@ -6,6 +6,7 @@ import { requireAdmin } from "@/lib/auth/session";
 import { audit } from "@/lib/audit";
 import { categorySchema, formDataToObject } from "@/lib/validation";
 import { backWithError, backWithMessage, firstZodMessage, requireString } from "./helpers";
+import { invalidateMemo } from "@/lib/ttl-cache";
 
 const PATH = "/admin/categorie";
 
@@ -20,6 +21,7 @@ export async function createCategoryAction(formData: FormData): Promise<void> {
   if (exists) backWithError(PATH, "Slug già in uso.");
   const category = await prisma.category.create({ data: parsed.data });
   await audit(user.email, "category.create", "Category", category.id, parsed.data);
+  invalidateMemo("catalog:");
   revalidatePath("/", "layout");
   revalidatePath(PATH);
   backWithMessage(PATH, "Categoria creata.");
@@ -39,6 +41,7 @@ export async function updateCategoryAction(formData: FormData): Promise<void> {
   if (clash) backWithError(PATH, "Slug già in uso.");
   await prisma.category.update({ where: { id }, data: parsed.data });
   await audit(user.email, "category.update", "Category", id, parsed.data);
+  invalidateMemo("catalog:");
   revalidatePath("/", "layout");
   revalidatePath(PATH);
   backWithMessage(PATH, "Categoria aggiornata.");
@@ -53,6 +56,7 @@ export async function deleteCategoryAction(formData: FormData): Promise<void> {
   }
   await prisma.category.delete({ where: { id } });
   await audit(user.email, "category.delete", "Category", id);
+  invalidateMemo("catalog:");
   revalidatePath("/", "layout");
   revalidatePath(PATH);
   backWithMessage(PATH, "Categoria eliminata.");

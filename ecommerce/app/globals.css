@@ -2136,10 +2136,16 @@ canvas {
   pointer-events: none;
 }
 
-.not-found-art img {
+.not-found-art img,
+.not-found-art-img {
   width: 100%;
   border-radius: calc(clamp(24px, 3vw, 36px) - 0.55rem);
   box-shadow: inset 0 0 0 1px rgba(255, 247, 237, 0.5);
+}
+
+.not-found-art-img {
+  aspect-ratio: 4 / 3;
+  background: url("/images/404/sessa-ti-sei-perso.webp") center / cover no-repeat;
 }
 
 /* Drawer carrello -------------------------------------------------------- */
@@ -3264,3 +3270,407 @@ canvas {
 	    scroll-behavior: auto;
 	  }
 	}
+
+/* ==========================================================================
+   Autenticazione (login, registrazione, recupero, reset, gestionale)
+   ========================================================================== */
+
+.auth-page {
+  --auth-accent: var(--color-terracotta);
+  --auth-accent-dark: var(--color-terracotta-dark);
+  --auth-panel-glow: rgba(216, 90, 31, 0.14);
+  display: grid;
+  min-height: 100dvh;
+}
+
+.auth-page[data-variant="admin"] {
+  --auth-accent: var(--color-ceramic);
+  --auth-accent-dark: #16395a;
+  --auth-panel-glow: rgba(31, 78, 121, 0.14);
+}
+
+/* Pannello brand ---------------------------------------------------------- */
+.auth-brand {
+  position: relative;
+  overflow: hidden;
+  color: var(--color-ivory);
+  background:
+    radial-gradient(circle at 82% 12%, rgba(255, 255, 255, 0.14), transparent 42%),
+    radial-gradient(circle at 12% 88%, rgba(23, 20, 18, 0.28), transparent 52%),
+    linear-gradient(158deg, var(--auth-accent) 6%, var(--auth-accent-dark) 92%);
+}
+
+.auth-brand::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: url("/patterns/sessa-maiolica-orange.png");
+  background-size: 132px 136px;
+  opacity: 0.07;
+  mix-blend-mode: luminosity;
+  pointer-events: none;
+}
+
+.auth-page[data-variant="admin"] .auth-brand::before {
+  background-image: url("/patterns/sessa-maiolica-blue.png");
+}
+
+.auth-brand-inner {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+  padding: clamp(1.4rem, 4vw, 3.4rem);
+  max-width: 34rem;
+}
+
+.auth-brand-logo img {
+  height: clamp(2.4rem, 4.5vw, 3.3rem);
+  width: auto;
+}
+
+.auth-brand-kicker {
+  margin-top: clamp(0.8rem, 2vw, 2rem);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: rgba(255, 247, 237, 0.72);
+}
+
+.auth-brand-claim {
+  font-family: var(--font-serif);
+  font-size: clamp(1.9rem, 3.4vw, 3rem);
+  font-weight: 600;
+  line-height: 1.04;
+  text-wrap: balance;
+}
+
+.auth-brand-copy {
+  max-width: 26rem;
+  font-size: 0.95rem;
+  line-height: 1.7;
+  color: rgba(255, 247, 237, 0.82);
+}
+
+.auth-brand-highlights {
+  margin-top: clamp(0.6rem, 1.4vw, 1.4rem);
+  display: grid;
+  gap: 0.55rem;
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
+.auth-brand-highlights li {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.auth-brand-highlights svg {
+  flex: none;
+  padding: 3px;
+  width: 21px;
+  height: 21px;
+  border-radius: 999px;
+  background: rgba(255, 247, 237, 0.16);
+}
+
+.auth-brand-sticker {
+  position: absolute;
+  right: clamp(-2.4rem, -1vw, -0.8rem);
+  bottom: clamp(-2.6rem, -1.4vw, -1rem);
+  width: clamp(11rem, 17vw, 16rem);
+  transform: rotate(-8deg);
+  filter: drop-shadow(0 22px 34px rgba(23, 20, 18, 0.35));
+  pointer-events: none;
+}
+
+/* Colonna form ------------------------------------------------------------ */
+.auth-panel {
+  display: grid;
+  align-items: center;
+  justify-items: center;
+  padding: clamp(1.4rem, 4vw, 3.5rem) 1rem clamp(2.4rem, 5vw, 3.5rem);
+  background:
+    radial-gradient(circle at 88% 0%, var(--auth-panel-glow), transparent 38%),
+    linear-gradient(180deg, #fff7ed 0%, #faf6ef 70%, #fff7ed 100%);
+}
+
+.auth-panel-inner {
+  width: 100%;
+  max-width: 27.5rem;
+}
+
+.auth-head {
+  text-align: center;
+}
+
+.auth-eyebrow {
+  font-family: var(--font-script);
+  font-size: clamp(1.6rem, 3vw, 2rem);
+  line-height: 1;
+  color: var(--auth-accent);
+}
+
+.auth-title {
+  margin-top: 0.55rem;
+  font-family: var(--font-serif);
+  font-size: clamp(1.8rem, 3.6vw, 2.4rem);
+  font-weight: 600;
+  line-height: 1.08;
+  color: var(--color-ink);
+  text-wrap: balance;
+}
+
+.auth-subtitle {
+  margin: 0.7rem auto 0;
+  max-width: 24rem;
+  font-size: 0.9rem;
+  line-height: 1.65;
+  color: rgba(23, 20, 18, 0.6);
+}
+
+.auth-card {
+  margin-top: 1.5rem;
+  padding: clamp(1.3rem, 3vw, 1.9rem);
+  border-radius: 1.5rem;
+  border: 1px solid rgba(23, 20, 18, 0.08);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.9) inset,
+    0 24px 60px rgba(23, 20, 18, 0.1);
+  backdrop-filter: blur(6px);
+  animation: auth-card-in 0.5s cubic-bezier(0.22, 0.8, 0.3, 1) both;
+}
+
+.auth-card > * + * {
+  margin-top: 1rem;
+}
+
+@keyframes auth-card-in {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.auth-footer {
+  margin-top: 1.1rem;
+}
+
+.auth-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.875rem;
+  color: rgba(23, 20, 18, 0.65);
+}
+
+.auth-link-strong {
+  font-weight: 700;
+  color: var(--auth-accent, var(--color-terracotta));
+}
+
+.auth-link-strong:hover,
+.auth-link-soft:hover {
+  text-decoration: underline;
+}
+
+.auth-link-soft {
+  color: rgba(23, 20, 18, 0.5);
+}
+
+.auth-backlink {
+  margin-top: 1.6rem;
+  text-align: center;
+  font-size: 0.8rem;
+}
+
+.auth-backlink a {
+  color: rgba(23, 20, 18, 0.42);
+  transition: color 0.2s;
+}
+
+.auth-backlink a:hover {
+  color: var(--auth-accent);
+}
+
+/* Messaggi + campi --------------------------------------------------------- */
+.auth-notice {
+  display: block;
+  border-radius: 0.9rem;
+  padding: 0.7rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  background: rgba(8, 201, 99, 0.1);
+  color: #056d38;
+}
+
+.auth-notice[data-tone="warn"] {
+  background: rgba(216, 90, 31, 0.1);
+  color: var(--color-terracotta-dark);
+}
+
+.auth-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  border-radius: 0.9rem;
+  padding: 0.7rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  background: rgba(216, 90, 31, 0.1);
+  color: var(--color-terracotta-dark);
+}
+
+.auth-error svg {
+  flex: none;
+  margin-top: 1px;
+}
+
+.auth-totp-box {
+  border-radius: 1rem;
+  border: 1px solid rgba(31, 78, 121, 0.25);
+  background: rgba(31, 78, 121, 0.05);
+  padding: 1rem;
+}
+
+.auth-checkbox {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  font-size: 0.85rem;
+  line-height: 1.5;
+  color: rgba(23, 20, 18, 0.68);
+}
+
+.auth-checkbox input {
+  margin-top: 2px;
+  width: 1rem;
+  height: 1rem;
+}
+
+.password-field {
+  position: relative;
+}
+
+.password-field .input-field {
+  padding-right: 2.9rem;
+}
+
+.password-toggle {
+  position: absolute;
+  top: 50%;
+  right: 0.55rem;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  width: 2.1rem;
+  height: 2.1rem;
+  border-radius: 0.7rem;
+  color: rgba(23, 20, 18, 0.45);
+  transition: color 0.2s, background 0.2s;
+}
+
+.password-toggle:hover {
+  color: var(--color-ink);
+  background: rgba(23, 20, 18, 0.06);
+}
+
+/* Breakpoints -------------------------------------------------------------- */
+@media (min-width: 900px) {
+  .auth-page {
+    grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+  }
+
+  .auth-brand {
+    display: flex;
+    align-items: center;
+  }
+
+  .auth-head {
+    text-align: left;
+  }
+
+  .auth-subtitle {
+    margin-left: 0;
+  }
+}
+
+@media (max-width: 899px) {
+  .auth-brand-inner {
+    padding-bottom: 1.6rem;
+  }
+
+  .auth-brand-claim {
+    font-size: 1.45rem;
+  }
+
+  .auth-brand-copy,
+  .auth-brand-highlights {
+    display: none;
+  }
+
+  .auth-brand-sticker {
+    width: 7.5rem;
+    right: -1.2rem;
+    bottom: -1.6rem;
+    opacity: 0.9;
+  }
+
+  .auth-brand-kicker {
+    margin-top: 0.55rem;
+  }
+
+  .auth-panel {
+    margin-top: -1.1rem;
+    border-radius: 1.4rem 1.4rem 0 0;
+    position: relative;
+    z-index: 1;
+  }
+}
+
+/* Install PWA gestionale ---------------------------------------------------- */
+.admin-pwa-install-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+  width: 100%;
+  border-radius: 0.8rem;
+  border: 1px solid rgba(31, 78, 121, 0.3);
+  background: rgba(31, 78, 121, 0.06);
+  padding: 0.5rem 0.8rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--color-ceramic);
+  transition: background 0.2s, border-color 0.2s;
+}
+
+.admin-pwa-install-btn:hover {
+  background: rgba(31, 78, 121, 0.12);
+  border-color: var(--color-ceramic);
+}
+
+.admin-pwa-install-hint {
+  margin-top: 0.5rem;
+  border-radius: 0.7rem;
+  background: rgba(31, 78, 121, 0.07);
+  padding: 0.55rem 0.7rem;
+  font-size: 0.72rem;
+  line-height: 1.55;
+  color: rgba(23, 20, 18, 0.7);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-card {
+    animation: none;
+  }
+}

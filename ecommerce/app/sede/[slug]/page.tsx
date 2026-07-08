@@ -11,7 +11,7 @@ import { buildStoreJsonLd, buildStoreMetadata, getStoreSeo } from "@/lib/seo/ses
 import { CATALOG_OCCASIONS, listStoreCategories, listStoreProducts } from "@/lib/services/catalog";
 import { getActiveLocationBySlug, listActiveLocations } from "@/lib/services/locations";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 30;
 
 const CATEGORY_ACCENTS: Record<string, { color: string; tile: string }> = {
   terracotta: { color: "#d65a1f", tile: 'url("/patterns/sessa-maiolica-orange.png")' },

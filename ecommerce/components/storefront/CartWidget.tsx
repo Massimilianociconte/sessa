@@ -1,14 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { centsToAnalyticsValue, trackEcommerceEvent } from "@/lib/analytics";
 import type { CartDTO, CartLineDTO } from "@/lib/cart-types";
 import { EMPTY_CART } from "@/lib/cart-types";
 import { formatCents } from "@/lib/money";
-import { onCartChanged, onOpenCart } from "@/components/storefront/cart-events";
+import { notifyCartChanged, onCartChanged, onOpenCart } from "@/components/storefront/cart-events";
 
 type CartLocationContext = {
   slug: string;
@@ -22,7 +21,6 @@ export default function CartWidget({
   initialCount: number;
   currentLocation?: CartLocationContext;
 }) {
-  const router = useRouter();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const panelRef = useRef<HTMLElement>(null);
   const closeButtonRef = useRef<HTMLButtonElement>(null);
@@ -59,16 +57,44 @@ export default function CartWidget({
   }, [cart]);
 
   useEffect(() => {
-    const offOpen = onOpenCart(() => {
+    const offOpen = onOpenCart((nextCart) => {
       setOpen(true);
-      void fetchCart();
+      if (nextCart) setCart(nextCart);
+      else void fetchCart();
     });
-    const offChanged = onCartChanged(() => void fetchCart());
+    const offChanged = onCartChanged((nextCart) => {
+      if (nextCart) {
+        setCart(nextCart);
+        setError(null);
+      } else {
+        void fetchCart();
+      }
+    });
     return () => {
       offOpen();
       offChanged();
     };
   }, [fetchCart]);
+
+  useEffect(() => {
+    if (!mounted || cart) return;
+    let cancelled = false;
+    const warmCart = async () => {
+      try {
+        const res = await fetch("/api/cart", { cache: "no-store" });
+        if (!cancelled && res.ok) setCart((await res.json()) as CartDTO);
+      } catch {
+        // Warm-up best-effort: non deve bloccare il rendering o sporcare la UI.
+      }
+    };
+    const idle = window.requestIdleCallback?.(() => void warmCart(), { timeout: 2500 });
+    const timeout = idle === undefined ? window.setTimeout(() => void warmCart(), 1200) : null;
+    return () => {
+      cancelled = true;
+      if (idle !== undefined) window.cancelIdleCallback?.(idle);
+      if (timeout !== null) window.clearTimeout(timeout);
+    };
+  }, [cart, mounted]);
 
   const closeDrawer = useCallback(() => {
     setOpen(false);
@@ -139,9 +165,10 @@ export default function CartWidget({
         body: JSON.stringify(body)
       });
       if (res.ok) {
-        setCart((await res.json()) as CartDTO);
+        const nextCart = (await res.json()) as CartDTO;
+        setCart(nextCart);
+        notifyCartChanged(nextCart);
         setStatusMessage(successMessage);
-        router.refresh();
       } else {
         const data = (await res.json().catch(() => null)) as { error?: string } | null;
         setError(data?.error ?? "Non riesco ad aggiornare il carrello.");
@@ -369,6 +396,8 @@ export default function CartWidget({
                         <img
                           src={line.image}
                           alt={line.productName}
+                          loading="lazy"
+                          decoding="async"
                           className="h-full w-full object-contain transition duration-500 group-hover:scale-105"
                         />
                       )}

@@ -6,14 +6,15 @@
  *  - Asset statici: stale-while-revalidate.
  *  - Richieste non GET: mai intercettate.
  */
-const VERSION = "sessa-shop-v3";
+const VERSION = "sessa-shop-v5";
 const OFFLINE_URL = "/offline.html";
 const PRECACHE = [
   OFFLINE_URL,
   "/manifest.webmanifest",
+  "/admin.webmanifest",
   "/icons/icon-192.png",
   "/icons/icon-512.png",
-  "/brand/sessa-logo-white.webp"
+  "/icons/admin-192.png"
 ];
 
 const SENSITIVE_PREFIXES = ["/api", "/admin", "/account", "/checkout", "/carrello", "/ordine"];
@@ -87,7 +88,8 @@ self.addEventListener("fetch", (event) => {
     url.pathname.startsWith("/brand/") ||
     url.pathname.startsWith("/patterns/") ||
     url.pathname === "/icon.svg" ||
-    url.pathname === "/manifest.webmanifest";
+    url.pathname === "/manifest.webmanifest" ||
+    url.pathname === "/admin.webmanifest";
   if (isStatic) {
     event.respondWith(
       caches.match(request).then((cached) => {

@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import Footer from "@/components/storefront/Footer";
-import Header from "@/components/storefront/Header";
+import AuthShell from "@/components/account/AuthShell";
 import { CustomerRegisterForm } from "@/components/account/CustomerAuthForms";
 import { getSessionCustomer } from "@/lib/auth/customer-session";
 
@@ -18,29 +17,31 @@ export default async function CustomerRegisterPage({
   if (customer) redirect("/account");
 
   return (
-    <>
-      <Header />
-      <main className="mx-auto flex max-w-md flex-col px-4 py-12">
-        <h1 className="text-center font-serif text-3xl font-semibold">Crea il tuo account</h1>
-        {ref && (
-          <p className="mt-3 rounded-xl bg-brilliant/10 px-4 py-3 text-center text-sm font-semibold text-emerald-800">
-            Sei stato invitato da un amico! Registrati per ricevere il tuo sconto di benvenuto.
-          </p>
-        )}
-        <p className="mt-2 text-center text-sm text-ink/60">
-          Ordina più velocemente, salva gli indirizzi e ritrova lo storico ordini.
-        </p>
-        <div className="card mt-6 p-6">
-          <CustomerRegisterForm />
+    <AuthShell
+      eyebrow="Nuovo qui?"
+      title="Crea il tuo account"
+      subtitle="Bastano trenta secondi: poi ordini, salvi indirizzi e inviti gli amici."
+      brandClaim="Un'esplosione di gusto, anche online."
+      brandCopy="Sfogliatelle, grandi lievitati e box regalo dal laboratorio di Ottaviano alle sedi di tutta Italia."
+      highlights={["Checkout più rapido", "Storico ordini e riordino", "Sconto di benvenuto con gli inviti"]}
+      sticker="/images/stickers/box-regalo-sessa-sticker.webp"
+      footer={
+        <div className="auth-links">
+          <span>
+            Hai già un account?{" "}
+            <Link href="/account/login" className="auth-link-strong">
+              Accedi
+            </Link>
+          </span>
         </div>
-        <p className="mt-4 text-center text-sm">
-          Hai già un account?{" "}
-          <Link href="/account/login" className="text-terracotta hover:underline">
-            Accedi
-          </Link>
+      }
+    >
+      {ref && (
+        <p className="auth-notice" role="status">
+          Sei stato invitato da un amico! Registrati per ricevere il tuo sconto di benvenuto.
         </p>
-      </main>
-      <Footer />
-    </>
+      )}
+      <CustomerRegisterForm />
+    </AuthShell>
   );
 }

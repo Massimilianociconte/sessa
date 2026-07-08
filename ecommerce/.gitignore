@@ -16,3 +16,4 @@ prisma/dev.db-journal
 
 # generato dal bundling edge functions di Netlify
 deno.lock
+.env.production

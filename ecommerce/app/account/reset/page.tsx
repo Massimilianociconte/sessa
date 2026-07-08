@@ -1,6 +1,5 @@
 import Link from "next/link";
-import Footer from "@/components/storefront/Footer";
-import Header from "@/components/storefront/Header";
+import AuthShell from "@/components/account/AuthShell";
 import { ResetForm } from "@/components/account/CustomerAuthForms";
 
 export const dynamic = "force-dynamic";
@@ -15,25 +14,36 @@ export default async function ResetPage({
   const { token } = await searchParams;
 
   return (
-    <>
-      <Header />
-      <main className="mx-auto flex max-w-md flex-col px-4 py-12">
-        <h1 className="text-center font-serif text-3xl font-semibold">Reimposta la password</h1>
-        <div className="card mt-6 p-6">
-          {token ? (
-            <ResetForm token={token} />
-          ) : (
-            <p className="text-sm text-ink/60">
-              Link non valido.{" "}
-              <Link href="/account/recupera" className="text-terracotta hover:underline">
-                Richiedine uno nuovo
-              </Link>
-              .
-            </p>
-          )}
+    <AuthShell
+      eyebrow="Ultimo passo"
+      title="Reimposta la password"
+      subtitle={token ? "Scegli una nuova password robusta per il tuo account." : undefined}
+      brandClaim="Sicurezza senza attese."
+      brandCopy="Nuova password, sessioni ruotate e sei di nuovo pronto a ordinare."
+      highlights={["Hash sicuro lato server", "Altre sessioni disconnesse", "Avviso email automatico"]}
+      sticker="/images/stickers/pasticceria-tradizionale-sessa-sticker.webp"
+      footer={
+        <div className="auth-links">
+          <span>
+            Serve un nuovo link?{" "}
+            <Link href="/account/recupera" className="auth-link-strong">
+              Richiedilo qui
+            </Link>
+          </span>
         </div>
-      </main>
-      <Footer />
-    </>
+      }
+    >
+      {token ? (
+        <ResetForm token={token} />
+      ) : (
+        <p className="text-sm text-ink/60">
+          Link non valido o scaduto.{" "}
+          <Link href="/account/recupera" className="auth-link-strong">
+            Richiedine uno nuovo
+          </Link>
+          .
+        </p>
+      )}
+    </AuthShell>
   );
 }

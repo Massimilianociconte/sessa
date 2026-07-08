@@ -76,10 +76,13 @@ export async function resendVerificationAction(): Promise<void> {
     back("/account/profilo", "err", "Hai già richiesto una verifica da poco. Riprova più tardi.");
   }
   registerFailedAttempt(rateKey);
-  const link = await sendVerificationEmail(customer.id);
-  if (!link) back("/account/profilo", "msg", "Email già verificata.");
+  const result = await sendVerificationEmail(customer.id);
+  if (!result) back("/account/profilo", "msg", "Email già verificata.");
+  if (result.delivery.status === "FAILED") {
+    back("/account/profilo", "err", "Non siamo riusciti a inviare l'email di verifica. Riprova più tardi o controlla la configurazione SMTP.");
+  }
   if (process.env.NODE_ENV !== "production") {
-    back("/account/profilo", "msg", `Email di verifica inviata. Link dev: ${link}`);
+    back("/account/profilo", "msg", `Email di verifica inviata. Link dev: ${result.link}`);
   }
   back("/account/profilo", "msg", "Email di verifica inviata: controlla la casella.");
 }
@@ -107,9 +110,12 @@ export async function requestEmailChangeAction(formData: FormData): Promise<void
   clearAttempts(rateKey);
 
   try {
-    const link = await requestEmailChange(customer.id, newEmail);
+    const result = await requestEmailChange(customer.id, newEmail);
+    if (result.delivery.status === "FAILED") {
+      back("/account/profilo", "err", "Non siamo riusciti a inviare la conferma al nuovo indirizzo. Riprova più tardi o controlla la configurazione SMTP.");
+    }
     if (process.env.NODE_ENV !== "production") {
-      back("/account/profilo", "msg", `Conferma inviata a ${newEmail}. Link dev: ${link}`);
+      back("/account/profilo", "msg", `Conferma inviata a ${newEmail}. Link dev: ${result.link}`);
     }
     back("/account/profilo", "msg", `Ti abbiamo inviato un link di conferma a ${newEmail}.`);
   } catch (error) {

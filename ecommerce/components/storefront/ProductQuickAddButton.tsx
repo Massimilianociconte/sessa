@@ -154,7 +154,7 @@ export default function ProductQuickAddButton({
           <div className="tile-frame quick-add-image" style={{ ["--tile" as string]: tile }}>
             {product.image ? (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={product.image} alt={product.name} className="h-full w-full object-contain" />
+              <img src={product.image} alt={product.name} loading="lazy" decoding="async" className="h-full w-full object-contain" />
             ) : (
               <span className="font-script text-6xl text-terracotta/40">Sessa</span>
             )}

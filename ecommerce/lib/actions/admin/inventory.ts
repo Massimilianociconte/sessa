@@ -6,6 +6,7 @@ import { requireAdmin } from "@/lib/auth/session";
 import { DomainError } from "@/lib/domain";
 import { adjustStock } from "@/lib/services/inventory";
 import { backWithError, backWithMessage } from "./helpers";
+import { invalidateMemo } from "@/lib/ttl-cache";
 
 const PATH = "/admin/magazzino";
 
@@ -40,6 +41,7 @@ export async function adjustStockAction(formData: FormData): Promise<void> {
     if (error instanceof DomainError) backWithError(backPath, error.message);
     throw error;
   }
+  invalidateMemo("catalog:");
   revalidatePath(PATH);
   revalidatePath("/", "layout");
   backWithMessage(backPath, "Stock aggiornato.");

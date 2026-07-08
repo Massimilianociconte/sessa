@@ -12,7 +12,7 @@ import { buildProductJsonLd, buildProductMetadata, getStoreSeo } from "@/lib/seo
 import { CATALOG_OCCASIONS, getStoreProduct, listStoreProducts, matchesOccasion } from "@/lib/services/catalog";
 import { getActiveLocationBySlug } from "@/lib/services/locations";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 30;
 
 type Props = { params: Promise<{ slug: string; productSlug: string }> };
 

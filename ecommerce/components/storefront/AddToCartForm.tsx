@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { FormEvent } from "react";
 import { centsToAnalyticsValue, trackEcommerceEvent } from "@/lib/analytics";
+import type { CartDTO } from "@/lib/cart-types";
 import { formatCents } from "@/lib/money";
 import { notifyCartChanged, openCart } from "@/components/storefront/cart-events";
 
@@ -69,6 +70,7 @@ export default function AddToCartForm({
         setError(data?.error ?? "Impossibile aggiungere il prodotto.");
         return;
       }
+      const nextCart = (await res.json().catch(() => null)) as CartDTO | null;
       const variant = variants.find((v) => v.storeVariantId === selected);
       if (variant) {
         trackEcommerceEvent("add_to_cart", {
@@ -89,8 +91,8 @@ export default function AddToCartForm({
           ]
         });
       }
-      notifyCartChanged();
-      if (openDrawerOnAdded) openCart();
+      notifyCartChanged(nextCart ?? undefined);
+      if (openDrawerOnAdded) openCart(nextCart ?? undefined);
       onAdded?.();
     } catch {
       setError("Errore di rete. Riprova.");

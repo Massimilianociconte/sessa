@@ -1,7 +1,7 @@
 # NB: col runtime Next.js v5 il publish DEVE essere ".next" (il plugin valida
 # che contenga l'output Next); asset statici e funzioni li smista il plugin.
 [build]
-  command = "npx prisma generate && npm run build"
+  command = "npx prisma generate && npm run db:deploy && npm run build"
   publish = ".next"
 
 [build.environment]
@@ -9,7 +9,7 @@
   NEXT_TELEMETRY_DISABLED = "1"
   # Chiavi runtime note al solo server: lo scan dei "secrets in output" darebbe
   # falsi positivi (Prisma embedda l'URL nel bundle server, mai in quello client).
-  SECRETS_SCAN_OMIT_KEYS = "DATABASE_URL,SESSION_SECRET,ADMIN_SETUP_TOKEN"
+  SECRETS_SCAN_OMIT_KEYS = "DATABASE_URL,SESSION_SECRET,ADMIN_SETUP_TOKEN,NEXT_PUBLIC_SITE_URL,SMTP_HOST,SMTP_PORT,SMTP_SECURE,SMTP_USER,SMTP_PASS,SMTP_FROM"
 
 # Runtime Next.js ufficiale (App Router, Server Actions, middleware).
 [[plugins]]
@@ -52,6 +52,11 @@
 
 [[headers]]
   for = "/manifest.webmanifest"
+  [headers.values]
+    Cache-Control = "public, max-age=3600, stale-while-revalidate=86400"
+
+[[headers]]
+  for = "/admin.webmanifest"
   [headers.values]
     Cache-Control = "public, max-age=3600, stale-while-revalidate=86400"
 

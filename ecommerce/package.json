@@ -8,6 +8,7 @@
     "start": "next start -p 3001",
     "lint": "eslint .",
     "db:push": "prisma db push",
+    "db:deploy": "prisma db execute --schema prisma/schema.prisma --file prisma/migrations-postgres/0002_account_email_pwa_hardening.sql",
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
     "db:reset": "rm -f prisma/dev.db && prisma db push && tsx prisma/seed.ts",

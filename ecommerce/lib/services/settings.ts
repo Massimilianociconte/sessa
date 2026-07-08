@@ -1,4 +1,9 @@
 import { prisma } from "@/lib/db";
+import { invalidateMemo, memoTtl } from "@/lib/ttl-cache";
+
+// Le impostazioni cambiano di rado: memo breve per non ripagare il roundtrip DB
+// a ogni request. setSetting invalida subito la cache dell'istanza che scrive.
+const SETTINGS_TTL_MS = 30_000;
 
 /**
  * Impostazioni chiave/valore con valori JSON tipizzati dal chiamante.
@@ -9,7 +14,9 @@ import { prisma } from "@/lib/db";
 export async function getSetting<T>(key: string, fallback: T): Promise<T> {
   let row: { value: string } | null = null;
   try {
-    row = await prisma.setting.findUnique({ where: { key } });
+    row = await memoTtl(`setting:${key}`, SETTINGS_TTL_MS, () =>
+      prisma.setting.findUnique({ where: { key } })
+    );
   } catch {
     return fallback;
   }
@@ -46,4 +53,5 @@ export async function setSetting(key: string, value: unknown): Promise<void> {
     update: { value: serialized },
     create: { key, value: serialized }
   });
+  invalidateMemo(`setting:${key}`);
 }

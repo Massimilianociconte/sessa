@@ -56,17 +56,6 @@
       "short_name": "Account",
       "url": "/account?source=pwa-shortcut",
       "description": "Accedi a ordini, indirizzi e referral"
-    },
-    {
-      "name": "Gestionale ordini",
-      "short_name": "Ordini",
-      "url": "/admin/ordini",
-      "description": "Gestisci gli ordini"
-    },
-    {
-      "name": "Magazzino",
-      "url": "/admin/magazzino",
-      "description": "Controlla le scorte"
     }
   ]
 }

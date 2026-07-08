@@ -136,9 +136,14 @@ robots e metadati assoluti).
 1. **Database**: cambiare `datasource` in `schema.prisma` a `postgresql` e impostare
    `DATABASE_URL`. Il codice è già scritto con guardie transazionali adatte a Postgres.
 2. **`SESSION_SECRET`**: valorizzare con stringa casuale lunga.
-3. **Pagamenti Stripe**: seguire le istruzioni in `lib/payments/stripe.ts`
+3. **`ADMIN_SETUP_TOKEN`**: token forte per creare il primo utente gestionale in produzione.
+4. **SMTP**: configurare `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`,
+   `SMTP_PASS`, `SMTP_FROM` per rendere effettivi verifica email, reset password e avvisi sicurezza.
+5. **Migrazione Netlify**: `netlify.toml` esegue `npm run db:deploy` prima del build,
+   applicando la migrazione Postgres additiva per account/sessioni/email.
+6. **Pagamenti Stripe**: seguire le istruzioni in `lib/payments/stripe.ts`
    (installare `stripe`, implementare `init()`, aggiungere il webhook, impostare
    `payments.provider = "stripe"` dalle impostazioni).
-4. **Immagini prodotto**: sono copiate in `public/images/products/`. In produzione si
+7. **Immagini prodotto**: sono copiate in `public/images/products/`. In produzione si
    possono caricare da gestionale (campo URL/percorso già presente) o servire da CDN.
 ```

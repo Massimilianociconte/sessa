@@ -7,8 +7,10 @@ import { audit } from "@/lib/audit";
 import { parseEuroToCents } from "@/lib/money";
 import { formDataToObject, productSchema, variantSchema } from "@/lib/validation";
 import { backWithError, backWithMessage, firstZodMessage, requireString } from "./helpers";
+import { invalidateMemo } from "@/lib/ttl-cache";
 
 function revalidateCatalog() {
+  invalidateMemo("catalog:");
   revalidatePath("/", "layout");
   revalidatePath("/admin/prodotti");
 }

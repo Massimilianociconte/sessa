@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import AdminPwaInstall from "@/components/admin/AdminPwaInstall";
 import { logoutAction } from "@/lib/actions/auth";
 import { getSessionUser } from "@/lib/auth/session";
 
@@ -44,6 +45,9 @@ export default async function ProtectedAdminLayout({ children }: { children: Rea
           ))}
         </nav>
         <div className="border-t border-ink/10 pt-4">
+          <div className="px-3 pb-3">
+            <AdminPwaInstall />
+          </div>
           <p className="truncate px-3 text-xs font-semibold">{user.name}</p>
           <p className="truncate px-3 text-xs text-ink/50">{user.email}</p>
           <form action={logoutAction} className="mt-2 px-3">

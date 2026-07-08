@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import AuthShell from "@/components/account/AuthShell";
 import SetupForm from "@/components/admin/SetupForm";
 import { prisma } from "@/lib/db";
 
@@ -19,27 +20,28 @@ export default async function AdminSetupPage() {
   const blocked = isProduction && !envToken;
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-cream px-4 py-10">
-      <div className="card w-full max-w-md p-8">
-        <p className="text-center font-script text-4xl text-terracotta">Sessa</p>
-        <h1 className="mt-1 text-center text-sm font-semibold uppercase tracking-[0.3em] text-ink/50">
-          Prima configurazione
-        </h1>
-        <p className="mt-4 text-center text-sm leading-6 text-ink/60">
+    <AuthShell
+      variant="admin"
+      eyebrow="Benvenuto"
+      title="Prima configurazione"
+      subtitle={
+        <>
           Il gestionale non ha ancora un account. Crea qui il profilo <strong>proprietario</strong>:
           questa pagina si disattiva da sola appena l'account esiste.
+        </>
+      }
+      brandClaim="Si parte da qui."
+      brandCopy="Un solo account proprietario, poi inviti il resto dello staff dalle impostazioni."
+      highlights={["Token di sicurezza in produzione", "Password minimo 12 caratteri", "Creazione atomica anti-race"]}
+    >
+      {blocked ? (
+        <p className="auth-notice" data-tone="warn" role="alert">
+          Per sicurezza la configurazione in produzione richiede la variabile d'ambiente
+          ADMIN_SETUP_TOKEN. Impostala nel pannello del deploy e ricarica questa pagina.
         </p>
-        <div className="mt-8">
-          {blocked ? (
-            <p className="rounded-xl bg-terracotta/10 px-4 py-3 text-sm font-semibold text-terracotta">
-              Per sicurezza la configurazione in produzione richiede la variabile d'ambiente
-              ADMIN_SETUP_TOKEN. Impostala nel pannello del deploy e ricarica questa pagina.
-            </p>
-          ) : (
-            <SetupForm requiresToken={Boolean(envToken)} />
-          )}
-        </div>
-      </div>
-    </main>
+      ) : (
+        <SetupForm requiresToken={Boolean(envToken)} />
+      )}
+    </AuthShell>
   );
 }

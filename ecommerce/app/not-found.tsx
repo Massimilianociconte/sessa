@@ -33,9 +33,10 @@ export default function NotFound() {
             </div>
           </div>
 
+          {/* Illustrazione come background CSS: evita il <link rel=preload> che
+              Next inietterebbe su ogni pagina per l'<img> del boundary 404. */}
           <div className="not-found-art" aria-hidden="true">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/images/404/sessa-ti-sei-perso.webp" alt="" />
+            <div className="not-found-art-img" role="img" />
           </div>
         </section>
       </main>

@@ -1,10 +1,16 @@
 import { prisma } from "@/lib/db";
+import { memoTtl } from "@/lib/ttl-cache";
 
 /**
  * Catalogo store-aware: prezzo e stock provengono da StoreVariant (per sede).
  * Le query restituiscono "view" già risolte (prezzo effettivo, stock) così le
  * pagine non ragionano su override/base.
+ * Le liste pubbliche sono memoizzate con TTL breve (vedi lib/ttl-cache):
+ * il carrello/checkout NON passa da qui e rilegge sempre stock e prezzi reali.
  */
+
+// TTL della vetrina: modifiche dal gestionale visibili entro mezzo minuto.
+const CATALOG_TTL_MS = 30_000;
 
 /** Prezzo effettivo di uno StoreVariant: override della sede o prezzo base. */
 export function effectivePrice(priceCentsOverride: number | null, basePriceCents: number): number {
@@ -128,7 +134,8 @@ export async function listStoreProducts(
 ): Promise<StoreProductView[]> {
   const normalized = typeof filters === "string" ? { categorySlug: filters } : (filters ?? {});
   const query = normalized.query?.trim();
-  const rows = await prisma.product.findMany({
+  const memoKey = `catalog:list:${locationId}:${normalized.categorySlug ?? ""}:${query ?? ""}`;
+  const rows = await memoTtl(memoKey, CATALOG_TTL_MS, () => prisma.product.findMany({
     where: {
       status: "ACTIVE",
       ...(normalized.categorySlug ? { category: { slug: normalized.categorySlug } } : {}),
@@ -146,7 +153,7 @@ export async function listStoreProducts(
     },
     include: storeProductInclude(locationId),
     orderBy: [{ featured: "desc" }, { position: "asc" }]
-  });
+  }));
   const products = (rows as RawProduct[]).map(toView);
   return normalized.occasion ? products.filter((product) => matchesOccasion(product, normalized.occasion)) : products;
 }
@@ -168,19 +175,20 @@ export async function getStoreProduct(
 
 /** Categorie che hanno almeno un prodotto acquistabile nella sede. */
 export async function listStoreCategories(locationId: string) {
-  const categories = await prisma.category.findMany({
-    where: {
-      isActive: true,
-      products: {
-        some: {
-          status: "ACTIVE",
-          variants: { some: { isActive: true, storeVariants: { some: { locationId, isAvailable: true } } } }
+  return memoTtl(`catalog:categories:${locationId}`, CATALOG_TTL_MS, () =>
+    prisma.category.findMany({
+      where: {
+        isActive: true,
+        products: {
+          some: {
+            status: "ACTIVE",
+            variants: { some: { isActive: true, storeVariants: { some: { locationId, isAvailable: true } } } }
+          }
         }
-      }
-    },
-    orderBy: { position: "asc" }
-  });
-  return categories;
+      },
+      orderBy: { position: "asc" }
+    })
+  );
 }
 
 export const CATALOG_OCCASIONS = [

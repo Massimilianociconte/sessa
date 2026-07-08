@@ -6,6 +6,7 @@ import { requireAdmin } from "@/lib/auth/session";
 import { audit } from "@/lib/audit";
 import { formDataToObject, locationSchema } from "@/lib/validation";
 import { backWithError, backWithMessage, firstZodMessage, requireString } from "./helpers";
+import { invalidateMemo } from "@/lib/ttl-cache";
 
 const PATH = "/admin/sedi";
 
@@ -45,6 +46,7 @@ export async function createLocationAction(formData: FormData): Promise<void> {
   }
 
   await audit(user.email, "location.create", "Location", location.id, parsed.data);
+  invalidateMemo("loc:");
   revalidatePath("/", "layout");
   revalidatePath(PATH);
   backWithMessage(PATH, `Sede "${location.name}" creata con l'intero catalogo (stock 0).`);
@@ -59,6 +61,7 @@ export async function updateLocationAction(formData: FormData): Promise<void> {
   if (clash) backWithError(PATH, "Slug sede già in uso.");
   await prisma.location.update({ where: { id }, data: parsed.data });
   await audit(user.email, "location.update", "Location", id, parsed.data);
+  invalidateMemo("loc:");
   revalidatePath("/", "layout");
   revalidatePath(PATH);
   backWithMessage(PATH, "Sede aggiornata.");
@@ -73,6 +76,7 @@ export async function deleteLocationAction(formData: FormData): Promise<void> {
   }
   await prisma.location.delete({ where: { id } });
   await audit(user.email, "location.delete", "Location", id);
+  invalidateMemo("loc:");
   revalidatePath("/", "layout");
   revalidatePath(PATH);
   backWithMessage(PATH, "Sede eliminata.");

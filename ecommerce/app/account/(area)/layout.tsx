@@ -14,7 +14,7 @@ export default async function AccountLayout({ children }: { children: React.Reac
 
   return (
     <>
-      <Header />
+      <Header accountLabel={customer.firstName} />
       <main className="account-shell">
         <section className="account-hero" aria-label="Area personale Sessa">
           <div>

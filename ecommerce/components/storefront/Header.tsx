@@ -1,7 +1,5 @@
 import Link from "next/link";
 import CartWidget from "@/components/storefront/CartWidget";
-import { getSessionCustomer } from "@/lib/auth/customer-session";
-import { getCurrentCartView } from "@/lib/services/cart-session";
 
 type HeaderLocationContext = {
   slug: string;
@@ -9,20 +7,26 @@ type HeaderLocationContext = {
 };
 
 /** Header a nastro terracotta, coerente col sito vetrina. */
-export default async function Header({ currentLocation }: { currentLocation?: HeaderLocationContext }) {
-  // Fault-tolerant: senza DB (prerender 404, hiccup) l'header degrada a "ospite, carrello vuoto".
-  const [cartView, customer] = await Promise.all([
-    getCurrentCartView().catch(() => null),
-    getSessionCustomer().catch(() => null)
-  ]);
-  const count = cartView?.itemCount ?? 0;
-
+export default function Header({
+  currentLocation,
+  accountLabel = "Account"
+}: {
+  currentLocation?: HeaderLocationContext;
+  accountLabel?: string;
+}) {
   return (
     <header className="brand-ribbon sticky top-0 z-40 text-ivory backdrop-blur">
       <div className="mx-auto flex min-h-[72px] max-w-6xl items-center justify-between gap-3 px-4 py-3">
         <Link href="/" className="brand-mark-link group flex min-w-0 items-center gap-3 outline-none" aria-label="Sessa 1930 home">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/brand/sessa-logo-white.webp" alt="Sessa 1930" className="h-9 w-auto transition group-hover:scale-[1.02] sm:h-10" />
+          <img
+            src="/brand/sessa-logo-white.webp"
+            alt="Sessa 1930"
+            width={3600}
+            height={978}
+            decoding="async"
+            className="h-9 w-auto transition group-hover:scale-[1.02] sm:h-10"
+          />
           <span className="hidden min-w-0 flex-col leading-none sm:flex">
             <span className="text-[10px] font-semibold uppercase tracking-[0.32em] text-cream/80">Shop</span>
             <span className="mt-1 max-w-[11rem] truncate text-xs font-medium text-cream/55">Pasticceria e regali</span>
@@ -50,9 +54,9 @@ export default async function Header({ currentLocation }: { currentLocation?: He
             href="/account"
             className="inline-flex min-h-10 items-center rounded-full border border-cream/45 px-3 py-1.5 font-semibold text-cream transition hover:bg-cream hover:text-terracotta sm:px-4"
           >
-            {customer ? customer.firstName : "Accedi"}
+            {accountLabel}
           </Link>
-          <CartWidget initialCount={count} currentLocation={currentLocation} />
+          <CartWidget initialCount={0} currentLocation={currentLocation} />
         </div>
       </div>
     </header>

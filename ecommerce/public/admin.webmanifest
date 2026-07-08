@@ -1,0 +1,52 @@
+{
+  "name": "Sessa 1930 - Gestionale",
+  "short_name": "Sessa Gest.",
+  "description": "Gestionale Sessa 1930: ordini, prodotti, magazzino, sconti e clienti multi-sede.",
+  "id": "/admin",
+  "start_url": "/admin?source=pwa",
+  "scope": "/admin",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#FAF6EF",
+  "theme_color": "#1F4E79",
+  "lang": "it",
+  "dir": "ltr",
+  "categories": ["business", "productivity"],
+  "icons": [
+    {
+      "src": "/icons/admin-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/admin-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/admin-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "Ordini",
+      "url": "/admin/ordini?source=pwa-shortcut",
+      "description": "Gestisci gli ordini in arrivo"
+    },
+    {
+      "name": "Magazzino",
+      "url": "/admin/magazzino?source=pwa-shortcut",
+      "description": "Controlla le scorte per sede"
+    },
+    {
+      "name": "Prodotti",
+      "url": "/admin/prodotti?source=pwa-shortcut",
+      "description": "Catalogo e prezzi"
+    }
+  ]
+}

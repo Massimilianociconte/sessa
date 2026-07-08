@@ -420,8 +420,8 @@ async function main() {
   });
 
   // Verifica email: link → token → emailVerified
-  const verifyLink = await sendVerificationEmail(entId);
-  const verifyToken = verifyLink?.split("token=")[1] ?? "";
+  const verifyResult = await sendVerificationEmail(entId);
+  const verifyToken = verifyResult?.link.split("token=")[1] ?? "";
   await consumeCustomerToken(verifyToken);
   let entCustomer = await prisma.customer.findUnique({ where: { id: entId } });
   check("email verificata via token", entCustomer?.emailVerified === true);
@@ -435,8 +435,8 @@ async function main() {
 
   // Cambio email con conferma dal nuovo indirizzo
   const entEmail2 = "acct-ent-2@example.com";
-  const changeLink = await requestEmailChange(entId, entEmail2);
-  await consumeCustomerToken(changeLink.split("token=")[1] ?? "");
+  const changeResult = await requestEmailChange(entId, entEmail2);
+  await consumeCustomerToken(changeResult.link.split("token=")[1] ?? "");
   entCustomer = await prisma.customer.findUnique({ where: { id: entId } });
   check("cambio email confermato", entCustomer?.email === entEmail2 && entCustomer.emailVerified === true);
 
