@@ -8,9 +8,7 @@ import { audit } from "@/lib/audit";
 import { hashPassword } from "@/lib/auth/password";
 import { isRateLimited, registerFailedAttempt } from "@/lib/auth/rate-limit";
 import { createSession } from "@/lib/auth/session";
-
-export type SetupState = { error: string | null };
-export const initialSetupState: SetupState = { error: null };
+import type { SetupState } from "@/lib/actions/admin/setup-state";
 
 function safeEqual(a: string, b: string): boolean {
   const bufA = Buffer.from(a);

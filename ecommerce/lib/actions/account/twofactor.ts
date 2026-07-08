@@ -7,8 +7,9 @@ import QRCode from "qrcode";
 import { prisma } from "@/lib/db";
 import { DomainError } from "@/lib/domain";
 import { verifyPassword } from "@/lib/auth/password";
-import { requireCustomer } from "@/lib/auth/customer-session";
+import { getSessionCustomer } from "@/lib/auth/customer-session";
 import { clearAttempts, isRateLimited, registerFailedAttempt } from "@/lib/auth/rate-limit";
+import type { TwoFactorState } from "@/lib/actions/account/twofactor-state";
 import {
   confirmTotpEnrollment,
   disableTotp,
@@ -16,20 +17,15 @@ import {
   startTotpEnrollment
 } from "@/lib/services/customer-2fa";
 
-export type TwoFactorState = {
-  error: string | null;
-  /** pending = QR mostrato, in attesa del codice di conferma */
-  step: "idle" | "pending" | "enabled" | "codes";
-  qrDataUrl?: string;
-  secret?: string;
-  backupCodes?: string[];
-};
-
-export const initialTwoFactorState: TwoFactorState = { error: null, step: "idle" };
-
 async function clientIp(): Promise<string> {
   const h = await headers();
   return h.get("x-forwarded-for")?.split(",")[0]?.trim() || h.get("x-real-ip") || "local";
+}
+
+async function currentCustomerOrLogin() {
+  const customer = await getSessionCustomer();
+  if (!customer) redirect("/account/login");
+  return customer;
 }
 
 async function verifyOwnPassword(customerId: string, password: string): Promise<boolean> {
@@ -39,7 +35,7 @@ async function verifyOwnPassword(customerId: string, password: string): Promise<
 
 /** Step 1: password → secret + QR (i dati restano nello stato della form, mai in URL). */
 export async function startTotpAction(_prev: TwoFactorState, formData: FormData): Promise<TwoFactorState> {
-  const customer = await requireCustomer();
+  const customer = await currentCustomerOrLogin();
   const password = String(formData.get("password") ?? "");
   if (!(await verifyOwnPassword(customer.id, password))) {
     return { error: "Password errata.", step: "idle" };
@@ -56,7 +52,7 @@ export async function startTotpAction(_prev: TwoFactorState, formData: FormData)
 
 /** Step 2: codice dall'app → 2FA attiva + codici di recupero mostrati una sola volta. */
 export async function confirmTotpAction(_prev: TwoFactorState, formData: FormData): Promise<TwoFactorState> {
-  const customer = await requireCustomer();
+  const customer = await currentCustomerOrLogin();
   const code = String(formData.get("code") ?? "");
   const rateKey = `totp-confirm:${await clientIp()}:${customer.id}`;
   if (isRateLimited(rateKey) !== null) {
@@ -81,7 +77,7 @@ export async function regenerateBackupCodesAction(
   _prev: TwoFactorState,
   formData: FormData
 ): Promise<TwoFactorState> {
-  const customer = await requireCustomer();
+  const customer = await currentCustomerOrLogin();
   const code = String(formData.get("code") ?? "");
   const rateKey = `totp-regen:${await clientIp()}:${customer.id}`;
   if (isRateLimited(rateKey) !== null) {
@@ -103,7 +99,7 @@ export async function regenerateBackupCodesAction(
 
 /** Disattivazione: password + codice valido. */
 export async function disableTotpAction(formData: FormData): Promise<void> {
-  const customer = await requireCustomer();
+  const customer = await currentCustomerOrLogin();
   const password = String(formData.get("password") ?? "");
   const code = String(formData.get("code") ?? "");
   const rateKey = `totp-disable:${await clientIp()}:${customer.id}`;

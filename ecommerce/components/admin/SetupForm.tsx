@@ -1,7 +1,8 @@
 "use client";
 
 import { useActionState } from "react";
-import { initialSetupState, setupFirstAdminAction } from "@/lib/actions/admin/setup";
+import { setupFirstAdminAction } from "@/lib/actions/admin/setup";
+import { initialSetupState } from "@/lib/actions/admin/setup-state";
 
 export default function SetupForm({ requiresToken }: { requiresToken: boolean }) {
   const [state, action, pending] = useActionState(setupFirstAdminAction, initialSetupState);

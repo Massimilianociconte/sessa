@@ -4,10 +4,10 @@ import { useActionState } from "react";
 import {
   confirmTotpAction,
   disableTotpAction,
-  initialTwoFactorState,
   regenerateBackupCodesAction,
   startTotpAction
 } from "@/lib/actions/account/twofactor";
+import { initialTwoFactorState } from "@/lib/actions/account/twofactor-state";
 
 function ErrorBox({ error }: { error: string | null }) {
   if (!error) return null;
