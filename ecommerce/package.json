@@ -13,7 +13,6 @@
     "db:reset": "rm -f prisma/dev.db && prisma db push && tsx prisma/seed.ts"
   },
   "dependencies": {
-    "@netlify/database": "^1.1.0",
     "@prisma/client": "^6.7.0",
     "@types/nodemailer": "^8.0.1",
     "next": "16.2.9",
