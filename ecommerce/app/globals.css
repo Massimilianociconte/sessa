@@ -3674,3 +3674,425 @@ canvas {
     animation: none;
   }
 }
+
+/* ==========================================================================
+   Badge di stato area personale
+   ========================================================================== */
+
+.account-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  vertical-align: middle;
+  margin-left: 0.45rem;
+  border-radius: 999px;
+  padding: 0.22rem 0.6rem;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.account-badge[data-tone="success"] {
+  background: rgba(8, 201, 99, 0.13);
+  color: #05713a;
+}
+
+.account-badge[data-tone="neutral"] {
+  background: rgba(23, 20, 18, 0.07);
+  color: rgba(23, 20, 18, 0.62);
+}
+
+.account-badge[data-tone="warn"] {
+  background: rgba(216, 90, 31, 0.13);
+  color: var(--color-terracotta-dark);
+}
+
+.account-badge[data-tone="info"] {
+  background: rgba(31, 78, 121, 0.11);
+  color: var(--color-ceramic);
+}
+
+.account-info-tile strong .account-badge {
+  margin-left: 0;
+}
+
+/* ==========================================================================
+   Passkey (sezione Sicurezza + login)
+   ========================================================================== */
+
+.passkey-list {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.passkey-card {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(23, 20, 18, 0.09);
+  background: rgba(255, 255, 255, 0.75);
+  padding: 0.85rem 1rem;
+}
+
+.passkey-icon {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 0.8rem;
+  background: rgba(216, 90, 31, 0.1);
+  color: var(--color-terracotta);
+}
+
+.passkey-card-main {
+  min-width: 0;
+  flex: 1;
+}
+
+.passkey-card-main strong {
+  display: block;
+  font-size: 0.92rem;
+}
+
+.passkey-card-main span {
+  display: block;
+  margin-top: 2px;
+  font-size: 0.74rem;
+  line-height: 1.5;
+  color: rgba(23, 20, 18, 0.5);
+}
+
+.passkey-create {
+  margin-top: 1rem;
+  border-radius: 1rem;
+  border: 1px dashed rgba(216, 90, 31, 0.35);
+  background: rgba(216, 90, 31, 0.04);
+  padding: 1rem;
+}
+
+.passkey-manager > * + * {
+  margin-top: 0.9rem;
+}
+
+.passkey-login {
+  margin-top: 1.1rem;
+}
+
+.passkey-login .btn-secondary svg {
+  margin-right: 0.15rem;
+}
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin: 0.9rem 0;
+  color: rgba(23, 20, 18, 0.35);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: "";
+  height: 1px;
+  flex: 1;
+  background: rgba(23, 20, 18, 0.12);
+}
+
+/* ==========================================================================
+   Menu account nell'header (dropdown desktop / bottom sheet mobile)
+   ========================================================================== */
+
+.account-menu-root {
+  position: relative;
+}
+
+.account-menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 2.5rem;
+  max-width: 11rem;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 247, 237, 0.45);
+  padding: 0.3rem 0.75rem 0.3rem 0.3rem;
+  font-weight: 700;
+  color: var(--color-cream);
+  transition: background 0.2s, color 0.2s;
+}
+
+.account-menu-trigger:hover {
+  background: rgba(255, 247, 237, 0.12);
+}
+
+.account-menu-trigger svg {
+  flex: none;
+  transition: transform 0.2s;
+}
+
+.account-menu-trigger svg[data-open="true"] {
+  transform: rotate(180deg);
+}
+
+.account-menu-avatar {
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 1.9rem;
+  height: 1.9rem;
+  border-radius: 999px;
+  background: var(--color-cream);
+  color: var(--color-terracotta);
+  font-weight: 800;
+  font-size: 0.9rem;
+}
+
+.account-menu-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-menu-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgba(23, 20, 18, 0.42);
+  backdrop-filter: blur(2px);
+  animation: account-menu-fade 0.18s ease both;
+}
+
+@keyframes account-menu-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.account-menu-panel {
+  position: fixed;
+  z-index: 61;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-height: min(84dvh, 40rem);
+  overflow-y: auto;
+  border-radius: 1.4rem 1.4rem 0 0;
+  background: #fffdf9;
+  color: var(--color-ink);
+  box-shadow: 0 -18px 60px rgba(23, 20, 18, 0.3);
+  padding: 1rem 1.1rem calc(1.2rem + var(--safe-bottom));
+  animation: account-menu-up 0.24s cubic-bezier(0.22, 0.8, 0.3, 1) both;
+}
+
+@keyframes account-menu-up {
+  from { transform: translateY(24px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+.account-menu-head {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.35rem 0.35rem 0.9rem;
+  border-bottom: 1px solid rgba(23, 20, 18, 0.08);
+}
+
+.account-menu-head .account-menu-avatar {
+  width: 2.5rem;
+  height: 2.5rem;
+  background: var(--color-terracotta);
+  color: var(--color-cream);
+  font-size: 1.05rem;
+}
+
+.account-menu-head strong {
+  display: block;
+  font-family: var(--font-serif);
+  font-size: 1.15rem;
+  line-height: 1.15;
+}
+
+.account-menu-head span {
+  display: block;
+  font-size: 0.72rem;
+  color: rgba(23, 20, 18, 0.5);
+}
+
+.account-menu-head > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.account-menu-close {
+  display: grid;
+  place-items: center;
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 0.8rem;
+  color: rgba(23, 20, 18, 0.55);
+  transition: background 0.2s;
+}
+
+.account-menu-close:hover {
+  background: rgba(23, 20, 18, 0.06);
+}
+
+.account-menu-links {
+  display: grid;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid rgba(23, 20, 18, 0.08);
+}
+
+.account-menu-links a,
+.account-menu-security {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  min-height: 2.7rem;
+  border-radius: 0.8rem;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.92rem;
+  font-weight: 600;
+  color: rgba(23, 20, 18, 0.82);
+  transition: background 0.15s, color 0.15s;
+}
+
+.account-menu-links a:hover,
+.account-menu-links a:focus-visible,
+.account-menu-security:hover,
+.account-menu-security:focus-visible {
+  background: rgba(216, 90, 31, 0.08);
+  color: var(--color-terracotta);
+  outline: none;
+}
+
+.account-menu-links svg,
+.account-menu-security svg {
+  flex: none;
+  color: rgba(23, 20, 18, 0.45);
+}
+
+.account-menu-section {
+  padding: 0.55rem 0;
+  border-bottom: 1px solid rgba(23, 20, 18, 0.08);
+}
+
+.account-menu-sublinks {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0.25rem 0.6rem 0.35rem 2.6rem;
+}
+
+.account-menu-sublinks a {
+  border-radius: 999px;
+  border: 1px solid rgba(31, 78, 121, 0.25);
+  background: rgba(31, 78, 121, 0.05);
+  padding: 0.3rem 0.7rem;
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--color-ceramic);
+  transition: background 0.15s;
+}
+
+.account-menu-sublinks a:hover {
+  background: rgba(31, 78, 121, 0.12);
+}
+
+.account-menu-logout {
+  padding-top: 0.6rem;
+}
+
+.account-menu-logout button {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  width: 100%;
+  min-height: 2.7rem;
+  border-radius: 0.8rem;
+  padding: 0.4rem 0.6rem;
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: var(--color-terracotta);
+  transition: background 0.15s;
+}
+
+.account-menu-logout button:hover {
+  background: rgba(216, 90, 31, 0.08);
+}
+
+/* Desktop: da bottom sheet a dropdown ancorato al bottone.
+   Il pannello vive in un portal su <body> (l'header ha backdrop-filter e farebbe
+   da containing block per position:fixed): top/right arrivano inline dal JS,
+   qui restano solo dimensioni e stile della variante. */
+.account-menu-panel[data-variant="dropdown"] {
+  width: 20.5rem;
+  max-height: min(78vh, 34rem);
+  border-radius: 1.2rem;
+  box-shadow: 0 24px 70px rgba(23, 20, 18, 0.22);
+  animation: account-menu-down 0.18s cubic-bezier(0.22, 0.8, 0.3, 1) both;
+}
+
+@keyframes account-menu-down {
+  from { transform: translateY(-8px); opacity: 0; }
+  to { transform: none; opacity: 1; }
+}
+
+@media (min-width: 640px) {
+  .account-menu-overlay {
+    background: transparent;
+    backdrop-filter: none;
+  }
+}
+
+/* ==========================================================================
+   Skeleton di segmento (loading.tsx per account/sede/carrello/checkout)
+   ========================================================================== */
+
+.segment-loading-ribbon {
+  height: 72px;
+  background: linear-gradient(135deg, var(--color-terracotta), var(--color-terracotta-dark));
+  opacity: 0.92;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .account-menu-panel,
+  .account-menu-overlay {
+    animation: none;
+  }
+}
+
+/* Il badge resta una pill compatta anche dentro tile/heading dell'area account
+   (le regole .account-info-tile span/strong altrimenti lo allargano a blocco). */
+.account-info-tile .account-badge,
+.account-panel .account-panel-heading .account-badge,
+.account-session-main .account-badge {
+  display: inline-flex;
+  width: auto;
+  max-width: max-content;
+  margin-top: 0;
+  font-family: var(--font-sans), system-ui, sans-serif;
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1.15;
+  letter-spacing: 0.04em;
+}
+
+.account-info-tile strong:has(.account-badge) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.account-panel-heading h2 .account-badge {
+  position: relative;
+  top: -0.15em;
+}

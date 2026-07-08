@@ -72,13 +72,13 @@ async function nextOrderSequenceInTx(tx: Prisma.TransactionClient, year: number)
   });
   const latestExistingSequence = parseSequenceFromCode(latestOrder?.code);
 
-  try {
-    await tx.orderCounter.create({
-      data: { year, value: latestExistingSequence }
-    });
-  } catch (error) {
-    if (prismaErrorCode(error) !== "P2002") throw error;
-  }
+  // Upsert nativo (INSERT ... ON CONFLICT): niente try/catch sul conflitto,
+  // che su Postgres abortirebbe l'intera transazione (SQLite invece perdonava).
+  await tx.orderCounter.upsert({
+    where: { year },
+    create: { year, value: latestExistingSequence },
+    update: {}
+  });
 
   if (latestExistingSequence > 0) {
     await tx.orderCounter.updateMany({

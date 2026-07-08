@@ -17,6 +17,7 @@ import {
   pruneExpiredCustomerSessions
 } from "@/lib/auth/customer-session";
 import { clearAttempts, isRateLimited, registerFailedAttempt } from "@/lib/auth/rate-limit";
+import { clearCustomerDisplayNameCookie, setCustomerDisplayNameCookie } from "@/lib/auth/display-name";
 import {
   consumeResetToken,
   createResetToken,
@@ -83,6 +84,7 @@ export async function registerCustomerAction(_prev: AuthState, formData: FormDat
   await sendVerificationEmail(customerId).catch(() => null);
 
   await createCustomerSession(customerId);
+  await setCustomerDisplayNameCookie(parsed.data.firstName);
   redirect("/account");
 }
 
@@ -129,6 +131,7 @@ export async function loginCustomerAction(_prev: AuthState, formData: FormData):
   clearAttempts(rateKey);
   await pruneExpiredCustomerSessions();
   const session = await createCustomerSession(customer.id);
+  await setCustomerDisplayNameCookie(customer.firstName);
   await enqueueEmail({
     toEmail: customer.email,
     subject: "Nuovo accesso al tuo account Sessa 1930",
@@ -140,12 +143,14 @@ export async function loginCustomerAction(_prev: AuthState, formData: FormData):
 
 export async function logoutCustomerAction(): Promise<void> {
   await destroyCustomerSession();
+  await clearCustomerDisplayNameCookie();
   redirect("/");
 }
 
 export async function logoutAllCustomerSessionsAction(): Promise<void> {
   const customer = await getSessionCustomer();
   if (customer) await destroyAllCustomerSessions(customer.id);
+  await clearCustomerDisplayNameCookie();
   redirect("/account/login?all=1");
 }
 
@@ -163,7 +168,10 @@ export async function logoutCustomerSessionAction(formData: FormData): Promise<v
   const sessionId = String(formData.get("sessionId") ?? "");
   if (!sessionId) redirect("/account/sicurezza?err=Sessione%20non%20valida");
   const result = await destroyCustomerSessionById(customer.id, sessionId);
-  if (result === "current") redirect("/account/login?all=1");
+  if (result === "current") {
+    await clearCustomerDisplayNameCookie();
+    redirect("/account/login?all=1");
+  }
   revalidatePath("/account/sicurezza");
   redirect(result === "missing" ? "/account/sicurezza?err=Sessione%20non%20trovata" : "/account/sicurezza?msg=Sessione%20chiusa");
 }

@@ -3,6 +3,31 @@ import type { ReactNode } from "react";
 
 type Tone = "terracotta" | "ceramic" | "brilliant" | "majolica";
 
+export type BadgeTone = "success" | "neutral" | "warn" | "info";
+
+/**
+ * Pill di stato per l'area personale: rende leggibile a colpo d'occhio
+ * cosa è attivo, cosa è da configurare e cosa richiede attenzione.
+ */
+export function AccountBadge({ tone = "neutral", children }: { tone?: BadgeTone; children: ReactNode }) {
+  return (
+    <span className="account-badge" data-tone={tone}>
+      {tone === "success" && (
+        <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <path d="m5 13 4 4L19 7" />
+        </svg>
+      )}
+      {tone === "warn" && (
+        <svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden="true">
+          <path d="M12 6v7" />
+          <path d="M12 17.5h.01" />
+        </svg>
+      )}
+      {children}
+    </span>
+  );
+}
+
 export function AccountPageIntro({
   kicker,
   title,
@@ -68,24 +93,31 @@ export function AccountMetricCard({
 export function AccountPanel({
   eyebrow,
   title,
+  badge,
   description,
   action,
   children,
-  className = ""
+  className = "",
+  id
 }: {
   eyebrow?: string;
   title: string;
+  badge?: ReactNode;
   description?: string;
   action?: ReactNode;
   children: ReactNode;
   className?: string;
+  id?: string;
 }) {
   return (
-    <section className={`account-panel ${className}`}>
+    <section id={id} className={`account-panel ${className}`}>
       <div className="account-panel-heading">
         <div>
           {eyebrow && <p>{eyebrow}</p>}
-          <h2>{title}</h2>
+          <h2>
+            {title}
+            {badge}
+          </h2>
           {description && <span>{description}</span>}
         </div>
         {action && <div className="account-panel-action">{action}</div>}
@@ -138,18 +170,25 @@ export function AccountInfoGrid({ children }: { children: ReactNode }) {
 export function AccountInfoTile({
   label,
   value,
+  badge,
   description,
   tone = "terracotta"
 }: {
   label: string;
-  value: string;
+  value?: string;
+  badge?: ReactNode;
   description?: string;
   tone?: Tone;
 }) {
   return (
     <div className="account-info-tile" data-tone={tone}>
       <p>{label}</p>
-      <strong>{value}</strong>
+      {(value || badge) && (
+        <strong>
+          {value}
+          {badge}
+        </strong>
+      )}
       {description && <span>{description}</span>}
     </div>
   );

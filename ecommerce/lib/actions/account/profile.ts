@@ -8,6 +8,7 @@ import { DomainError } from "@/lib/domain";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { requireCustomer, rotateCustomerSessions } from "@/lib/auth/customer-session";
 import { clearAttempts, isRateLimited, registerFailedAttempt } from "@/lib/auth/rate-limit";
+import { setCustomerDisplayNameCookie } from "@/lib/auth/display-name";
 import { enqueueEmail } from "@/lib/services/email";
 import { requestEmailChange, sendVerificationEmail } from "@/lib/services/customer-verification";
 import { formDataToObject, profileSchema } from "@/lib/validation";
@@ -37,6 +38,7 @@ export async function updateProfileAction(formData: FormData): Promise<void> {
       marketingOptIn: parsed.data.marketingOptIn
     }
   });
+  await setCustomerDisplayNameCookie(parsed.data.firstName);
   revalidatePath("/account", "layout");
   back("/account/profilo", "msg", "Profilo aggiornato.");
 }

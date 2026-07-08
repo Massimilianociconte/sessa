@@ -8,7 +8,7 @@
     "start": "next start -p 3001",
     "lint": "eslint .",
     "db:push": "prisma db push",
-    "db:deploy": "prisma db execute --schema prisma/schema.prisma --file prisma/migrations-postgres/0002_account_email_pwa_hardening.sql",
+    "db:deploy": "prisma db execute --schema prisma/schema.prisma --file prisma/migrations-postgres/0002_account_email_pwa_hardening.sql && prisma db execute --schema prisma/schema.prisma --file prisma/migrations-postgres/0003_passkeys.sql",
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
     "db:reset": "rm -f prisma/dev.db && prisma db push && tsx prisma/seed.ts",
@@ -16,6 +16,8 @@
   },
   "dependencies": {
     "@prisma/client": "^6.7.0",
+    "@simplewebauthn/browser": "^13.3.0",
+    "@simplewebauthn/server": "^13.3.2",
     "@types/nodemailer": "^8.0.1",
     "next": "16.2.9",
     "nodemailer": "^9.0.3",

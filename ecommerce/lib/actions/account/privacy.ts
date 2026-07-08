@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { DomainError } from "@/lib/domain";
 import { verifyPassword } from "@/lib/auth/password";
 import { destroyCustomerSession, requireCustomer } from "@/lib/auth/customer-session";
+import { clearCustomerDisplayNameCookie } from "@/lib/auth/display-name";
 import { deleteCustomerAccount } from "@/lib/services/customer-gdpr";
 
 /**
@@ -33,5 +34,6 @@ export async function deleteAccountAction(formData: FormData): Promise<void> {
     throw error;
   }
   await destroyCustomerSession();
+  await clearCustomerDisplayNameCookie();
   redirect("/?account=eliminato");
 }

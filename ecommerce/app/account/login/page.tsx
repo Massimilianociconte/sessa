@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import AuthShell from "@/components/account/AuthShell";
 import { CustomerLoginForm } from "@/components/account/CustomerAuthForms";
+import PasskeyLoginButton from "@/components/account/PasskeyLoginButton";
 import { getSessionCustomer } from "@/lib/auth/customer-session";
 
 export const dynamic = "force-dynamic";
@@ -48,6 +49,7 @@ export default async function CustomerLoginPage({
       {msg && <p className="auth-notice" role="status">{decodeURIComponent(msg)}</p>}
       {err && <p className="auth-notice" data-tone="warn" role="alert">{decodeURIComponent(err)}</p>}
       <CustomerLoginForm />
+      <PasskeyLoginButton />
     </AuthShell>
   );
 }

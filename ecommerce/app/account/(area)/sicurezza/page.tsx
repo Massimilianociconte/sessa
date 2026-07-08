@@ -1,4 +1,4 @@
-import { AccountEmptyState, AccountInfoGrid, AccountInfoTile, AccountPageIntro, AccountPanel } from "@/components/account/AccountUi";
+import { AccountBadge, AccountEmptyState, AccountInfoGrid, AccountInfoTile, AccountPageIntro, AccountPanel } from "@/components/account/AccountUi";
 import {
   logoutAllCustomerSessionsAction,
   logoutCustomerSessionAction,
@@ -6,8 +6,10 @@ import {
 } from "@/lib/actions/account/auth";
 import { deleteAccountAction } from "@/lib/actions/account/privacy";
 import { TwoFactorEnroll, TwoFactorManage } from "@/components/account/TwoFactorSetup";
+import PasskeyManager, { type PasskeyView } from "@/components/account/PasskeyManager";
 import { getSessionCustomer, listCustomerSessions } from "@/lib/auth/customer-session";
 import { getTwoFactorStatus } from "@/lib/services/customer-2fa";
+import { listPasskeys } from "@/lib/services/customer-passkeys";
 
 export const metadata = { title: "Sicurezza" };
 
@@ -55,27 +57,60 @@ export default async function AccountSecurityPage({
   searchParams: Promise<{ msg?: string; err?: string }>;
 }) {
   const [{ msg, err }, customer] = await Promise.all([searchParams, getSessionCustomer()]);
-  const [sessions, twoFactor] = customer
-    ? await Promise.all([listCustomerSessions(customer.id), getTwoFactorStatus(customer.id)])
-    : [[], { enabled: false, enabledAt: null, backupRemaining: 0, backupTotal: 0 }];
+  const [sessions, twoFactor, passkeys] = customer
+    ? await Promise.all([
+        listCustomerSessions(customer.id),
+        getTwoFactorStatus(customer.id),
+        listPasskeys(customer.id)
+      ])
+    : [[], { enabled: false, enabledAt: null, backupRemaining: 0, backupTotal: 0 }, []];
   const otherSessions = sessions.filter((session) => !session.isCurrent);
+  const passkeyViews: PasskeyView[] = passkeys.map((pk) => ({
+    id: pk.id,
+    name: pk.name,
+    deviceType: pk.deviceType,
+    backedUp: pk.backedUp,
+    createdAt: pk.createdAt.toISOString(),
+    lastUsedAt: pk.lastUsedAt ? pk.lastUsedAt.toISOString() : null
+  }));
 
   return (
     <div className="account-page-stack">
       <AccountPageIntro
         kicker="Protezione account"
         title="Sicurezza"
-        description="Controlla i dispositivi connessi, chiudi accessi specifici e ricevi avvisi quando qualcuno entra o cambia la password."
+        description="Passkey, verifica in due passaggi, dispositivi connessi e controllo dei tuoi dati: tutto in una pagina."
       />
 
       {msg && <p className="rounded-xl bg-brilliant/10 px-4 py-3 text-sm font-semibold text-emerald-800">{decodeURIComponent(msg)}</p>}
       {err && <p className="rounded-xl bg-terracotta/10 px-4 py-3 text-sm font-semibold text-terracotta">{decodeURIComponent(err)}</p>}
 
       <AccountInfoGrid>
-        <AccountInfoTile label="Sessioni attive" value={String(sessions.length)} description={`${otherSessions.length} dispositiv${otherSessions.length === 1 ? "o" : "i"} oltre a questo.`} tone="terracotta" />
+        <AccountInfoTile
+          label="Passkey"
+          badge={
+            passkeys.length > 0 ? (
+              <AccountBadge tone="success">Configurata</AccountBadge>
+            ) : (
+              <AccountBadge tone="neutral">Da configurare</AccountBadge>
+            )
+          }
+          description={
+            passkeys.length > 0
+              ? `${passkeys.length} dispositiv${passkeys.length === 1 ? "o" : "i"} con accesso rapido senza password.`
+              : "Accedi con Face ID, Touch ID o impronta: più veloce della password."
+          }
+          tone="terracotta"
+        />
         <AccountInfoTile
           label="Verifica in 2 passaggi"
-          value={twoFactor.enabled ? "Attiva" : "Non attiva"}
+          badge={
+            twoFactor.enabled ? (
+              <AccountBadge tone="success">Attiva</AccountBadge>
+            ) : (
+              <AccountBadge tone="neutral">Non attiva</AccountBadge>
+            )
+          }
           description={
             twoFactor.enabled
               ? `Codice app richiesto al login · ${twoFactor.backupRemaining} codici di recupero rimasti.`
@@ -83,16 +118,66 @@ export default async function AccountSecurityPage({
           }
           tone="ceramic"
         />
-        <AccountInfoTile label="Password" value="Protetta" description="Hash server-side e rotazione sessioni dopo cambio o reset." tone="brilliant" />
+        <AccountInfoTile
+          label="Email"
+          badge={
+            customer?.emailVerified ? (
+              <AccountBadge tone="success">Verificata</AccountBadge>
+            ) : (
+              <AccountBadge tone="warn">Da verificare</AccountBadge>
+            )
+          }
+          description={customer?.email}
+          tone="majolica"
+        />
+        <AccountInfoTile
+          label="Sessioni attive"
+          badge={<AccountBadge tone="info">{sessions.length} dispositiv{sessions.length === 1 ? "o" : "i"}</AccountBadge>}
+          description={`${otherSessions.length} oltre a questo. Revocabili qui sotto.`}
+          tone="brilliant"
+        />
       </AccountInfoGrid>
 
       <AccountPanel
+        id="passkey"
+        eyebrow="Accesso rapido"
+        title="Passkey"
+        badge={
+          passkeys.length > 0 ? (
+            <AccountBadge tone="success">Attiva</AccountBadge>
+          ) : (
+            <AccountBadge tone="neutral">Da configurare</AccountBadge>
+          )
+        }
+        description="Accedi in modo rapido e sicuro usando il tuo dispositivo: Face ID, Touch ID, impronta o PIN. Funziona su iPhone, iPad, Mac, Android e nei password manager compatibili. La password resta come alternativa."
+      >
+        <PasskeyManager passkeys={passkeyViews} />
+      </AccountPanel>
+
+      <AccountPanel
+        id="2fa"
         eyebrow="Autenticazione forte"
         title="Verifica in due passaggi (2FA)"
+        badge={
+          twoFactor.enabled ? (
+            <AccountBadge tone="success">Attiva</AccountBadge>
+          ) : (
+            <AccountBadge tone="neutral">Non attiva</AccountBadge>
+          )
+        }
         description={
           twoFactor.enabled
-            ? "Attiva: oltre alla password serve il codice dell'app authenticator. Gestisci qui codici di recupero e disattivazione."
+            ? "Oltre alla password serve il codice dell'app authenticator. Gestisci qui codici di recupero e disattivazione."
             : "Proteggi l'account con un codice temporaneo generato dal tuo telefono (TOTP standard: Google Authenticator, 1Password, Aegis…)."
+        }
+        action={
+          twoFactor.enabled ? (
+            <AccountBadge tone={twoFactor.backupRemaining > 0 ? "info" : "warn"}>
+              {twoFactor.backupRemaining > 0
+                ? `Codici di recupero: ${twoFactor.backupRemaining}/${twoFactor.backupTotal}`
+                : "Codici di recupero esauriti"}
+            </AccountBadge>
+          ) : undefined
         }
       >
         {twoFactor.enabled ? (
@@ -103,8 +188,10 @@ export default async function AccountSecurityPage({
       </AccountPanel>
 
       <AccountPanel
+        id="sessioni"
         eyebrow="Dispositivi"
         title="Sessioni attive"
+        badge={<AccountBadge tone="info">{sessions.length}</AccountBadge>}
         description="Ogni sessione è revocabile dal server: se la chiudi, il relativo cookie non può più autenticare richieste."
         action={
           <div className="account-session-actions">
@@ -135,11 +222,11 @@ export default async function AccountSecurityPage({
                     <strong>{deviceName(session.userAgent)}</strong>
                     <span>{session.isCurrent ? "Questo dispositivo" : "Sessione remota"}</span>
                   </div>
-                  {session.isCurrent && <span className="badge bg-brilliant/15 text-emerald-800">Attuale</span>}
+                  {session.isCurrent && <AccountBadge tone="success">Attuale</AccountBadge>}
                 </div>
                 <div className="account-session-meta">
                   <span>IP {maskIp(session.ipAddress)}</span>
-                  <span>Ultimo uso {formatDate(session.lastSeenAt)}</span>
+                  <span>Ultimo uso {formatDate(session.lastSeenAt ?? session.createdAt)}</span>
                   <span>Creata {formatDate(session.createdAt)}</span>
                   <span>Scade {formatDate(session.expiresAt)}</span>
                 </div>
@@ -156,6 +243,7 @@ export default async function AccountSecurityPage({
       </AccountPanel>
 
       <AccountPanel
+        id="password"
         eyebrow="Privacy"
         title="I tuoi dati"
         description="Scarica una copia completa dei tuoi dati o elimina definitivamente l'account. Gli ordini restano conservati in forma anonima per gli obblighi fiscali."
@@ -193,20 +281,37 @@ export default async function AccountSecurityPage({
       </AccountPanel>
 
       <AccountPanel
-        eyebrow="Protezione avanzata"
+        eyebrow="Riepilogo"
         title="Protezioni dell'account"
-        description="Lo stato delle difese attive su questo account. La passkey resta il prossimo passo naturale."
+        description="Lo stato delle difese attive su questo account, in un colpo d'occhio."
       >
         <div className="account-security-grid">
           {[
-            ["App authenticator", "TOTP con QR code, conferma iniziale e codici di recupero monouso.", twoFactor.enabled ? "Attivo" : "Attivabile qui sopra"],
-            ["Passkey", "Accesso moderno con Face ID, Touch ID o chiave dispositivo compatibile.", "Modulo successivo"],
-            ["Avvisi sensibili", "Email automatica per nuovi accessi, cambio password, cambio email e 2FA.", "Attivo"]
-          ].map(([title, copy, status]) => (
-            <div key={title}>
-              <strong>{title}</strong>
-              <p>{copy}</p>
-              <span>{status}</span>
+            {
+              title: "Passkey",
+              copy: "Accesso moderno con Face ID, Touch ID o chiave del dispositivo.",
+              badge: passkeys.length > 0 ? <AccountBadge tone="success">Attiva</AccountBadge> : <AccountBadge tone="neutral">Da configurare</AccountBadge>
+            },
+            {
+              title: "App authenticator",
+              copy: "TOTP con QR code, conferma iniziale e codici di recupero monouso.",
+              badge: twoFactor.enabled ? <AccountBadge tone="success">Attiva</AccountBadge> : <AccountBadge tone="neutral">Attivabile qui sopra</AccountBadge>
+            },
+            {
+              title: "Email verificata",
+              copy: "Conferma dell'indirizzo per recuperi sicuri e comunicazioni affidabili.",
+              badge: customer?.emailVerified ? <AccountBadge tone="success">Verificata</AccountBadge> : <AccountBadge tone="warn">Da verificare</AccountBadge>
+            },
+            {
+              title: "Avvisi sensibili",
+              copy: "Email automatica per nuovi accessi, cambio password, cambio email, 2FA e passkey.",
+              badge: <AccountBadge tone="success">Attivi</AccountBadge>
+            }
+          ].map((item) => (
+            <div key={item.title}>
+              <strong>{item.title}</strong>
+              <p>{item.copy}</p>
+              {item.badge}
             </div>
           ))}
         </div>

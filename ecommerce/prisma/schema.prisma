@@ -226,6 +226,7 @@ model Customer {
   totpEnabledAt         DateTime?
   totpLastStep          Int? // anti-replay: ultimo time-step accettato
   backupCodes           CustomerBackupCode[]
+  passkeys              CustomerPasskey[]
   orders         Order[]
   addresses      Address[]
   sessions       CustomerSession[]
@@ -241,6 +242,25 @@ model Customer {
   @@index([createdAt])
   @@index([marketingOptIn])
   @@index([preferredLocationId])
+}
+
+// Passkey WebAuthn (FIDO2): credenziali discoverable per login senza password.
+// publicKey/credentialId in base64url; counter per anti-clonazione.
+model CustomerPasskey {
+  id           String    @id @default(cuid())
+  customerId   String
+  customer     Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  credentialId String    @unique
+  publicKey    String
+  counter      Int       @default(0)
+  transports   String? // csv: es. "internal,hybrid"
+  deviceType   String? // singleDevice | multiDevice
+  backedUp     Boolean   @default(false)
+  name         String // etichetta scelta/derivata (es. "iPhone di Max")
+  createdAt    DateTime  @default(now())
+  lastUsedAt   DateTime?
+
+  @@index([customerId])
 }
 
 // Codici di recupero 2FA monouso (mostrati in chiaro solo alla generazione).
