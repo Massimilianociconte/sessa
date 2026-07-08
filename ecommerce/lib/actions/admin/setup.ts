@@ -27,7 +27,7 @@ export async function setupFirstAdminAction(_prev: SetupState, formData: FormDat
   const h = await headers();
   const ip = h.get("x-forwarded-for")?.split(",")[0]?.trim() || h.get("x-real-ip") || "local";
   const rateKey = `admin-setup:${ip}`;
-  if (isRateLimited(rateKey) !== null) {
+  if ((await isRateLimited(rateKey)) !== null) {
     return { error: "Troppi tentativi. Riprova tra qualche minuto." };
   }
 
@@ -43,7 +43,7 @@ export async function setupFirstAdminAction(_prev: SetupState, formData: FormDat
   if (envToken) {
     const provided = String(formData.get("setupToken") ?? "");
     if (!provided || !safeEqual(provided, envToken)) {
-      registerFailedAttempt(rateKey);
+      await registerFailedAttempt(rateKey);
       return { error: "Token di configurazione errato." };
     }
   }
@@ -74,7 +74,7 @@ export async function setupFirstAdminAction(_prev: SetupState, formData: FormDat
       return { error: "Il gestionale è già configurato: accedi dalla pagina di login." };
     }
     // Vincolo unique email o altro errore imprevisto.
-    registerFailedAttempt(rateKey);
+    await registerFailedAttempt(rateKey);
     return { error: "Creazione non riuscita. Riprova." };
   }
 

@@ -96,7 +96,7 @@ export async function loginCustomerAction(_prev: AuthState, formData: FormData):
   if (!parsed.success) return { error: "Inserisci email e password." };
 
   const rateKey = `cust:${await clientIp()}:${parsed.data.email}`;
-  const blockedMs = isRateLimited(rateKey);
+  const blockedMs = await isRateLimited(rateKey);
   if (blockedMs !== null) {
     const minutes = Math.ceil(blockedMs / 60000);
     return { error: `Troppi tentativi. Riprova tra ${minutes} minut${minutes === 1 ? "o" : "i"}.` };
@@ -104,7 +104,7 @@ export async function loginCustomerAction(_prev: AuthState, formData: FormData):
 
   const customer = await prisma.customer.findUnique({ where: { email: parsed.data.email } });
   if (!customer || !customer.passwordHash || !verifyPassword(parsed.data.password, customer.passwordHash)) {
-    registerFailedAttempt(rateKey);
+    await registerFailedAttempt(rateKey);
     return { error: "Credenziali non valide." };
   }
 
@@ -116,19 +116,19 @@ export async function loginCustomerAction(_prev: AuthState, formData: FormData):
       return { error: null, needsTotp: true };
     }
     const totpKey = `cust-totp:${await clientIp()}:${customer.id}`;
-    const totpBlocked = isRateLimited(totpKey);
+    const totpBlocked = await isRateLimited(totpKey);
     if (totpBlocked !== null) {
       const minutes = Math.ceil(totpBlocked / 60000);
       return { error: `Troppi codici errati. Riprova tra ${minutes} minut${minutes === 1 ? "o" : "i"}.`, needsTotp: true };
     }
     if (!(await verifySecondFactor(customer.id, totpCode))) {
-      registerFailedAttempt(totpKey);
+      await registerFailedAttempt(totpKey);
       return { error: "Codice di verifica non valido.", needsTotp: true };
     }
-    clearAttempts(totpKey);
+    await clearAttempts(totpKey);
   }
 
-  clearAttempts(rateKey);
+  await clearAttempts(rateKey);
   await pruneExpiredCustomerSessions();
   const session = await createCustomerSession(customer.id);
   await setCustomerDisplayNameCookie(customer.firstName);
@@ -186,8 +186,8 @@ export async function requestResetAction(formData: FormData): Promise<void> {
 
   const email = parsed.data.email.toLowerCase();
   const resetKey = `cust-reset:${await clientIp()}:${email}`;
-  if (isRateLimited(resetKey) !== null) redirect("/account/recupera?sent=1");
-  registerFailedAttempt(resetKey);
+  if ((await isRateLimited(resetKey)) !== null) redirect("/account/recupera?sent=1");
+  await registerFailedAttempt(resetKey);
 
   const token = await createResetToken(email);
   if (token) {

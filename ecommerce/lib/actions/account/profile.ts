@@ -74,10 +74,10 @@ export async function changeCustomerPasswordAction(formData: FormData): Promise<
 export async function resendVerificationAction(): Promise<void> {
   const customer = await requireCustomer();
   const rateKey = `verify-resend:${await clientIp()}:${customer.id}`;
-  if (isRateLimited(rateKey) !== null) {
+  if ((await isRateLimited(rateKey)) !== null) {
     back("/account/profilo", "err", "Hai già richiesto una verifica da poco. Riprova più tardi.");
   }
-  registerFailedAttempt(rateKey);
+  await registerFailedAttempt(rateKey);
   const result = await sendVerificationEmail(customer.id);
   if (!result) back("/account/profilo", "msg", "Email già verificata.");
   if (result.delivery.status === "FAILED") {
@@ -99,17 +99,17 @@ export async function requestEmailChangeAction(formData: FormData): Promise<void
   }
 
   const rateKey = `email-change:${await clientIp()}:${customer.id}`;
-  const blockedMs = isRateLimited(rateKey);
+  const blockedMs = await isRateLimited(rateKey);
   if (blockedMs !== null) {
     back("/account/profilo", "err", "Troppi tentativi. Riprova più tardi.");
   }
 
   const dbCustomer = await prisma.customer.findUnique({ where: { id: customer.id } });
   if (!dbCustomer?.passwordHash || !verifyPassword(password, dbCustomer.passwordHash)) {
-    registerFailedAttempt(rateKey);
+    await registerFailedAttempt(rateKey);
     back("/account/profilo", "err", "Password errata.");
   }
-  clearAttempts(rateKey);
+  await clearAttempts(rateKey);
 
   try {
     const result = await requestEmailChange(customer.id, newEmail);

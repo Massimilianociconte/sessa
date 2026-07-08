@@ -55,17 +55,17 @@ export async function confirmTotpAction(_prev: TwoFactorState, formData: FormDat
   const customer = await currentCustomerOrLogin();
   const code = String(formData.get("code") ?? "");
   const rateKey = `totp-confirm:${await clientIp()}:${customer.id}`;
-  if (isRateLimited(rateKey) !== null) {
+  if ((await isRateLimited(rateKey)) !== null) {
     return { error: "Troppi tentativi: riprova tra qualche minuto.", step: "pending" };
   }
   try {
     const backupCodes = await confirmTotpEnrollment(customer.id, code);
-    clearAttempts(rateKey);
+    await clearAttempts(rateKey);
     revalidatePath("/account/sicurezza");
     return { error: null, step: "enabled", backupCodes };
   } catch (error) {
     if (error instanceof DomainError) {
-      registerFailedAttempt(rateKey);
+      await registerFailedAttempt(rateKey);
       return { error: error.message, step: "pending" };
     }
     throw error;
@@ -80,17 +80,17 @@ export async function regenerateBackupCodesAction(
   const customer = await currentCustomerOrLogin();
   const code = String(formData.get("code") ?? "");
   const rateKey = `totp-regen:${await clientIp()}:${customer.id}`;
-  if (isRateLimited(rateKey) !== null) {
+  if ((await isRateLimited(rateKey)) !== null) {
     return { error: "Troppi tentativi: riprova tra qualche minuto.", step: "idle" };
   }
   try {
     const backupCodes = await regenerateBackupCodes(customer.id, code);
-    clearAttempts(rateKey);
+    await clearAttempts(rateKey);
     revalidatePath("/account/sicurezza");
     return { error: null, step: "codes", backupCodes };
   } catch (error) {
     if (error instanceof DomainError) {
-      registerFailedAttempt(rateKey);
+      await registerFailedAttempt(rateKey);
       return { error: error.message, step: "idle" };
     }
     throw error;
@@ -103,23 +103,23 @@ export async function disableTotpAction(formData: FormData): Promise<void> {
   const password = String(formData.get("password") ?? "");
   const code = String(formData.get("code") ?? "");
   const rateKey = `totp-disable:${await clientIp()}:${customer.id}`;
-  if (isRateLimited(rateKey) !== null) {
+  if ((await isRateLimited(rateKey)) !== null) {
     redirect(`/account/sicurezza?err=${encodeURIComponent("Troppi tentativi: riprova più tardi.")}`);
   }
   if (!(await verifyOwnPassword(customer.id, password))) {
-    registerFailedAttempt(rateKey);
+    await registerFailedAttempt(rateKey);
     redirect(`/account/sicurezza?err=${encodeURIComponent("Password errata.")}`);
   }
   try {
     await disableTotp(customer.id, code);
   } catch (error) {
     if (error instanceof DomainError) {
-      registerFailedAttempt(rateKey);
+      await registerFailedAttempt(rateKey);
       redirect(`/account/sicurezza?err=${encodeURIComponent(error.message)}`);
     }
     throw error;
   }
-  clearAttempts(rateKey);
+  await clearAttempts(rateKey);
   revalidatePath("/account/sicurezza");
   redirect(`/account/sicurezza?msg=${encodeURIComponent("Verifica in due passaggi disattivata.")}`);
 }

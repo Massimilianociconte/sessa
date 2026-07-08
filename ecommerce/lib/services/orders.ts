@@ -41,7 +41,7 @@ export function buildOrderWhere(filter?: OrderFilter): Prisma.OrderWhereInput {
   if (filter?.paymentStatus) where.paymentStatus = filter.paymentStatus;
   if (filter?.paymentMethod) where.paymentMethod = filter.paymentMethod;
   if (filter?.fulfillmentType) where.fulfillmentType = filter.fulfillmentType;
-  if (filter?.discountCode) where.discountCodeSnapshot = { contains: filter.discountCode.toUpperCase() };
+  if (filter?.discountCode) where.discountCodeSnapshot = { contains: filter.discountCode.toUpperCase(), mode: "insensitive" };
   if (filter?.placedFrom || filter?.placedTo) {
     where.placedAt = {
       ...(filter.placedFrom ? { gte: filter.placedFrom } : {}),
@@ -60,18 +60,18 @@ export function buildOrderWhere(filter?: OrderFilter): Prisma.OrderWhereInput {
   if (filter?.query) {
     const q = filter.query.trim();
     where.OR = [
-      { id: { contains: q } },
-      { code: { contains: q } },
-      { customerId: { contains: q } },
-      { email: { contains: q } },
-      { phone: { contains: q } },
-      { shipFullName: { contains: q } },
-      { locationName: { contains: q } },
-      { paymentRef: { contains: q } },
-      { paymentMethod: { contains: q } },
-      { discountCodeSnapshot: { contains: q.toUpperCase() } },
-      { giftCardCodeSnapshot: { contains: q.toUpperCase() } },
-      { referralCodeSnapshot: { contains: q.toUpperCase() } }
+      { id: { contains: q, mode: "insensitive" } },
+      { code: { contains: q, mode: "insensitive" } },
+      { customerId: { contains: q, mode: "insensitive" } },
+      { email: { contains: q, mode: "insensitive" } },
+      { phone: { contains: q, mode: "insensitive" } },
+      { shipFullName: { contains: q, mode: "insensitive" } },
+      { locationName: { contains: q, mode: "insensitive" } },
+      { paymentRef: { contains: q, mode: "insensitive" } },
+      { paymentMethod: { contains: q, mode: "insensitive" } },
+      { discountCodeSnapshot: { contains: q.toUpperCase(), mode: "insensitive" } },
+      { giftCardCodeSnapshot: { contains: q.toUpperCase(), mode: "insensitive" } },
+      { referralCodeSnapshot: { contains: q.toUpperCase(), mode: "insensitive" } }
     ];
   }
   return where;

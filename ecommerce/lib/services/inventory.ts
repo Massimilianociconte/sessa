@@ -48,9 +48,9 @@ export async function listInventory(filter?: InventoryFilter | string) {
         ? {
             variant: {
               OR: [
-                { name: { contains: f.query } },
-                { sku: { contains: f.query } },
-                { product: { name: { contains: f.query } } }
+                { name: { contains: f.query, mode: "insensitive" } },
+                { sku: { contains: f.query, mode: "insensitive" } },
+                { product: { name: { contains: f.query, mode: "insensitive" } } }
               ]
             }
           }

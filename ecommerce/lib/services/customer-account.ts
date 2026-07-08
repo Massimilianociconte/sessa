@@ -56,18 +56,26 @@ export async function registerCustomer(input: {
     });
     return existing.id;
   }
-  const created = await prisma.customer.create({
-    data: {
-      email,
-      passwordHash,
-      firstName: input.firstName,
-      lastName: input.lastName,
-      phone: input.phone,
-      marketingOptIn: input.marketingOptIn,
-      referralCode
+  try {
+    const created = await prisma.customer.create({
+      data: {
+        email,
+        passwordHash,
+        firstName: input.firstName,
+        lastName: input.lastName,
+        phone: input.phone,
+        marketingOptIn: input.marketingOptIn,
+        referralCode
+      }
+    });
+    return created.id;
+  } catch (error) {
+    // Doppio submit simultaneo: il vincolo unique sull'email vince la race.
+    if (typeof error === "object" && error !== null && (error as { code?: string }).code === "P2002") {
+      throw new DomainError("Esiste già un account con questa email.", "EMAIL_TAKEN");
     }
-  });
-  return created.id;
+    throw error;
+  }
 }
 
 export async function getAccountOverview(customerId: string) {

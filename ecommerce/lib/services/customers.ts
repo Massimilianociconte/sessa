@@ -5,9 +5,9 @@ export async function listCustomers(query?: string) {
     where: query
       ? {
           OR: [
-            { email: { contains: query } },
-            { firstName: { contains: query } },
-            { lastName: { contains: query } }
+            { email: { contains: query, mode: "insensitive" } },
+            { firstName: { contains: query, mode: "insensitive" } },
+            { lastName: { contains: query, mode: "insensitive" } }
           ]
         }
       : undefined,

@@ -17,9 +17,11 @@ function withConnectionLimit(url: string | undefined): string | undefined {
     const parsed = new URL(url);
     if ((parsed.protocol === "postgres:" || parsed.protocol === "postgresql:") && !parsed.searchParams.has("connection_limit")) {
       // Next/Netlify build e funzioni serverless possono aprire piu worker in parallelo.
-      // Prisma di default crea pool piu ampi: con Postgres in session mode basta poco
-      // per saturare il limite. Un pool per processo mantiene build/runtime stabili.
-      parsed.searchParams.set("connection_limit", process.env.NODE_ENV === "production" ? "1" : "2");
+      // Prisma di default crea pool piu ampi e saturerebbe Postgres; ma 1 sola
+      // connessione SERIALIZZA le Promise.all (dashboard ≈ 13 query in fila sulla
+      // rete). Col pooler in transaction mode (pgbouncer) un piccolo pool per
+      // lambda e sicuro e parallelizza le letture.
+      parsed.searchParams.set("connection_limit", process.env.NODE_ENV === "production" ? "5" : "3");
       parsed.searchParams.set("pool_timeout", parsed.searchParams.get("pool_timeout") ?? "20");
       return parsed.toString();
     }

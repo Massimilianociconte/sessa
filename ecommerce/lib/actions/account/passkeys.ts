@@ -89,7 +89,7 @@ export async function startPasskeyLoginAction(): Promise<
 > {
   try {
     const rateKey = `passkey-login:${await clientIp()}`;
-    if (isRateLimited(rateKey) !== null) {
+    if ((await isRateLimited(rateKey)) !== null) {
       return { ok: false, error: "Troppi tentativi. Riprova tra qualche minuto." };
     }
     const options = await beginPasskeyLogin();
@@ -110,14 +110,14 @@ export async function finishPasskeyLoginAction(
       where: { id: customerId },
       select: { firstName: true, email: true }
     });
-    clearAttempts(rateKey);
+    await clearAttempts(rateKey);
     await createCustomerSession(customerId);
     await setCustomerDisplayNameCookie(customer?.firstName ?? null);
     // Il redirect lo fa il client dopo l'esito: le Response WebAuthn non
     // sopravvivono a un redirect() dentro l'action senza perdere l'errore.
     return { ok: true, data: { redirectTo: "/account" } };
   } catch (error) {
-    registerFailedAttempt(rateKey);
+    await registerFailedAttempt(rateKey);
     return fail(error, "Accesso con passkey non riuscito.");
   }
 }

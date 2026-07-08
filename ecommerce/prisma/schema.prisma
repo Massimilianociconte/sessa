@@ -275,6 +275,18 @@ model CustomerBackupCode {
   @@index([customerId])
 }
 
+// Rate limiting condiviso tra le lambda (la memoria di processo su serverless
+// si azzera a ogni cold start e non è condivisa tra istanze).
+model RateLimitEntry {
+  key          String    @id // es. "cust:<ip>:<email>"
+  count        Int       @default(0)
+  firstAt      DateTime  @default(now())
+  blockedUntil DateTime?
+  updatedAt    DateTime  @updatedAt
+
+  @@index([updatedAt])
+}
+
 // Token monouso per azioni sensibili account: verifica email e conferma cambio email.
 model CustomerToken {
   id         String    @id @default(cuid())

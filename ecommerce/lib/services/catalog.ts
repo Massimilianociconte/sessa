@@ -142,10 +142,10 @@ export async function listStoreProducts(
       ...(query
         ? {
             OR: [
-              { name: { contains: query } },
-              { shortDescription: { contains: query } },
-              { description: { contains: query } },
-              { tags: { contains: query } }
+              { name: { contains: query, mode: "insensitive" } },
+              { shortDescription: { contains: query, mode: "insensitive" } },
+              { description: { contains: query, mode: "insensitive" } },
+              { tags: { contains: query, mode: "insensitive" } }
             ]
           }
         : {}),

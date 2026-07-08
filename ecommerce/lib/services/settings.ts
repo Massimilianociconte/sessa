@@ -55,3 +55,18 @@ export async function setSetting(key: string, value: unknown): Promise<void> {
   });
   invalidateMemo(`setting:${key}`);
 }
+
+/** Salva più impostazioni in una sola transazione (1 round-trip invece di N). */
+export async function setSettings(entries: Record<string, unknown>): Promise<void> {
+  await prisma.$transaction(
+    Object.entries(entries).map(([key, value]) => {
+      const serialized = JSON.stringify(value);
+      return prisma.setting.upsert({
+        where: { key },
+        update: { value: serialized },
+        create: { key, value: serialized }
+      });
+    })
+  );
+  for (const key of Object.keys(entries)) invalidateMemo(`setting:${key}`);
+}

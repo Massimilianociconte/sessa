@@ -5,7 +5,7 @@ import { prisma } from "@/lib/db";
 import { requireAdmin, rotateSessionsForUser } from "@/lib/auth/session";
 import { audit } from "@/lib/audit";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
-import { setSetting } from "@/lib/services/settings";
+import { setSettings } from "@/lib/services/settings";
 import { formDataToObject, storeSettingsSchema } from "@/lib/validation";
 import { backWithError, backWithMessage, firstZodMessage } from "./helpers";
 
@@ -16,15 +16,14 @@ export async function saveStoreSettingsAction(formData: FormData): Promise<void>
   const parsed = storeSettingsSchema.safeParse(formDataToObject(formData));
   if (!parsed.success) backWithError(PATH, firstZodMessage(parsed.error));
 
-  await setSetting("store.name", parsed.data.storeName);
-  await setSetting("store.email", parsed.data.storeEmail);
-  await setSetting("store.phone", parsed.data.storePhone ?? "");
-  await setSetting("store.address", parsed.data.storeAddress ?? "");
-  await setSetting("store.vat", parsed.data.storeVat ?? "");
-  await setSetting(
-    "payments.bankTransferInstructions",
-    parsed.data.bankTransferInstructions ?? ""
-  );
+  await setSettings({
+    "store.name": parsed.data.storeName,
+    "store.email": parsed.data.storeEmail,
+    "store.phone": parsed.data.storePhone ?? "",
+    "store.address": parsed.data.storeAddress ?? "",
+    "store.vat": parsed.data.storeVat ?? "",
+    "payments.bankTransferInstructions": parsed.data.bankTransferInstructions ?? ""
+  });
   await audit(user.email, "settings.update", "Setting", "store");
   revalidatePath("/", "layout");
   backWithMessage(PATH, "Impostazioni salvate.");
