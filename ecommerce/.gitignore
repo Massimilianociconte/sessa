@@ -13,3 +13,6 @@ prisma/dev.db-journal
 .env
 .env.local
 .netlify
+
+# generato dal bundling edge functions di Netlify
+deno.lock

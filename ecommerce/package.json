@@ -10,7 +10,8 @@
     "db:push": "prisma db push",
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
-    "db:reset": "rm -f prisma/dev.db && prisma db push && tsx prisma/seed.ts"
+    "db:reset": "rm -f prisma/dev.db && prisma db push && tsx prisma/seed.ts",
+    "deploy": "mkdir -p .git && netlify deploy --prod"
   },
   "dependencies": {
     "@prisma/client": "^6.7.0",

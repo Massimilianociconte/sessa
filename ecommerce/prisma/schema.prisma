@@ -7,7 +7,10 @@
 // sede). ProductVariant è la definizione del prodotto (nome, SKU, prezzo base, IVA).
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // "rhel-openssl-3.0.x" serve alle lambda Netlify (Amazon Linux) quando la
+  // build parte da macOS: senza, il query engine giusto non finisce nel bundle.
+  binaryTargets = ["native", "rhel-openssl-3.0.x"]
 }
 
 datasource db {
