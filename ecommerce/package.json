@@ -15,9 +15,9 @@
     "db:deploy": "sh prisma/run-postgres-migrations.sh",
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
-    "deploy": "mkdir -p .git && netlify deploy --context deploy-preview",
-    "deploy:preview": "mkdir -p .git && netlify deploy --context deploy-preview",
-    "deploy:prod": "mkdir -p .git && netlify deploy --prod --context production"
+    "deploy": "mkdir -p .git && npx --yes netlify-cli deploy --context deploy-preview",
+    "deploy:preview": "mkdir -p .git && npx --yes netlify-cli deploy --context deploy-preview",
+    "deploy:prod": "mkdir -p .git && npx --yes netlify-cli deploy --prod --context production"
   },
   "engines": {
     "node": "24.x"
