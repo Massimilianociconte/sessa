@@ -20,6 +20,10 @@ export async function exportCustomerData(customerId: string) {
       referralsMade: true,
       referralUsed: true,
       sessions: { select: { createdAt: true, lastSeenAt: true, expiresAt: true, ipAddress: true, userAgent: true } },
+      passkeys: {
+        select: { name: true, deviceType: true, backedUp: true, createdAt: true, lastUsedAt: true }
+      },
+      backupCodes: { select: { usedAt: true, createdAt: true } },
       preferredLocation: { select: { name: true, city: true } }
     }
   });
@@ -94,7 +98,15 @@ export async function exportCustomerData(customerId: string) {
       made: customer.referralsMade.map((r) => ({ status: r.status, createdAt: r.createdAt })),
       used: customer.referralUsed ? { status: customer.referralUsed.status, createdAt: customer.referralUsed.createdAt } : null
     },
-    sessions: customer.sessions
+    sessions: customer.sessions,
+    security: {
+      twoFactorEnabled: Boolean(customer.totpEnabledAt),
+      backupCodes: {
+        total: customer.backupCodes.length,
+        remaining: customer.backupCodes.filter((code) => !code.usedAt).length
+      },
+      passkeys: customer.passkeys
+    }
   };
 }
 
@@ -108,6 +120,12 @@ export async function deleteCustomerAccount(customerId: string): Promise<void> {
   if (!customer || customer.anonymizedAt) throw new DomainError("Account non valido.");
   const originalEmail = customer.email;
   const firstName = customer.firstName;
+  const anonymousEmail = `eliminato-${customerId}@anonimo.sessa1930.invalid`;
+  const linkedOrders = await prisma.order.findMany({
+    where: { customerId },
+    select: { id: true }
+  });
+  const orderIds = linkedOrders.map((order) => order.id);
 
   await prisma.$transaction([
     prisma.address.deleteMany({ where: { customerId } }),
@@ -115,10 +133,47 @@ export async function deleteCustomerAccount(customerId: string): Promise<void> {
     prisma.passwordResetToken.deleteMany({ where: { customerId } }),
     prisma.customerToken.deleteMany({ where: { customerId } }),
     prisma.customerBackupCode.deleteMany({ where: { customerId } }),
+    prisma.customerPasskey.deleteMany({ where: { customerId } }),
+    // Scollega i record finanziari/promozionali che devono sopravvivere.
+    prisma.giftCard.updateMany({ where: { customerId }, data: { customerId: null } }),
+    prisma.discountRedemption.updateMany({ where: { customerId }, data: { customerId: null } }),
+    prisma.discountCode.updateMany({
+      where: { customerId },
+      data: { customerId: null, isActive: false }
+    }),
+    prisma.referral.deleteMany({
+      where: { OR: [{ referrerId: customerId }, { invitedCustomerId: customerId }] }
+    }),
+    prisma.order.updateMany({
+      where: { customerId },
+      data: {
+        customerId: null,
+        email: anonymousEmail,
+        phone: null,
+        shipFullName: "Cliente anonimizzato",
+        shipLine1: "",
+        shipLine2: null,
+        shipCity: "",
+        shipProvince: "",
+        shipPostalCode: "",
+        customerNote: null,
+        adminNote: null,
+        trackingCarrier: null,
+        trackingCode: null,
+        giftCardCodeSnapshot: null,
+        referralCodeSnapshot: null
+      }
+    }),
+    prisma.orderEvent.updateMany({
+      where: { orderId: { in: orderIds } },
+      data: { message: "Evento ordine conservato con contenuto anonimizzato." }
+    }),
+    // L'outbox contiene destinatario e corpo in chiaro: rientra nei dati da cancellare.
+    prisma.emailMessage.deleteMany({ where: { toEmail: originalEmail } }),
     prisma.customer.update({
       where: { id: customerId },
       data: {
-        email: `eliminato-${customerId}@anonimo.sessa1930.invalid`,
+        email: anonymousEmail,
         firstName: "Account",
         lastName: "Eliminato",
         phone: null,
@@ -138,10 +193,15 @@ export async function deleteCustomerAccount(customerId: string): Promise<void> {
     })
   ]);
 
-  await enqueueEmail({
+  const confirmation = await enqueueEmail({
     toEmail: originalEmail,
     subject: "Il tuo account Sessa 1930 è stato eliminato",
     type: "ACCOUNT_DELETED",
     body: `Ciao ${firstName},\n\ncome richiesto, il tuo account Sessa 1930 è stato eliminato e i dati personali anonimizzati. Gli ordini restano conservati in forma anonima per gli obblighi di legge.\n\nGrazie per essere stato con noi.`
-  });
+  }).catch(() => null);
+  // La conferma viene consegnata inline e poi rimossa dall'outbox per non
+  // reintrodurre l'email appena cancellata.
+  if (confirmation) {
+    await prisma.emailMessage.deleteMany({ where: { id: confirmation.id } }).catch(() => undefined);
+  }
 }

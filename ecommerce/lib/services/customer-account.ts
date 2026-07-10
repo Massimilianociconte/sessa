@@ -21,6 +21,66 @@ async function generateReferralCode(firstName: string): Promise<string> {
   return `SESSA-${randomBytes(5).toString("hex").toUpperCase()}`;
 }
 
+export type CustomerRegistrationRequest = {
+  customerId: string;
+  email: string;
+  firstName: string;
+  alreadyRegistered: boolean;
+};
+
+/**
+ * Avvia una registrazione email-first senza mai reclamare uno storico guest in
+ * base al solo input del browser. La password verrà scelta dal proprietario
+ * dell'email tramite PasswordResetToken.
+ */
+export async function beginCustomerRegistrationRequest(input: {
+  email: string;
+  firstName: string;
+  lastName: string;
+  phone?: string;
+}): Promise<CustomerRegistrationRequest> {
+  const email = input.email.toLowerCase();
+  let customer = await prisma.customer.findUnique({
+    where: { email },
+    select: { id: true, email: true, firstName: true, passwordHash: true, anonymizedAt: true }
+  });
+
+  if (!customer) {
+    try {
+      const created = await prisma.customer.create({
+        data: {
+          email,
+          firstName: input.firstName,
+          lastName: input.lastName,
+          phone: input.phone,
+          marketingOptIn: false,
+          passwordHash: null,
+          emailVerified: false,
+          referralCode: await generateReferralCode(input.firstName)
+        },
+        select: { id: true, email: true, firstName: true, passwordHash: true, anonymizedAt: true }
+      });
+      customer = created;
+    } catch (error) {
+      if (typeof error !== "object" || error === null || (error as { code?: string }).code !== "P2002") {
+        throw error;
+      }
+      customer = await prisma.customer.findUnique({
+        where: { email },
+        select: { id: true, email: true, firstName: true, passwordHash: true, anonymizedAt: true }
+      });
+    }
+  }
+
+  if (!customer || customer.anonymizedAt) throw new DomainError("Registrazione non disponibile.");
+  return {
+    customerId: customer.id,
+    email: customer.email,
+    firstName: customer.firstName,
+    alreadyRegistered: Boolean(customer.passwordHash)
+  };
+}
+
 /**
  * Registra un account. Se esiste già un cliente "ospite" (creato da un checkout
  * senza registrazione) con la stessa email, l'account viene "reclamato" e lo
@@ -346,32 +406,50 @@ export async function setDefaultAddress(customerId: string, addressId: string): 
 /** Crea un token di reset per l'email; ritorna il token in chiaro se il cliente esiste. */
 export async function createResetToken(email: string): Promise<string | null> {
   const customer = await prisma.customer.findUnique({ where: { email: email.toLowerCase() } });
-  if (!customer) return null;
+  if (!customer || customer.anonymizedAt) return null;
   const token = randomBytes(32).toString("hex");
-  await prisma.passwordResetToken.create({
-    data: {
-      tokenHash: hashToken(token),
-      customerId: customer.id,
-      expiresAt: new Date(Date.now() + RESET_TTL_MS)
-    }
-  });
+  await prisma.$transaction([
+    prisma.passwordResetToken.deleteMany({
+      where: { customerId: customer.id, usedAt: null }
+    }),
+    prisma.passwordResetToken.create({
+      data: {
+        tokenHash: hashToken(token),
+        customerId: customer.id,
+        expiresAt: new Date(Date.now() + RESET_TTL_MS)
+      }
+    })
+  ]);
   return token;
 }
 
-export async function consumeResetToken(token: string, newPassword: string): Promise<void> {
+export async function consumeResetToken(
+  token: string,
+  newPassword: string
+): Promise<{ customerId: string; activated: boolean }> {
   const row = await prisma.passwordResetToken.findUnique({
     where: { tokenHash: hashToken(token) },
-    include: { customer: { select: { email: true, firstName: true } } }
+    include: { customer: { select: { email: true, firstName: true, passwordHash: true, anonymizedAt: true } } }
   });
-  if (!row || row.usedAt || row.expiresAt < new Date()) {
+  if (!row || row.usedAt || row.expiresAt < new Date() || row.customer.anonymizedAt) {
     throw new DomainError("Link di reimpostazione non valido o scaduto.");
   }
+  const activated = !row.customer.passwordHash;
   await prisma.$transaction(async (tx) => {
+    const claimed = await tx.passwordResetToken.updateMany({
+      where: { id: row.id, usedAt: null, expiresAt: { gt: new Date() } },
+      data: { usedAt: new Date() }
+    });
+    if (claimed.count !== 1) {
+      throw new DomainError("Link di reimpostazione non valido o già utilizzato.");
+    }
     await tx.customer.update({
       where: { id: row.customerId },
-      data: { passwordHash: hashPassword(newPassword) }
+      data: { passwordHash: hashPassword(newPassword), emailVerified: true }
     });
-    await tx.passwordResetToken.update({ where: { id: row.id }, data: { usedAt: new Date() } });
+    await tx.passwordResetToken.deleteMany({
+      where: { customerId: row.customerId, id: { not: row.id }, usedAt: null }
+    });
     // Invalida eventuali sessioni attive dopo il reset.
     await tx.customerSession.deleteMany({ where: { customerId: row.customerId } });
   });
@@ -380,5 +458,6 @@ export async function consumeResetToken(token: string, newPassword: string): Pro
     subject: "Password account Sessa 1930 reimpostata",
     type: "SECURITY_PASSWORD_CHANGED",
     body: `Ciao ${row.customer.firstName},\n\nla password del tuo account Sessa 1930 è stata reimpostata. Tutte le sessioni precedenti sono state chiuse.\n\nSe non sei stato tu, contatta subito Sessa.`
-  });
+  }).catch(() => undefined);
+  return { customerId: row.customerId, activated };
 }

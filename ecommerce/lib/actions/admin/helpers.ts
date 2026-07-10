@@ -15,10 +15,12 @@ export function firstZodMessage(error: ZodError): string {
   return issue ? `${String(issue.path[0] ?? "campo")}: ${issue.message}` : "Dati non validi";
 }
 
-export function requireString(formData: FormData, key: string): string {
+export function requireString(formData: FormData, key: string, maxLength = 200): string {
   const value = formData.get(key);
   if (typeof value !== "string" || value.trim() === "") {
     throw new Error(`Campo mancante: ${key}`);
   }
-  return value.trim();
+  const trimmed = value.trim();
+  if (trimmed.length > maxLength) throw new Error(`Campo non valido: ${key}`);
+  return trimmed;
 }

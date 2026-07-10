@@ -1,10 +1,13 @@
 import { prisma } from "@/lib/db";
+import { requireAdminCapability } from "@/lib/auth/session";
+import { formatRomeDate } from "@/lib/datetime";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = { title: "Referral" };
 
 export default async function AdminReferralPage() {
+  await requireAdminCapability("customers:manage");
   const referrals = await prisma.referral.findMany({
     include: {
       referrer: { select: { firstName: true, lastName: true, email: true } },
@@ -50,7 +53,7 @@ export default async function AdminReferralPage() {
                   {r.invitedCustomer ? `${r.invitedCustomer.firstName} ${r.invitedCustomer.lastName}` : "—"}
                   {r.invitedCustomer && <span className="block text-xs text-ink/50">{r.invitedCustomer.email}</span>}
                 </td>
-                <td className="px-4 py-3 text-xs text-ink/60">{r.createdAt.toLocaleDateString("it-IT")}</td>
+                <td className="px-4 py-3 text-xs text-ink/60">{formatRomeDate(r.createdAt)}</td>
                 <td className="px-4 py-3">
                   <span className={`badge ${r.status === "REDEEMED" ? "bg-brilliant/15 text-emerald-800" : "bg-majolica/25 text-yellow-900"}`}>
                     {r.status === "REDEEMED" ? "Convertito" : "Registrato"}

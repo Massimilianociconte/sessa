@@ -1,4 +1,4 @@
-import type { ShippingRate } from "@prisma/client";
+import type { Prisma, ShippingRate } from "@prisma/client";
 import { prisma } from "@/lib/db";
 
 export type QuotedRate = ShippingRate & {
@@ -13,9 +13,10 @@ export type QuotedRate = ShippingRate & {
  */
 export async function quoteRatesForCountry(
   country: string,
-  discountedSubtotalCents: number
+  discountedSubtotalCents: number,
+  db: Pick<Prisma.TransactionClient, "shippingZone"> = prisma
 ): Promise<QuotedRate[]> {
-  const zones = await prisma.shippingZone.findMany({
+  const zones = await db.shippingZone.findMany({
     where: { isActive: true },
     include: { rates: { where: { isActive: true }, orderBy: { position: "asc" } } },
     orderBy: { position: "asc" }
@@ -34,8 +35,9 @@ export async function quoteRatesForCountry(
 export async function getQuotedRate(
   rateId: string,
   country: string,
-  discountedSubtotalCents: number
+  discountedSubtotalCents: number,
+  db: Pick<Prisma.TransactionClient, "shippingZone"> = prisma
 ): Promise<QuotedRate | null> {
-  const rates = await quoteRatesForCountry(country, discountedSubtotalCents);
+  const rates = await quoteRatesForCountry(country, discountedSubtotalCents, db);
   return rates.find((r) => r.id === rateId) ?? null;
 }

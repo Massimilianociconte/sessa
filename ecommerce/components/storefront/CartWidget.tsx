@@ -14,6 +14,20 @@ type CartLocationContext = {
   name: string;
 };
 
+// Sopravvive alle navigazioni App Router: una lettura carrello per sessione
+// client, non una chiamata serverless a ogni Header rimontato. Le funzioni
+// tengono la mutazione fuori dal corpo del componente, come richiesto dalle
+// regole React sui globali.
+let latestCartSnapshot: CartDTO | undefined;
+
+function readLatestCartSnapshot() {
+  return latestCartSnapshot;
+}
+
+function saveLatestCartSnapshot(nextCart: CartDTO) {
+  latestCartSnapshot = nextCart;
+}
+
 export default function CartWidget({
   initialCount,
   currentLocation
@@ -26,8 +40,12 @@ export default function CartWidget({
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const trackedCartViewRef = useRef<string | null>(null);
+  const cartRef = useRef<CartDTO | null>(readLatestCartSnapshot() ?? null);
+  const cartReadVersionRef = useRef(0);
+  const activeCartReadRef = useRef<AbortController | null>(null);
+  const mutationInFlightRef = useRef(false);
   const [open, setOpen] = useState(false);
-  const [cart, setCart] = useState<CartDTO | null>(null);
+  const [cart, setCart] = useState<CartDTO | null>(() => readLatestCartSnapshot() ?? null);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,31 +59,66 @@ export default function CartWidget({
     return () => window.clearTimeout(timeout);
   }, []);
 
-  const fetchCart = useCallback(async () => {
-    setLoading(true);
+  const cancelCartRead = useCallback(() => {
+    cartReadVersionRef.current += 1;
+    activeCartReadRef.current?.abort();
+    activeCartReadRef.current = null;
+    setLoading(false);
+  }, []);
+
+  const acceptCart = useCallback((nextCart: CartDTO) => {
+    cancelCartRead();
+    saveLatestCartSnapshot(nextCart);
+    cartRef.current = nextCart;
+    setCart(nextCart);
+    setError(null);
+  }, [cancelCartRead]);
+
+  const fetchCart = useCallback(async (silent = false) => {
+    const requestId = cartReadVersionRef.current + 1;
+    cartReadVersionRef.current = requestId;
+    activeCartReadRef.current?.abort();
+    const controller = new AbortController();
+    activeCartReadRef.current = controller;
+    if (!silent) setLoading(true);
     try {
-      const res = await fetch("/api/cart", { cache: "no-store" });
-      if (res.ok) {
-        setCart((await res.json()) as CartDTO);
-        setError(null);
+      const res = await fetch("/api/cart", { cache: "no-store", signal: controller.signal });
+      if (!res.ok) {
+        throw new Error(`Carrello non disponibile (${res.status})`);
       }
-    } catch {
-      if (!cart) setError("Non riesco ad aggiornare il carrello. Riprova tra poco.");
+      const nextCart = (await res.json()) as CartDTO;
+      if (cartReadVersionRef.current !== requestId) return;
+      saveLatestCartSnapshot(nextCart);
+      cartRef.current = nextCart;
+      setCart(nextCart);
+      setError(null);
+    } catch (readError) {
+      if (readError instanceof DOMException && readError.name === "AbortError") return;
+      if (cartReadVersionRef.current !== requestId || silent) return;
+      setError(
+        cartRef.current
+          ? "Non riesco a verificare il carrello: mostro l'ultimo stato disponibile."
+          : "Non riesco ad aggiornare il carrello. Riprova tra poco."
+      );
     } finally {
-      setLoading(false);
+      if (cartReadVersionRef.current === requestId) {
+        activeCartReadRef.current = null;
+        if (!silent) setLoading(false);
+      }
     }
-  }, [cart]);
+  }, []);
+
+  useEffect(() => () => activeCartReadRef.current?.abort(), []);
 
   useEffect(() => {
     const offOpen = onOpenCart((nextCart) => {
       setOpen(true);
-      if (nextCart) setCart(nextCart);
+      if (nextCart) acceptCart(nextCart);
       else void fetchCart();
     });
     const offChanged = onCartChanged((nextCart) => {
       if (nextCart) {
-        setCart(nextCart);
-        setError(null);
+        acceptCart(nextCart);
       } else {
         void fetchCart();
       }
@@ -74,27 +127,20 @@ export default function CartWidget({
       offOpen();
       offChanged();
     };
-  }, [fetchCart]);
+  }, [acceptCart, fetchCart]);
 
   useEffect(() => {
-    if (!mounted || cart) return;
-    let cancelled = false;
-    const warmCart = async () => {
-      try {
-        const res = await fetch("/api/cart", { cache: "no-store" });
-        if (!cancelled && res.ok) setCart((await res.json()) as CartDTO);
-      } catch {
-        // Warm-up best-effort: non deve bloccare il rendering o sporcare la UI.
-      }
-    };
-    const idle = window.requestIdleCallback?.(() => void warmCart(), { timeout: 2500 });
-    const timeout = idle === undefined ? window.setTimeout(() => void warmCart(), 1200) : null;
+    if (cart || readLatestCartSnapshot() !== undefined) return;
+    let idle: number | undefined;
+    const timeout = window.setTimeout(() => {
+      idle = window.requestIdleCallback?.(() => void fetchCart(true), { timeout: 1800 });
+      if (idle === undefined) void fetchCart(true);
+    }, 2500);
     return () => {
-      cancelled = true;
       if (idle !== undefined) window.cancelIdleCallback?.(idle);
-      if (timeout !== null) window.clearTimeout(timeout);
+      window.clearTimeout(timeout);
     };
-  }, [cart, mounted]);
+  }, [cart, fetchCart]);
 
   const closeDrawer = useCallback(() => {
     setOpen(false);
@@ -155,6 +201,9 @@ export default function CartWidget({
   }, [open]);
 
   async function mutate(url: string, body: Record<string, unknown>, successMessage = "Carrello aggiornato.") {
+    if (mutationInFlightRef.current) return;
+    mutationInFlightRef.current = true;
+    cancelCartRead();
     setBusy(true);
     setError(null);
     setStatusMessage("Aggiorno il carrello.");
@@ -166,6 +215,8 @@ export default function CartWidget({
       });
       if (res.ok) {
         const nextCart = (await res.json()) as CartDTO;
+        saveLatestCartSnapshot(nextCart);
+        cartRef.current = nextCart;
         setCart(nextCart);
         notifyCartChanged(nextCart);
         setStatusMessage(successMessage);
@@ -178,6 +229,7 @@ export default function CartWidget({
       setError("Errore di rete. Controlla la connessione e riprova.");
       setStatusMessage("Errore di rete durante l'aggiornamento del carrello.");
     } finally {
+      mutationInFlightRef.current = false;
       setBusy(false);
     }
   }
@@ -240,6 +292,7 @@ export default function CartWidget({
   }, [analyticsItems, data.discountCents, data.discountCode, data.itemCount, data.locationName, data.subtotalCents, hasLines, open, payable]);
 
   function removeLine(line: CartLineDTO) {
+    if (mutationInFlightRef.current) return;
     trackEcommerceEvent("remove_from_cart", {
       value: centsToAnalyticsValue(line.totalCents),
       location_name: data.locationName ?? undefined,
@@ -258,7 +311,11 @@ export default function CartWidget({
   }
 
   const drawer = (
-    <div className={`cart-overlay fixed inset-0 z-[60] ${open ? "cart-overlay-open" : ""}`} aria-hidden={!open}>
+    <div
+      className={`cart-overlay fixed inset-0 z-[60] ${open ? "cart-overlay-open" : ""}`}
+      aria-hidden={!open}
+      inert={!open}
+    >
       <div className="cart-overlay-backdrop absolute inset-0" onClick={closeDrawer} />
 
       <aside

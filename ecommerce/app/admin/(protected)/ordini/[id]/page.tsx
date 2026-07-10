@@ -19,6 +19,7 @@ import {
   type PaymentStatus
 } from "@/lib/domain";
 import { formatCents } from "@/lib/money";
+import { formatRomeDateTime } from "@/lib/datetime";
 import { getOrder } from "@/lib/services/orders";
 
 export const dynamic = "force-dynamic";
@@ -119,7 +120,7 @@ export default async function AdminOrderDetailPage({
                   <div>
                     <p>{event.message}</p>
                     <p className="text-xs text-ink/40">
-                      {event.createdAt.toLocaleString("it-IT")} · {event.actor}
+                      {formatRomeDateTime(event.createdAt)} · {event.actor}
                     </p>
                   </div>
                 </li>
@@ -147,7 +148,7 @@ export default async function AdminOrderDetailPage({
                       />
                     )}
                     {(to === "CANCELLED" || to === "REFUNDED") && (
-                      <input name="note" placeholder="Motivo (opzionale)" className="input-field" />
+                      <input name="note" maxLength={500} placeholder="Motivo (opzionale)" className="input-field" />
                     )}
                     <button
                       type="submit"
@@ -193,7 +194,7 @@ export default async function AdminOrderDetailPage({
                 <p className="mt-3 font-semibold text-ink">
                   {order.fulfillmentType === "PICKUP" ? "Ritiro richiesto" : "Consegna richiesta"}
                 </p>
-                <p className="text-ink/60">{order.fulfillmentAt.toLocaleString("it-IT")}</p>
+                <p className="text-ink/60">{formatRomeDateTime(order.fulfillmentAt)}</p>
               </>
             )}
             <p className="mt-3 font-semibold text-ink">Pagamento</p>
@@ -216,6 +217,7 @@ export default async function AdminOrderDetailPage({
               <input type="hidden" name="orderId" value={order.id} />
               <input
                 name="carrier"
+                maxLength={80}
                 defaultValue={order.trackingCarrier ?? ""}
                 placeholder="Corriere (es. BRT)"
                 className="input-field"
@@ -223,6 +225,7 @@ export default async function AdminOrderDetailPage({
               />
               <input
                 name="code"
+                maxLength={120}
                 defaultValue={order.trackingCode ?? ""}
                 placeholder="Codice tracking"
                 className="input-field"
@@ -240,6 +243,7 @@ export default async function AdminOrderDetailPage({
               <input type="hidden" name="orderId" value={order.id} />
               <textarea
                 name="note"
+                maxLength={2000}
                 rows={3}
                 defaultValue={order.adminNote ?? ""}
                 className="input-field"

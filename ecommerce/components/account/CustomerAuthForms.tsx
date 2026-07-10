@@ -25,10 +25,11 @@ function ErrorBox({ error }: { error: string | null }) {
   );
 }
 
-export function CustomerLoginForm() {
+export function CustomerLoginForm({ nextPath }: { nextPath?: string }) {
   const [state, action, pending] = useActionState(loginCustomerAction, initial);
   return (
     <form action={action} className="space-y-4">
+      {nextPath && <input type="hidden" name="next" value={nextPath} />}
       <div>
         <label htmlFor="email" className="label-field">Email</label>
         <input
@@ -41,7 +42,7 @@ export function CustomerLoginForm() {
           className="input-field"
         />
       </div>
-      <PasswordField id="password" name="password" label="Password" autoComplete="current-password" />
+      <PasswordField id="password" name="password" label="Password" autoComplete="current-password" maxLength={128} />
       {state.needsTotp && (
         <div className="auth-totp-box">
           <label htmlFor="totp" className="label-field">Codice di verifica</label>
@@ -92,24 +93,16 @@ export function CustomerRegisterForm() {
         <label htmlFor="phone" className="label-field">Telefono (opzionale)</label>
         <input id="phone" name="phone" type="tel" inputMode="tel" autoComplete="tel" placeholder="+39 333 000 0000" className="input-field" />
       </div>
-      <PasswordField
-        id="password"
-        name="password"
-        label="Password"
-        autoComplete="new-password"
-        minLength={10}
-        hint="Minimo 10 caratteri: più è lunga, più è sicura."
-      />
-      <label className="auth-checkbox">
-        <input type="checkbox" name="marketingOptIn" className="accent-terracotta" />
-        <span>Voglio ricevere novità, stagionalità e offerte Sessa (facoltativo)</span>
-      </label>
+      <p className="auth-notice">
+        Ti invieremo un link personale: solo dopo aver verificato l&apos;email potrai scegliere la password.
+        In questo modo nessuno può reclamare ordini effettuati in precedenza con il tuo indirizzo.
+      </p>
       <ErrorBox error={state.error} />
       <button type="submit" disabled={pending} className="btn-primary w-full">
-        {pending ? "Creazione…" : "Crea account"}
+        {pending ? "Invio…" : "Invia link sicuro"}
       </button>
       <p className="text-center text-[11px] leading-5 text-ink/40">
-        Creando l'account accetti le condizioni d'uso dello shop Sessa 1930.
+        Richiedendo il link accetti le condizioni d&apos;uso dello shop Sessa 1930.
       </p>
     </form>
   );
@@ -125,8 +118,9 @@ export function ResetForm({ token }: { token: string }) {
         name="password"
         label="Nuova password"
         autoComplete="new-password"
-        minLength={10}
-        hint="Minimo 10 caratteri. Dopo il salvataggio dovrai accedere di nuovo."
+        minLength={12}
+        maxLength={128}
+        hint="Minimo 12 caratteri. Dopo il salvataggio dovrai accedere di nuovo."
       />
       <ErrorBox error={state.error} />
       <button type="submit" disabled={pending} className="btn-primary w-full">

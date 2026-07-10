@@ -10,6 +10,7 @@ import CopyField from "@/components/account/CopyField";
 import { requireCustomer } from "@/lib/auth/customer-session";
 import { formatCents } from "@/lib/money";
 import { listCustomerGiftCards } from "@/lib/services/customer-account";
+import { formatRomeDate } from "@/lib/datetime";
 
 export const metadata = { title: "Gift card e crediti" };
 
@@ -69,7 +70,7 @@ export default async function AccountGiftCardsPage() {
                   </div>
                   <CopyField value={card.code} />
                   <div className="account-credit-meta">
-                    <span>Scadenza: {card.expiresAt ? card.expiresAt.toLocaleDateString("it-IT") : "Nessuna"}</span>
+                    <span>Scadenza: {card.expiresAt ? formatRomeDate(card.expiresAt) : "Nessuna"}</span>
                     <span>{card.transactions.length} moviment{card.transactions.length === 1 ? "o" : "i"}</span>
                   </div>
                   {card.transactions.length > 0 && (

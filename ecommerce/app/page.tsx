@@ -4,7 +4,7 @@ import Footer from "@/components/storefront/Footer";
 import Header from "@/components/storefront/Header";
 import { listActiveLocations } from "@/lib/services/locations";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 30;
 
 const ACCENTS = [
   { accent: "#d65a1f", tile: 'url("/patterns/sessa-maiolica-orange.png")' },

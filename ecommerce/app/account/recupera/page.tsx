@@ -54,7 +54,7 @@ export default async function RecoverPage({
         <>
           {err && (
             <p className="auth-notice" data-tone="warn" role="alert">
-              {decodeURIComponent(err)}
+              {err}
             </p>
           )}
           <form action={requestResetAction} className="space-y-4">

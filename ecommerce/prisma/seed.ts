@@ -11,11 +11,7 @@ import { randomBytes, scryptSync } from "node:crypto";
 const prisma = new PrismaClient();
 
 function getSeedPassword(envKey: string, fallback: string): string {
-  const value = process.env[envKey] ?? fallback;
-  if (process.env.NODE_ENV === "production" && !process.env[envKey]) {
-    throw new Error(`${envKey} deve essere configurata per eseguire il seed in produzione.`);
-  }
-  return value;
+  return process.env[envKey] ?? fallback;
 }
 
 function hashPassword(password: string): string {
@@ -146,8 +142,19 @@ const productExtra: Record<string, { allergens: string; ingredients: string }> =
 
 async function main() {
   console.log("Seeding piattaforma multi-sede Sessa 1930…");
-  const adminPassword = getSeedPassword("SEED_ADMIN_PASSWORD", "sessa1930!admin");
-  const customerPassword = getSeedPassword("SEED_CUSTOMER_PASSWORD", "cliente1930!");
+  const isProduction = process.env.NODE_ENV === "production";
+  if (isProduction && process.env.ALLOW_PRODUCTION_CATALOG_SEED !== "1") {
+    throw new Error(
+      "Seed produzione bloccato. Usa ALLOW_PRODUCTION_CATALOG_SEED=1 solo per catalogo/impostazioni; le fixture demo restano escluse."
+    );
+  }
+  const includeDemoFixtures = !isProduction && process.env.SEED_DEMO_FIXTURES !== "0";
+  const adminPassword = includeDemoFixtures
+    ? getSeedPassword("SEED_ADMIN_PASSWORD", "sessa1930!admin")
+    : null;
+  const customerPassword = includeDemoFixtures
+    ? getSeedPassword("SEED_CUSTOMER_PASSWORD", "cliente1930!")
+    : null;
 
   // Sedi
   const locationIds = new Map<string, string>();
@@ -264,27 +271,28 @@ async function main() {
   });
   await prisma.discountCategory.upsert({ where: { discountId_categoryId: { discountId: dc.id, categoryId: boxRegalo } }, update: {}, create: { discountId: dc.id, categoryId: boxRegalo } });
 
-  // Admin iniziale
-  await prisma.adminUser.upsert({
-    where: { email: "admin@sessa1930.com" },
-    update: {},
-    create: { email: "admin@sessa1930.com", name: "Amministratore", passwordHash: hashPassword(adminPassword), role: "OWNER" }
-  });
+  if (includeDemoFixtures && adminPassword && customerPassword) {
+    // Fixture locali: mai create quando NODE_ENV=production.
+    await prisma.adminUser.upsert({
+      where: { email: "admin@sessa1930.com" },
+      update: {},
+      create: { email: "admin@sessa1930.com", name: "Amministratore", passwordHash: hashPassword(adminPassword), role: "OWNER" }
+    });
 
-  // Cliente demo (per provare l'area personale)
-  await prisma.customer.upsert({
-    where: { email: "cliente@demo.it" },
-    update: {},
-    create: {
-      email: "cliente@demo.it",
-      firstName: "Mario",
-      lastName: "Cliente",
-      phone: "081 000 0000",
-      passwordHash: hashPassword(customerPassword),
-      referralCode: "MARIO-DEMO01",
-      marketingOptIn: true
-    }
-  });
+    await prisma.customer.upsert({
+      where: { email: "cliente@demo.it" },
+      update: {},
+      create: {
+        email: "cliente@demo.it",
+        firstName: "Mario",
+        lastName: "Cliente",
+        phone: "081 000 0000",
+        passwordHash: hashPassword(customerPassword),
+        referralCode: "MARIO-DEMO01",
+        marketingOptIn: true
+      }
+    });
+  }
 
   // Impostazioni
   const settings: Record<string, unknown> = {
@@ -308,21 +316,24 @@ async function main() {
     await prisma.setting.upsert({ where: { key }, update: {}, create: { key, value: JSON.stringify(value) } });
   }
 
-  // Gift card demo
-  const demoGift = await prisma.giftCard.findUnique({ where: { code: "GIFT-DEMO-2025" } });
-  if (!demoGift) {
-    const card = await prisma.giftCard.create({
-      data: { code: "GIFT-DEMO-2025", initialCents: 5000, balanceCents: 5000 }
-    });
-    await prisma.giftCardTransaction.create({
-      data: { giftCardId: card.id, delta: 5000, reason: "ISSUE" }
-    });
+  if (includeDemoFixtures) {
+    const demoGift = await prisma.giftCard.findUnique({ where: { code: "GIFT-DEMO-2025" } });
+    if (!demoGift) {
+      const card = await prisma.giftCard.create({
+        data: { code: "GIFT-DEMO-2025", initialCents: 5000, balanceCents: 5000 }
+      });
+      await prisma.giftCardTransaction.create({
+        data: { giftCardId: card.id, delta: 5000, reason: "ISSUE" }
+      });
+    }
   }
 
   console.log(`Seed completato: ${activeLocationSlugs.length} sedi attive, ${products.length} prodotti.`);
-  console.log("Admin: admin@sessa1930.com / password da SEED_ADMIN_PASSWORD (fallback locale: sessa1930!admin)");
-  console.log("Cliente demo: cliente@demo.it / password da SEED_CUSTOMER_PASSWORD (fallback locale: cliente1930!)");
-  console.log("Gift card demo: GIFT-DEMO-2025 (50€)");
+  if (includeDemoFixtures) {
+    console.log("Fixture locali create: admin, cliente demo e gift card demo.");
+  } else {
+    console.log("Fixture demo escluse.");
+  }
 }
 
 main()

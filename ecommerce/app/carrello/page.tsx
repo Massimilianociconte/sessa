@@ -1,4 +1,5 @@
 import Link from "next/link";
+import SubmitButton from "@/components/SubmitButton";
 import Footer from "@/components/storefront/Footer";
 import Header from "@/components/storefront/Header";
 import {
@@ -42,7 +43,7 @@ export default async function CartPage({
 
         {err && (
           <p className="mt-4 rounded-xl bg-terracotta/10 px-4 py-3 text-sm font-semibold text-terracotta">
-            {decodeURIComponent(err)}
+            {err}
           </p>
         )}
 
@@ -87,16 +88,16 @@ export default async function CartPage({
                         className="input-field w-full sm:w-24"
                         aria-label={`Quantità per ${line.productName}`}
                       />
-                      <button type="submit" className="btn-secondary !px-4 text-xs">
+                      <SubmitButton pendingLabel="Aggiorno…" className="btn-secondary !px-4 text-xs">
                         Aggiorna
-                      </button>
+                      </SubmitButton>
                     </form>
                     <div className="font-serif text-xl font-bold text-terracotta">{formatCents(line.totalCents)}</div>
                     <form action={removeCartItemAction}>
                       <input type="hidden" name="itemId" value={line.itemId} />
-                      <button type="submit" className="btn-ghost text-xs text-terracotta" aria-label={`Rimuovi ${line.productName}`}>
+                      <SubmitButton pendingLabel="Rimuovo…" className="btn-ghost text-xs text-terracotta" aria-label={`Rimuovi ${line.productName}`}>
                         Rimuovi
-                      </button>
+                      </SubmitButton>
                     </form>
                   </div>
                 </li>
@@ -110,9 +111,9 @@ export default async function CartPage({
                     Codice <strong>{view.discountCode}</strong> applicato: −{formatCents(view.discountCents)}
                   </p>
                   <form action={removeDiscountAction}>
-                    <button type="submit" className="btn-ghost text-xs text-terracotta">
+                    <SubmitButton pendingLabel="Rimuovo…" className="btn-ghost text-xs text-terracotta">
                       Rimuovi
-                    </button>
+                    </SubmitButton>
                   </form>
                 </div>
               ) : (
@@ -123,9 +124,9 @@ export default async function CartPage({
                     </label>
                     <input id="code" name="code" className="input-field uppercase" placeholder="BENVENUTO10" />
                   </div>
-                  <button type="submit" className="btn-secondary">
+                  <SubmitButton pendingLabel="Applico…" className="btn-secondary">
                     Applica
-                  </button>
+                  </SubmitButton>
                 </form>
               )}
               {view.discountWarning && (
@@ -141,9 +142,9 @@ export default async function CartPage({
                     <span className="block text-xs text-ink/50">Applicata all'importo dovuto al checkout.</span>
                   </p>
                   <form action={removeGiftCardAction}>
-                    <button type="submit" className="btn-ghost text-xs text-terracotta">
+                    <SubmitButton pendingLabel="Rimuovo…" className="btn-ghost text-xs text-terracotta">
                       Rimuovi
-                    </button>
+                    </SubmitButton>
                   </form>
                 </div>
               ) : (
@@ -154,9 +155,9 @@ export default async function CartPage({
                     </label>
                     <input id="giftCardCode" name="giftCardCode" className="input-field uppercase" placeholder="GIFT-XXXX-XXXX" />
                   </div>
-                  <button type="submit" className="btn-secondary">
+                  <SubmitButton pendingLabel="Applico…" className="btn-secondary">
                     Applica
-                  </button>
+                  </SubmitButton>
                 </form>
               )}
               {giftCard && !giftCard.valid && (

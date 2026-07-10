@@ -1,6 +1,7 @@
 # Sessa 1930 E-commerce - Hardening produzione
 
-Questo documento mappa i controlli gia presenti e le prossime decisioni necessarie per scalare in produzione.
+Questo documento mappa i controlli presenti nel codice e i rischi operativi che
+restano prima di considerare il servizio production-ready.
 
 ## Flussi critici coperti nel codice
 
@@ -16,14 +17,25 @@ Questo documento mappa i controlli gia presenti e le prossime decisioni necessar
 - Gift card con saldo e ledger, decremento condizionale atomico.
 - Referral creati/convertiti in transazione insieme ai codici sconto riservati.
 - State machine ordini centralizzata in `transitionOrder`.
-- Webhook Stripe con firma verificata.
+- Tentativi pagamento Stripe persistiti e idempotenti, webhook con firma verificata.
 - Fallimento/scadenza Stripe collegati ad annullamento e rilascio stock se l'ordine e ancora `PENDING_PAYMENT`.
-- Rate limiting base su login cliente.
-- Sessioni cliente revocabili da area personale.
+- Rate limiting persistito su PostgreSQL per login, recupero, registrazione,
+  checkout e mutazioni carrello.
+- Sessioni cliente revocabili, TOTP con backup code e passkey/WebAuthn.
 
 ## Test disponibili
 
-`npx tsx prisma/verify-flow.ts` copre:
+La suite minima non distruttiva è:
+
+```bash
+npm run lint
+npx tsc --noEmit --pretty false
+npm run test:security
+npm run build
+```
+
+`npx tsx prisma/verify-flow.ts`, da eseguire esclusivamente contro un database di
+test sacrificabile, copre:
 
 - ordine base;
 - idempotenza anti doppio ordine;
@@ -38,35 +50,39 @@ Questo documento mappa i controlli gia presenti e le prossime decisioni necessar
 - gift card parziale/totale;
 - referral anti abuso e conversione.
 
-## Requisiti prima della produzione reale
+## Requisiti operativi ancora aperti
 
-1. Passare da SQLite a Postgres gestito.
-2. Rigenerare/verificare le migrazioni contro provider `postgresql` prima del deploy reale.
-   La cartella `prisma/migrations` contiene ora una baseline SQLite tracciata per nuovi
-   ambienti locali; non va applicata alla cieca su un database produzione gia popolato.
-3. Verificare in Postgres gli indici gia dichiarati nello schema per catalogo, ordini,
-   pagamenti, gift card, referral, sessioni, admin e audit log.
-4. Usare rate limit condiviso, preferibilmente Redis o database, non memoria di processo.
-5. Configurare backup automatici e restore testato.
-6. Spostare invio email, ricevute, analytics e sync secondari su job/outbox retryable.
-7. Aggiungere osservabilita:
+1. Portare il runtime sul transaction pooler Supabase (`DATABASE_URL`, porta 6543)
+   e riservare `DIRECT_URL` diretto/session pooler alle migrazioni. Il pool runtime
+   deve restare prudente (`connection_limit=1`) in ambiente serverless.
+2. Allineare o mitigare la distanza tra regione Netlify Functions e regione DB;
+   misurare separatamente warm latency e cold start.
+3. Configurare backup automatici e provare davvero un restore su un database isolato.
+4. Rendere l'outbox email un job retryable con dead-letter/alert: il record DB da
+   solo non garantisce la consegna.
+5. Aggiungere osservabilita con redazione dei dati personali:
    - errori checkout;
    - pagamento fallito;
    - webhook duplicato/fallito;
    - stock insufficiente;
    - login sospetto;
    - azioni admin critiche.
-8. Abilitare alert su:
+6. Abilitare alert su:
    - ordini `PENDING_PAYMENT` troppo vecchi;
    - pagamenti Stripe completati senza ordine;
    - ordini cancellati con stock non ripristinato;
    - email in `FAILED`;
-   - gift card con ledger incoerente.
+   - gift card con ledger incoerente;
+   - saturazione connessioni DB e aumento dei cold start.
+7. Completare i dati legali, cookie/consensi, resi e informazioni alimentari nei
+   draft in `docs/legal` prima di pubblicarli.
 
 ## Migrazioni e script database
 
-- `prisma.config.ts` dichiara schema, cartella migrazioni e seed senza usare la
-  configurazione deprecata `package.json#prisma`.
+- Il provider è PostgreSQL; `prisma/migrations-postgres/0001_init.sql` è il
+  bootstrap e `0002`-`0005` sono migrazioni additive/idempotenti.
+- `npm run db:bootstrap` è fail-closed su DB non vuoti. `npm run db:deploy` usa
+  `DIRECT_URL` quando disponibile e non riesegue la baseline.
 - Il seed e rilanciabile: usa upsert su sedi, categorie, prodotti, varianti, sconti
   e dati demo; non ricrea stock o gift card gia presenti.
 - `SEED_ADMIN_PASSWORD` e `SEED_CUSTOMER_PASSWORD` sono opzionali solo in sviluppo.
@@ -87,33 +103,21 @@ Fino a quel momento, gli ordini `PENDING_PAYMENT` vanno monitorati e cancellati/
 
 ## Sicurezza account
 
-Gia presenti:
+Gia presenti: password hash server-side, reset token monouso, sessioni revocabili,
+rate limit persistito, TOTP, backup code monouso, passkey/WebAuthn, conferma email
+e area `/account/sicurezza`.
 
-- password hash server-side;
-- reset token monouso e scadenza;
-- sessioni server-side revocabili;
-- rate limiting login;
-- area account `/account/sicurezza`.
-
-Prossimi step gratuiti consigliati:
-
-- TOTP con app authenticator;
-- backup codes monouso;
-- passkey/WebAuthn;
-- email alert su nuovo login e cambio password;
-- conferma cambio email;
-- storico accessi con IP/user agent normalizzati.
+Restano controlli operativi: verificare origin/RP ID passkey sul dominio definitivo,
+consegnare realmente gli alert SMTP, definire retention di sessioni/audit e provare
+recovery account e revoca da dispositivi reali.
 
 ## Admin e audit
 
-Gia presenti:
+Gia presenti: ruoli `OWNER | ADMIN | STAFF`, capability server-side centralizzate,
+sessioni admin, `AuditLog` ed eventi ordine. La UI non è la barriera di sicurezza:
+azioni ed export verificano la capability sul server.
 
-- utenti admin con ruolo;
-- sessioni admin;
-- `AuditLog`;
-- eventi ordine.
-
-Prossimo step: espandere i ruoli da `OWNER | ADMIN | STAFF` a ruoli operativi granulari:
+Evoluzione possibile: ruoli operativi piu granulari:
 
 - `OWNER`;
 - `STORE_MANAGER`;

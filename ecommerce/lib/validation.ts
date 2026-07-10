@@ -8,6 +8,7 @@ import {
   PAYMENT_METHODS,
   PRODUCT_STATUSES
 } from "@/lib/domain";
+import { parseRomeDateTimeLocal, romeDayRange } from "@/lib/datetime";
 
 /** Schemi Zod: unica dogana tra FormData/input esterni e i servizi. */
 
@@ -19,6 +20,16 @@ const optionalTrimmed = (max = 500) =>
     .max(max)
     .transform((v) => (v === "" ? undefined : v))
     .optional();
+
+const optionalCalendarDate = optionalTrimmed(10).refine(
+  (value) => value === undefined || romeDayRange(value) !== null,
+  "Data non valida"
+);
+
+const passwordInput = z
+  .string()
+  .min(12, "La password deve avere almeno 12 caratteri")
+  .max(128, "La password non può superare 128 caratteri");
 
 export const checkoutSchema = z
   .object({
@@ -41,11 +52,13 @@ export const checkoutSchema = z
   })
   .superRefine((data, ctx) => {
     // Data/ora richiesta: valida e non nel passato.
-    const when = new Date(data.fulfillmentAt);
-    if (Number.isNaN(when.getTime())) {
+    const when = parseRomeDateTimeLocal(data.fulfillmentAt);
+    if (!when) {
       ctx.addIssue({ path: ["fulfillmentAt"], code: "custom", message: "Data/ora non valida" });
-    } else if (when.getTime() < Date.now() - 60_000) {
-      ctx.addIssue({ path: ["fulfillmentAt"], code: "custom", message: "Scegli una data/ora futura" });
+    } else if (when.getTime() < Date.now() + 60 * 60_000) {
+      ctx.addIssue({ path: ["fulfillmentAt"], code: "custom", message: "Scegli almeno 1 ora da ora" });
+    } else if (when.getTime() > Date.now() + 366 * 24 * 60 * 60_000) {
+      ctx.addIssue({ path: ["fulfillmentAt"], code: "custom", message: "La data e troppo lontana" });
     }
     // Per la consegna a domicilio i campi indirizzo sono obbligatori.
     if (data.fulfillmentType === "DELIVERY") {
@@ -62,22 +75,30 @@ export type CheckoutFormInput = z.infer<typeof checkoutSchema>;
 
 export const loginSchema = z.object({
   email: z.string().trim().toLowerCase().email("Email non valida"),
-  password: z.string().min(1, "Password obbligatoria")
+  password: z.string().min(1, "Password obbligatoria").max(128, "Password non valida")
 });
 
 // --- Clienti ---
 export const customerRegisterSchema = z.object({
   email: z.string().trim().toLowerCase().email("Email non valida"),
-  password: z.string().min(10, "La password deve avere almeno 10 caratteri"),
+  password: passwordInput,
   firstName: trimmed(80),
   lastName: trimmed(80),
   phone: optionalTrimmed(40),
   marketingOptIn: z.coerce.boolean().default(false)
 });
 
+/** Registrazione sicura email-first: la password si sceglie solo dal link ricevuto. */
+export const customerRegistrationRequestSchema = z.object({
+  email: z.string().trim().toLowerCase().email("Email non valida"),
+  firstName: trimmed(80),
+  lastName: trimmed(80),
+  phone: optionalTrimmed(40)
+});
+
 export const customerLoginSchema = z.object({
   email: z.string().trim().toLowerCase().email("Email non valida"),
-  password: z.string().min(1, "Password obbligatoria")
+  password: z.string().min(1, "Password obbligatoria").max(128, "Password non valida")
 });
 
 export const profileSchema = z.object({
@@ -105,7 +126,7 @@ export const resetRequestSchema = z.object({
 
 export const resetSchema = z.object({
   token: z.string().min(1),
-  password: z.string().min(10, "La password deve avere almeno 10 caratteri")
+  password: passwordInput
 });
 
 export const productSchema = z.object({
@@ -172,12 +193,12 @@ export const discountSchema = z
     perUserLimit: z.coerce.number().int().min(1).optional(),
     firstOrderOnly: z.coerce.boolean().default(false),
     stackable: z.coerce.boolean().default(false),
-    startsAt: optionalTrimmed(30),
-    endsAt: optionalTrimmed(30),
+    startsAt: optionalCalendarDate,
+    endsAt: optionalCalendarDate,
     isActive: z.coerce.boolean().default(true)
   })
   .refine(
-    (d) => !(d.startsAt && d.endsAt) || new Date(d.startsAt) <= new Date(d.endsAt),
+    (d) => !(d.startsAt && d.endsAt) || d.startsAt <= d.endsAt,
     { message: "La data di fine deve seguire quella di inizio", path: ["endsAt"] }
   );
 
@@ -236,7 +257,7 @@ export const stockAdjustSchema = z.object({
 export const adminUserSchema = z.object({
   email: z.string().trim().toLowerCase().email("Email non valida"),
   name: trimmed(120),
-  password: z.string().min(10, "Minimo 10 caratteri"),
+  password: passwordInput,
   role: z.enum(ADMIN_ROLES).default("STAFF")
 });
 

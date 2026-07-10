@@ -1,8 +1,9 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { createPortal } from "react-dom";
+import SubmitButton from "@/components/SubmitButton";
 
 const MAIN_LINKS: Array<{ href: string; label: string; icon: string }> = [
   { href: "/account", label: "Panoramica", icon: "M3 12 12 4l9 8M5 10v10h14V10" },
@@ -20,6 +21,48 @@ const SECURITY_LINKS: Array<{ href: string; label: string }> = [
   { href: "/account/sicurezza#sessioni", label: "Dispositivi e sessioni" }
 ];
 
+const DISPLAY_NAME_COOKIE = "sessa_dn";
+
+function readDisplayNameCookie(): string | null {
+  if (typeof document === "undefined") return null;
+  const prefix = `${DISPLAY_NAME_COOKIE}=`;
+  const raw = document.cookie
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(prefix))
+    ?.slice(prefix.length);
+  if (!raw) return null;
+  try {
+    const signed = decodeURIComponent(raw);
+    const dot = signed.lastIndexOf(".");
+    // Compatibilità per 30 giorni coi cookie plain emessi prima del formato
+    // firmato. È solo testo UI e non viene mai usato come prova di sessione.
+    if (dot < 1) {
+      const legacy = signed.trim();
+      return legacy && !/[\u0000-\u001f\u007f]/.test(legacy) ? legacy.slice(0, 40) : null;
+    }
+    const payload = signed.slice(0, dot);
+    if (!/^[A-Za-z0-9_-]+$/.test(payload)) return null;
+    const base64 = payload.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
+    const bytes = Uint8Array.from(window.atob(padded), (char) => char.charCodeAt(0));
+    const decoded = new TextDecoder().decode(bytes).trim();
+    return decoded ? decoded.slice(0, 40) : null;
+  } catch {
+    return null;
+  }
+}
+
+function subscribeToDisplayName(onStoreChange: () => void): () => void {
+  queueMicrotask(onStoreChange);
+  window.addEventListener("focus", onStoreChange);
+  window.addEventListener("pageshow", onStoreChange);
+  return () => {
+    window.removeEventListener("focus", onStoreChange);
+    window.removeEventListener("pageshow", onStoreChange);
+  };
+}
+
 /**
  * Bottone account dell'header. Da loggato mostra il nome e apre un menu di
  * scorciatoie verso l'area personale: dropdown su desktop, bottom sheet su
@@ -32,15 +75,14 @@ export default function AccountMenu({
   name: string | null;
   logout: () => Promise<void>;
 }) {
+  const cookieName = useSyncExternalStore(subscribeToDisplayName, readDisplayNameCookie, () => null);
+  const displayName = name ?? cookieName;
   const [open, setOpen] = useState(false);
-  const [mounted, setMounted] = useState(false);
   // Il pannello vive in un portal su <body>: l'header ha backdrop-filter, che
   // farebbe da containing block per position:fixed ancorando il menu all'header.
   const [dropdownPos, setDropdownPos] = useState<{ top: number; right: number } | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
-
-  useEffect(() => setMounted(true), []);
 
   const close = useCallback(() => {
     setOpen(false);
@@ -86,14 +128,15 @@ export default function AccountMenu({
     document.addEventListener("keydown", onKey);
     const firstLink = panelRef.current?.querySelector<HTMLElement>("a, button");
     firstLink?.focus();
+    const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
     return () => {
       document.removeEventListener("keydown", onKey);
-      document.body.style.overflow = "";
+      document.body.style.overflow = previousOverflow;
     };
   }, [open, close]);
 
-  if (!name) {
+  if (!displayName) {
     return (
       <Link
         href="/account/login"
@@ -104,7 +147,7 @@ export default function AccountMenu({
     );
   }
 
-  const initial = name.trim().charAt(0).toUpperCase() || "S";
+  const initial = displayName.trim().charAt(0).toUpperCase() || "S";
 
   return (
     <div className="account-menu-root">
@@ -117,13 +160,13 @@ export default function AccountMenu({
         className="account-menu-trigger"
       >
         <span className="account-menu-avatar" aria-hidden="true">{initial}</span>
-        <span className="account-menu-name">{name}</span>
+        <span className="account-menu-name">{displayName}</span>
         <svg aria-hidden="true" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" data-open={open}>
           <path d="m6 9 6 6 6-6" />
         </svg>
       </button>
 
-      {open && mounted && createPortal(
+      {open && createPortal(
         <>
           <div className="account-menu-overlay" onClick={close} aria-hidden="true" />
           <div
@@ -137,7 +180,7 @@ export default function AccountMenu({
             <div className="account-menu-head">
               <span className="account-menu-avatar" aria-hidden="true">{initial}</span>
               <div>
-                <strong>Ciao, {name}</strong>
+                <strong>Ciao, {displayName}</strong>
                 <span>La tua Sessa personale</span>
               </div>
               <button type="button" onClick={close} className="account-menu-close" aria-label="Chiudi menu">
@@ -175,14 +218,14 @@ export default function AccountMenu({
             </div>
 
             <form action={logout} className="account-menu-logout">
-              <button type="submit" role="menuitem">
+              <SubmitButton pendingLabel="Uscita…" role="menuitem">
                 <svg aria-hidden="true" viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
                   <path d="m16 17 5-5-5-5" />
                   <path d="M21 12H9" />
                 </svg>
                 Esci dall'account
-              </button>
+              </SubmitButton>
             </form>
           </div>
         </>,

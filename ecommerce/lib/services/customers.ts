@@ -1,19 +1,28 @@
 import { prisma } from "@/lib/db";
+import type { Prisma } from "@prisma/client";
 
-export async function listCustomers(query?: string) {
-  const customers = await prisma.customer.findMany({
-    where: query
-      ? {
+export async function listCustomers(query?: string, page = 1, pageSize = 50) {
+  const normalizedQuery = query?.trim().slice(0, 100);
+  const safePage = Math.max(1, Math.floor(page));
+  const safePageSize = Math.min(100, Math.max(1, Math.floor(pageSize)));
+  const where: Prisma.CustomerWhereInput | undefined = normalizedQuery
+    ? {
           OR: [
-            { email: { contains: query, mode: "insensitive" } },
-            { firstName: { contains: query, mode: "insensitive" } },
-            { lastName: { contains: query, mode: "insensitive" } }
+            { email: { contains: normalizedQuery, mode: "insensitive" } },
+            { firstName: { contains: normalizedQuery, mode: "insensitive" } },
+            { lastName: { contains: normalizedQuery, mode: "insensitive" } }
           ]
         }
-      : undefined,
-    orderBy: { createdAt: "desc" },
-    take: 200
-  });
+    : undefined;
+  const [customers, total] = await Promise.all([
+    prisma.customer.findMany({
+      where,
+      orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+      skip: (safePage - 1) * safePageSize,
+      take: safePageSize
+    }),
+    prisma.customer.count({ where })
+  ]);
 
   const customerIds = customers.map((customer) => customer.id);
   const [orderCounts, lifetimeTotals] = customerIds.length
@@ -45,12 +54,17 @@ export async function listCustomers(query?: string) {
       .map((row) => [row.customerId!, row._sum.totalCents ?? 0])
   );
 
-  return customers.map((c) => ({
-    ...c,
-    orderCount: orderCountByCustomer.get(c.id) ?? 0,
-    // Il valore cliente esclude ordini annullati/rimborsati
-    lifetimeCents: lifetimeByCustomer.get(c.id) ?? 0
-  }));
+  return {
+    items: customers.map((c) => ({
+      ...c,
+      orderCount: orderCountByCustomer.get(c.id) ?? 0,
+      // Il valore cliente esclude ordini annullati/rimborsati
+      lifetimeCents: lifetimeByCustomer.get(c.id) ?? 0
+    })),
+    total,
+    page: safePage,
+    pageCount: Math.max(1, Math.ceil(total / safePageSize))
+  };
 }
 
 export async function getCustomer(id: string) {

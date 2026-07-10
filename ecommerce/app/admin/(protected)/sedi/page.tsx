@@ -5,6 +5,7 @@ import {
   updateLocationAction
 } from "@/lib/actions/admin/locations";
 import { prisma } from "@/lib/db";
+import { requireAdminCapability } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
@@ -87,6 +88,7 @@ export default async function AdminLocationsPage({
 }: {
   searchParams: Promise<{ msg?: string; err?: string }>;
 }) {
+  await requireAdminCapability("catalog:manage");
   const { msg, err } = await searchParams;
   const locations = await prisma.location.findMany({
     include: { _count: { select: { storeVariants: true, orders: true } } },

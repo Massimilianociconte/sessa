@@ -8,11 +8,12 @@ type PasswordFieldProps = {
   label: string;
   autoComplete: string;
   minLength?: number;
+  maxLength?: number;
   hint?: string;
 };
 
 /** Campo password con occhiello mostra/nascondi (accessibile, senza dipendenze). */
-export default function PasswordField({ id, name, label, autoComplete, minLength, hint }: PasswordFieldProps) {
+export default function PasswordField({ id, name, label, autoComplete, minLength, maxLength, hint }: PasswordFieldProps) {
   const [visible, setVisible] = useState(false);
   return (
     <div>
@@ -26,6 +27,7 @@ export default function PasswordField({ id, name, label, autoComplete, minLength
           type={visible ? "text" : "password"}
           required
           minLength={minLength}
+          maxLength={maxLength}
           autoComplete={autoComplete}
           className="input-field"
         />

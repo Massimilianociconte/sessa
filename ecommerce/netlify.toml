@@ -1,15 +1,20 @@
 # NB: col runtime Next.js v5 il publish DEVE essere ".next" (il plugin valida
 # che contenga l'output Next); asset statici e funzioni li smista il plugin.
 [build]
-  command = "npx prisma generate && npm run db:deploy && npm run build"
+  # Le preview non devono mai migrare implicitamente il database di produzione.
+  command = "npx prisma generate && npm run build"
   publish = ".next"
 
+[context.production]
+  command = "npx prisma generate && npm run db:deploy && npm run build"
+
 [build.environment]
-  NODE_VERSION = "22"
+  NODE_VERSION = "24"
   NEXT_TELEMETRY_DISABLED = "1"
-  # Chiavi runtime note al solo server: lo scan dei "secrets in output" darebbe
-  # falsi positivi (Prisma embedda l'URL nel bundle server, mai in quello client).
-  SECRETS_SCAN_OMIT_KEYS = "DATABASE_URL,SESSION_SECRET,ADMIN_SETUP_TOKEN,NEXT_PUBLIC_SITE_URL,SMTP_HOST,SMTP_PORT,SMTP_SECURE,SMTP_USER,SMTP_PASS,SMTP_FROM"
+  # Sono esclusi solo valori pubblici/non sensibili. Credenziali DB, sessione,
+  # setup, Stripe e SMTP restano sotto secret scanning e bloccano il deploy se
+  # finiscono accidentalmente in un artefatto.
+  SECRETS_SCAN_OMIT_KEYS = "NEXT_PUBLIC_SITE_URL,SMTP_HOST,SMTP_PORT,SMTP_SECURE,SMTP_FROM"
 
 # Runtime Next.js ufficiale (App Router, Server Actions, middleware).
 [[plugins]]
@@ -19,6 +24,17 @@
 # Le route dinamiche Next continuano a ricevere anche gli header definiti in next.config.mjs.
 
 [[headers]]
+  for = "/*"
+  [headers.values]
+    Content-Security-Policy = "base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; upgrade-insecure-requests"
+    Cross-Origin-Opener-Policy = "same-origin-allow-popups"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "DENY"
+    X-Permitted-Cross-Domain-Policies = "none"
+
+[[headers]]
   for = "/_next/static/*"
   [headers.values]
     Cache-Control = "public, max-age=31536000, immutable"
@@ -26,22 +42,38 @@
 [[headers]]
   for = "/icons/*"
   [headers.values]
-    Cache-Control = "public, max-age=31536000, immutable"
+    Cache-Control = "public, max-age=86400, stale-while-revalidate=604800"
+    CDN-Cache-Control = "public, max-age=604800, stale-while-revalidate=604800"
 
 [[headers]]
   for = "/brand/*"
   [headers.values]
-    Cache-Control = "public, max-age=31536000, immutable"
+    Cache-Control = "public, max-age=86400, stale-while-revalidate=604800"
+    CDN-Cache-Control = "public, max-age=604800, stale-while-revalidate=604800"
 
 [[headers]]
   for = "/patterns/*"
   [headers.values]
-    Cache-Control = "public, max-age=31536000, immutable"
+    Cache-Control = "public, max-age=86400, stale-while-revalidate=604800"
+    CDN-Cache-Control = "public, max-age=604800, stale-while-revalidate=604800"
 
 [[headers]]
   for = "/images/stickers/*"
   [headers.values]
-    Cache-Control = "public, max-age=31536000, immutable"
+    Cache-Control = "public, max-age=86400, stale-while-revalidate=604800"
+    CDN-Cache-Control = "public, max-age=604800, stale-while-revalidate=604800"
+
+[[headers]]
+  for = "/images/sfondo-sedi/*"
+  [headers.values]
+    Cache-Control = "public, max-age=86400, stale-while-revalidate=604800"
+    CDN-Cache-Control = "public, max-age=604800, stale-while-revalidate=604800"
+
+[[headers]]
+  for = "/images/404/*"
+  [headers.values]
+    Cache-Control = "public, max-age=86400, stale-while-revalidate=604800"
+    CDN-Cache-Control = "public, max-age=604800, stale-while-revalidate=604800"
 
 [[headers]]
   for = "/images/products/*"

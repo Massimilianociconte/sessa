@@ -5,11 +5,12 @@ import { loginAction, type LoginState } from "@/lib/actions/auth";
 
 const initialState: LoginState = { error: null };
 
-export default function LoginForm() {
+export default function LoginForm({ nextPath }: { nextPath?: string }) {
   const [state, formAction, pending] = useActionState(loginAction, initialState);
 
   return (
     <form action={formAction} className="space-y-4">
+      {nextPath && <input type="hidden" name="next" value={nextPath} />}
       <div>
         <label htmlFor="email" className="label-field">
           Email
@@ -25,6 +26,7 @@ export default function LoginForm() {
           name="password"
           type="password"
           required
+          maxLength={128}
           autoComplete="current-password"
           className="input-field"
         />

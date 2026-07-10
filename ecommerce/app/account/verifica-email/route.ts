@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { DomainError } from "@/lib/domain";
 import { getSessionCustomer } from "@/lib/auth/customer-session";
 import { consumeCustomerToken } from "@/lib/services/customer-verification";
+import { clearCustomerDisplayNameCookie } from "@/lib/auth/display-name";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +18,7 @@ export async function GET(request: NextRequest) {
   }
   try {
     const type = await consumeCustomerToken(token);
+    if (type === "CHANGE_EMAIL") await clearCustomerDisplayNameCookie();
     const message =
       type === "CHANGE_EMAIL" ? "Email aggiornata e verificata." : "Email verificata, grazie!";
     const session = await getSessionCustomer();

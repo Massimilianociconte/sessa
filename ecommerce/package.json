@@ -7,12 +7,20 @@
     "build": "next build",
     "start": "next start -p 3001",
     "lint": "eslint .",
+    "test:flow": "tsx prisma/verify-flow.ts",
+    "test": "tsx --test tests/*.test.ts",
+    "test:security": "tsx --test tests/auth-security.test.ts",
     "db:push": "prisma db push",
-    "db:deploy": "prisma db execute --schema prisma/schema.prisma --file prisma/migrations-postgres/0002_account_email_pwa_hardening.sql && prisma db execute --schema prisma/schema.prisma --file prisma/migrations-postgres/0003_passkeys.sql",
+    "db:bootstrap": "sh prisma/run-postgres-migrations.sh --bootstrap",
+    "db:deploy": "sh prisma/run-postgres-migrations.sh",
     "db:seed": "tsx prisma/seed.ts",
     "db:studio": "prisma studio",
-    "db:reset": "rm -f prisma/dev.db && prisma db push && tsx prisma/seed.ts",
-    "deploy": "mkdir -p .git && netlify deploy --prod"
+    "deploy": "mkdir -p .git && netlify deploy --context deploy-preview",
+    "deploy:preview": "mkdir -p .git && netlify deploy --context deploy-preview",
+    "deploy:prod": "mkdir -p .git && netlify deploy --prod --context production"
+  },
+  "engines": {
+    "node": "24.x"
   },
   "dependencies": {
     "@prisma/client": "^6.7.0",

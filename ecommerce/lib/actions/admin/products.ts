@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
-import { requireAdmin } from "@/lib/auth/session";
+import { requireAdminCapability } from "@/lib/auth/session";
 import { audit } from "@/lib/audit";
 import { parseEuroToCents } from "@/lib/money";
 import { formDataToObject, productSchema, variantSchema } from "@/lib/validation";
@@ -15,23 +15,8 @@ function revalidateCatalog() {
   revalidatePath("/admin/prodotti");
 }
 
-/** Crea uno StoreVariant per ogni sede attiva (assortimento iniziale). */
-async function createStoreVariantsForAllLocations(variantId: string, position: number) {
-  const locations = await prisma.location.findMany({ where: { isActive: true }, select: { id: true } });
-  for (const loc of locations) {
-    const exists = await prisma.storeVariant.findUnique({
-      where: { locationId_variantId: { locationId: loc.id, variantId } }
-    });
-    if (!exists) {
-      await prisma.storeVariant.create({
-        data: { locationId: loc.id, variantId, stockQty: 0, isAvailable: true, position }
-      });
-    }
-  }
-}
-
 export async function createProductAction(formData: FormData): Promise<void> {
-  const user = await requireAdmin();
+  const user = await requireAdminCapability("catalog:manage");
   const parsed = productSchema.safeParse({
     ...formDataToObject(formData),
     featured: formData.get("featured") === "on"
@@ -48,7 +33,7 @@ export async function createProductAction(formData: FormData): Promise<void> {
 }
 
 export async function updateProductAction(formData: FormData): Promise<void> {
-  const user = await requireAdmin();
+  const user = await requireAdminCapability("catalog:manage");
   const id = requireString(formData, "id");
   const parsed = productSchema.safeParse({
     ...formDataToObject(formData),
@@ -67,7 +52,7 @@ export async function updateProductAction(formData: FormData): Promise<void> {
 }
 
 export async function deleteProductAction(formData: FormData): Promise<void> {
-  const user = await requireAdmin();
+  const user = await requireAdminCapability("catalog:manage");
   const id = requireString(formData, "id");
   const referenced = await prisma.orderItem.count({ where: { variant: { productId: id } } });
   if (referenced > 0) {
@@ -80,7 +65,7 @@ export async function deleteProductAction(formData: FormData): Promise<void> {
 }
 
 export async function createVariantAction(formData: FormData): Promise<void> {
-  const user = await requireAdmin();
+  const user = await requireAdminCapability("catalog:manage");
   const productId = requireString(formData, "productId");
   const path = `/admin/prodotti/${productId}`;
   const parsed = variantSchema.safeParse({
@@ -101,26 +86,44 @@ export async function createVariantAction(formData: FormData): Promise<void> {
   const skuClash = await prisma.productVariant.findUnique({ where: { sku: parsed.data.sku } });
   if (skuClash) backWithError(path, `SKU "${parsed.data.sku}" già esistente.`);
 
-  const variant = await prisma.productVariant.create({
-    data: {
-      productId,
-      name: parsed.data.name,
-      sku: parsed.data.sku,
-      basePriceCents,
-      compareAtCents,
-      weightGrams: parsed.data.weightGrams,
-      isActive: parsed.data.isActive,
-      position: parsed.data.position
+  const variant = await prisma.$transaction(async (tx) => {
+    const created = await tx.productVariant.create({
+      data: {
+        productId,
+        name: parsed.data.name,
+        sku: parsed.data.sku,
+        basePriceCents,
+        compareAtCents,
+        weightGrams: parsed.data.weightGrams,
+        isActive: parsed.data.isActive,
+        position: parsed.data.position
+      }
+    });
+    const locations = await tx.location.findMany({
+      where: { isActive: true },
+      select: { id: true }
+    });
+    if (locations.length > 0) {
+      await tx.storeVariant.createMany({
+        data: locations.map((location) => ({
+          locationId: location.id,
+          variantId: created.id,
+          stockQty: 0,
+          isAvailable: true,
+          position: parsed.data.position
+        })),
+        skipDuplicates: true
+      });
     }
+    return created;
   });
-  await createStoreVariantsForAllLocations(variant.id, parsed.data.position);
   await audit(user.email, "variant.create", "ProductVariant", variant.id, parsed.data);
   revalidateCatalog();
   backWithMessage(path, `Variante "${parsed.data.name}" creata e pubblicata su tutte le sedi (stock 0).`);
 }
 
 export async function updateVariantAction(formData: FormData): Promise<void> {
-  const user = await requireAdmin();
+  const user = await requireAdminCapability("catalog:manage");
   const variantId = requireString(formData, "variantId");
   const productId = requireString(formData, "productId");
   const path = `/admin/prodotti/${productId}`;
@@ -162,7 +165,7 @@ export async function updateVariantAction(formData: FormData): Promise<void> {
 }
 
 export async function deleteVariantAction(formData: FormData): Promise<void> {
-  const user = await requireAdmin();
+  const user = await requireAdminCapability("catalog:manage");
   const variantId = requireString(formData, "variantId");
   const productId = requireString(formData, "productId");
   const path = `/admin/prodotti/${productId}`;
@@ -181,7 +184,7 @@ export async function deleteVariantAction(formData: FormData): Promise<void> {
  * di uno StoreVariant. Lo stock si tocca solo dal magazzino (ledger).
  */
 export async function updateStoreVariantAction(formData: FormData): Promise<void> {
-  const user = await requireAdmin();
+  const user = await requireAdminCapability("catalog:manage");
   const storeVariantId = requireString(formData, "storeVariantId");
   const productId = requireString(formData, "productId");
   const path = `/admin/prodotti/${productId}`;

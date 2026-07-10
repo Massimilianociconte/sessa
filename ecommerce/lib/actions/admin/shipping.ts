@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
-import { requireAdmin } from "@/lib/auth/session";
+import { requireAdminCapability } from "@/lib/auth/session";
 import { audit } from "@/lib/audit";
 import { parseEuroToCents } from "@/lib/money";
 import { formDataToObject, shippingRateSchema } from "@/lib/validation";
@@ -11,7 +11,7 @@ import { backWithError, backWithMessage, firstZodMessage, requireString } from "
 const PATH = "/admin/impostazioni";
 
 export async function createShippingRateAction(formData: FormData): Promise<void> {
-  const user = await requireAdmin();
+  const user = await requireAdminCapability("settings:manage");
   const parsed = shippingRateSchema.safeParse({
     ...formDataToObject(formData),
     isActive: formData.get("isActive") !== "off"
@@ -43,7 +43,7 @@ export async function createShippingRateAction(formData: FormData): Promise<void
 }
 
 export async function updateShippingRateAction(formData: FormData): Promise<void> {
-  const user = await requireAdmin();
+  const user = await requireAdminCapability("settings:manage");
   const id = requireString(formData, "id");
   const parsed = shippingRateSchema.safeParse({
     ...formDataToObject(formData),
@@ -76,7 +76,7 @@ export async function updateShippingRateAction(formData: FormData): Promise<void
 }
 
 export async function deleteShippingRateAction(formData: FormData): Promise<void> {
-  const user = await requireAdmin();
+  const user = await requireAdminCapability("settings:manage");
   const id = requireString(formData, "id");
   await prisma.shippingRate.delete({ where: { id } });
   await audit(user.email, "shipping.rate.delete", "ShippingRate", id);

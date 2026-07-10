@@ -3,6 +3,8 @@ import Flash from "@/components/admin/Flash";
 import { ProductStatusBadge } from "@/components/admin/StatusBadge";
 import { prisma } from "@/lib/db";
 import { formatCents } from "@/lib/money";
+import { requireAdminCapability } from "@/lib/auth/session";
+import type { Prisma } from "@prisma/client";
 
 export const dynamic = "force-dynamic";
 
@@ -11,19 +13,36 @@ export const metadata = { title: "Prodotti" };
 export default async function AdminProductsPage({
   searchParams
 }: {
-  searchParams: Promise<{ msg?: string; err?: string; q?: string }>;
+  searchParams: Promise<{ msg?: string; err?: string; q?: string; page?: string }>;
 }) {
-  const { msg, err, q } = await searchParams;
-  const products = await prisma.product.findMany({
-    where: q
-      ? { OR: [{ name: { contains: q } }, { slug: { contains: q } }, { tags: { contains: q } }] }
-      : undefined,
-    include: {
-      category: true,
-      variants: { include: { storeVariants: { select: { stockQty: true } } } }
-    },
-    orderBy: [{ position: "asc" }, { createdAt: "desc" }]
-  });
+  await requireAdminCapability("catalog:manage");
+  const { msg, err, q, page } = await searchParams;
+  const currentPage = /^\d+$/.test(page ?? "") ? Math.max(1, Number(page)) : 1;
+  const pageSize = 50;
+  const query = q?.trim().slice(0, 100);
+  const where: Prisma.ProductWhereInput | undefined = query
+    ? {
+        OR: [
+          { name: { contains: query, mode: "insensitive" } },
+          { slug: { contains: query, mode: "insensitive" } },
+          { tags: { contains: query, mode: "insensitive" } }
+        ]
+      }
+    : undefined;
+  const [products, total] = await Promise.all([
+    prisma.product.findMany({
+      where,
+      include: {
+        category: true,
+        variants: { include: { storeVariants: { select: { stockQty: true } } } }
+      },
+      orderBy: [{ position: "asc" }, { createdAt: "desc" }],
+      skip: (currentPage - 1) * pageSize,
+      take: pageSize
+    }),
+    prisma.product.count({ where })
+  ]);
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
 
   return (
     <>
@@ -95,6 +114,25 @@ export default async function AdminProductsPage({
           </tbody>
         </table>
       </div>
+      {pageCount > 1 && (
+        <nav className="mt-4 flex items-center justify-between text-sm" aria-label="Pagine prodotti">
+          <Link
+            href={`/admin/prodotti?page=${Math.max(1, currentPage - 1)}${q ? `&q=${encodeURIComponent(q)}` : ""}`}
+            aria-disabled={currentPage <= 1}
+            className={currentPage <= 1 ? "pointer-events-none text-ink/30" : "btn-ghost"}
+          >
+            ← Precedenti
+          </Link>
+          <span className="text-ink/50">Pagina {currentPage} di {pageCount} · {total} prodotti</span>
+          <Link
+            href={`/admin/prodotti?page=${Math.min(pageCount, currentPage + 1)}${q ? `&q=${encodeURIComponent(q)}` : ""}`}
+            aria-disabled={currentPage >= pageCount}
+            className={currentPage >= pageCount ? "pointer-events-none text-ink/30" : "btn-ghost"}
+          >
+            Successivi →
+          </Link>
+        </nav>
+      )}
     </>
   );
 }

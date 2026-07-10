@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
-import { requireAdmin } from "@/lib/auth/session";
+import { requireAdminCapability } from "@/lib/auth/session";
 import { audit } from "@/lib/audit";
 import { formDataToObject, locationSchema } from "@/lib/validation";
 import { backWithError, backWithMessage, firstZodMessage, requireString } from "./helpers";
@@ -20,30 +20,34 @@ function parseLocation(formData: FormData) {
 }
 
 export async function createLocationAction(formData: FormData): Promise<void> {
-  const user = await requireAdmin();
+  const user = await requireAdminCapability("catalog:manage");
   const parsed = parseLocation(formData);
   if (!parsed.success) backWithError(PATH, firstZodMessage(parsed.error));
   const exists = await prisma.location.findUnique({ where: { slug: parsed.data.slug } });
   if (exists) backWithError(PATH, "Slug sede già in uso.");
 
-  const location = await prisma.location.create({ data: parsed.data });
-
-  // Assortimento iniziale: pubblica tutte le varianti attive nella nuova sede (stock 0).
-  const variants = await prisma.productVariant.findMany({
-    where: { isActive: true },
-    select: { id: true, position: true }
-  });
-  if (variants.length > 0) {
-    await prisma.storeVariant.createMany({
-      data: variants.map((v) => ({
-        locationId: location.id,
-        variantId: v.id,
-        stockQty: 0,
-        isAvailable: true,
-        position: v.position
-      }))
+  const location = await prisma.$transaction(async (tx) => {
+    const created = await tx.location.create({ data: parsed.data });
+    // Assortimento iniziale atomico: se il provisioning fallisce non resta una
+    // sede visibile priva di catalogo.
+    const variants = await tx.productVariant.findMany({
+      where: { isActive: true },
+      select: { id: true, position: true }
     });
-  }
+    if (variants.length > 0) {
+      await tx.storeVariant.createMany({
+        data: variants.map((variant) => ({
+          locationId: created.id,
+          variantId: variant.id,
+          stockQty: 0,
+          isAvailable: true,
+          position: variant.position
+        })),
+        skipDuplicates: true
+      });
+    }
+    return created;
+  });
 
   await audit(user.email, "location.create", "Location", location.id, parsed.data);
   invalidateMemo("loc:");
@@ -53,7 +57,7 @@ export async function createLocationAction(formData: FormData): Promise<void> {
 }
 
 export async function updateLocationAction(formData: FormData): Promise<void> {
-  const user = await requireAdmin();
+  const user = await requireAdminCapability("catalog:manage");
   const id = requireString(formData, "id");
   const parsed = parseLocation(formData);
   if (!parsed.success) backWithError(PATH, firstZodMessage(parsed.error));
@@ -68,7 +72,7 @@ export async function updateLocationAction(formData: FormData): Promise<void> {
 }
 
 export async function deleteLocationAction(formData: FormData): Promise<void> {
-  const user = await requireAdmin();
+  const user = await requireAdminCapability("catalog:manage");
   const id = requireString(formData, "id");
   const orders = await prisma.order.count({ where: { locationId: id } });
   if (orders > 0) {

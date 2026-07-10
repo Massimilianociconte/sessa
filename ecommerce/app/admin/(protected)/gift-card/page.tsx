@@ -2,6 +2,8 @@ import Flash from "@/components/admin/Flash";
 import { createGiftCardAction, toggleGiftCardAction } from "@/lib/actions/admin/giftcards";
 import { formatCents } from "@/lib/money";
 import { listGiftCards } from "@/lib/services/giftcards";
+import { requireAdminCapability } from "@/lib/auth/session";
+import { formatRomeDate } from "@/lib/datetime";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +14,7 @@ export default async function AdminGiftCardsPage({
 }: {
   searchParams: Promise<{ msg?: string; err?: string }>;
 }) {
+  await requireAdminCapability("promotions:manage");
   const { msg, err } = await searchParams;
   const cards = await listGiftCards();
 
@@ -58,7 +61,7 @@ export default async function AdminGiftCardsPage({
                   </td>
                   <td className="px-4 py-3 text-xs text-ink/60">{card.customer?.email ?? "Al portatore"}</td>
                   <td className="px-4 py-3 text-xs text-ink/60">
-                    {card.expiresAt ? card.expiresAt.toLocaleDateString("it-IT") : "—"}
+                    {card.expiresAt ? formatRomeDate(card.expiresAt) : "—"}
                   </td>
                   <td className="px-4 py-3">
                     <span className={`badge ${card.isActive ? "bg-brilliant/15 text-emerald-800" : "bg-ink/10 text-ink/50"}`}>

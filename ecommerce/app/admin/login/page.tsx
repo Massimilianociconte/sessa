@@ -4,14 +4,20 @@ import AuthShell from "@/components/account/AuthShell";
 import LoginForm from "@/components/admin/LoginForm";
 import { getSessionUser } from "@/lib/auth/session";
 import { prisma } from "@/lib/db";
+import { safeNextPath } from "@/lib/auth/redirects";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = { title: "Accesso" };
 
-export default async function AdminLoginPage() {
-  const user = await getSessionUser();
-  if (user) redirect("/admin");
+export default async function AdminLoginPage({
+  searchParams
+}: {
+  searchParams: Promise<{ next?: string; expired?: string }>;
+}) {
+  const [{ next, expired }, user] = await Promise.all([searchParams, getSessionUser()]);
+  const nextPath = safeNextPath(next, "/admin", "/admin");
+  if (user) redirect(nextPath);
   const adminCount = await prisma.adminUser.count();
   if (adminCount === 0) redirect("/admin/setup");
 
@@ -33,7 +39,12 @@ export default async function AdminLoginPage() {
         </div>
       }
     >
-      <LoginForm />
+      {expired && (
+        <p className="auth-notice" data-tone="warn" role="status">
+          La sessione gestionale è scaduta o è stata revocata. Accedi di nuovo per continuare.
+        </p>
+      )}
+      <LoginForm nextPath={nextPath} />
     </AuthShell>
   );
 }

@@ -1,12 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { DomainError } from "@/lib/domain";
+import { getSessionCustomer } from "@/lib/auth/customer-session";
 import { CART_COOKIE, getCartByToken } from "@/lib/services/cart";
 import { placeOrder } from "@/lib/services/checkout";
 import { checkoutSchema, formDataToObject } from "@/lib/validation";
+import { enforceCartRateLimit } from "@/lib/services/cart-rate-limit";
 
 export type CheckoutState = {
   error: string | null;
@@ -43,7 +45,11 @@ export async function placeOrderAction(
   let redirectUrl: string | null = null;
   let paymentInitError: string | null = null;
   try {
-    const placed = await placeOrder(cart, parsed.data);
+    await enforceCartRateLimit(await headers(), token, "checkout");
+    const sessionCustomer = await getSessionCustomer();
+    const placed = await placeOrder(cart, parsed.data, {
+      authenticatedCustomerId: sessionCustomer?.id ?? null
+    });
     placedCode = placed.code;
     placedToken = placed.publicToken;
     redirectUrl = placed.redirectUrl;

@@ -2,11 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
-import { requireAdmin } from "@/lib/auth/session";
+import { requireAdminCapability } from "@/lib/auth/session";
 import { audit } from "@/lib/audit";
 import { parseEuroToCents } from "@/lib/money";
 import { discountSchema, formDataToObject } from "@/lib/validation";
 import { backWithError, backWithMessage, firstZodMessage, requireString } from "./helpers";
+import { romeDayRange } from "@/lib/datetime";
 
 const PATH = "/admin/sconti";
 
@@ -22,27 +23,35 @@ function parseDiscountValue(type: "PERCENT" | "FIXED", raw: string): number {
 }
 
 function parseDates(startsAt?: string, endsAt?: string) {
+  const startsRange = startsAt ? romeDayRange(startsAt) : null;
+  const endsRange = endsAt ? romeDayRange(endsAt) : null;
+  if ((startsAt && !startsRange) || (endsAt && !endsRange)) throw new Error("Data non valida.");
   return {
-    startsAt: startsAt ? new Date(startsAt) : null,
-    endsAt: endsAt ? new Date(endsAt) : null
+    startsAt: startsRange?.start ?? null,
+    // La data finale e inclusiva per l'operatore: scade alla mezzanotte romana successiva.
+    endsAt: endsRange?.end ?? null
   };
 }
 
 export async function createDiscountAction(formData: FormData): Promise<void> {
-  const user = await requireAdmin();
+  const user = await requireAdminCapability("promotions:manage");
   const parsed = discountSchema.safeParse({
     ...formDataToObject(formData),
     firstOrderOnly: formData.get("firstOrderOnly") === "on",
-    stackable: formData.get("stackable") === "on",
+    // Il carrello supporta intenzionalmente un solo codice: niente promessa di
+    // cumulabilita finche non esiste un modello multi-discount end-to-end.
+    stackable: false,
     isActive: formData.get("isActive") !== "off"
   });
   if (!parsed.success) backWithError(PATH, firstZodMessage(parsed.error));
 
   let value: number;
   let minSubtotalCents: number | null = null;
+  let dates: ReturnType<typeof parseDates>;
   try {
     value = parseDiscountValue(parsed.data.type, parsed.data.value);
     if (parsed.data.minSubtotal) minSubtotalCents = parseEuroToCents(parsed.data.minSubtotal);
+    dates = parseDates(parsed.data.startsAt, parsed.data.endsAt);
   } catch (error) {
     backWithError(PATH, error instanceof Error ? error.message : "Valore non valido.");
   }
@@ -65,9 +74,9 @@ export async function createDiscountAction(formData: FormData): Promise<void> {
       maxUses: parsed.data.maxUses ?? null,
       perUserLimit: parsed.data.perUserLimit ?? null,
       firstOrderOnly: parsed.data.firstOrderOnly,
-      stackable: parsed.data.stackable,
+      stackable: false,
       isActive: parsed.data.isActive,
-      ...parseDates(parsed.data.startsAt, parsed.data.endsAt),
+      ...dates,
       locations: { create: locationIds.map((locationId) => ({ locationId })) },
       categories: { create: categoryIds.map((categoryId) => ({ categoryId })) },
       products: { create: productIds.map((productId) => ({ productId })) }
@@ -84,7 +93,7 @@ export async function createDiscountAction(formData: FormData): Promise<void> {
 }
 
 export async function toggleDiscountAction(formData: FormData): Promise<void> {
-  const user = await requireAdmin();
+  const user = await requireAdminCapability("promotions:manage");
   const id = requireString(formData, "id");
   const discount = await prisma.discountCode.findUnique({ where: { id } });
   if (!discount) backWithError(PATH, "Codice non trovato.");
@@ -95,7 +104,7 @@ export async function toggleDiscountAction(formData: FormData): Promise<void> {
 }
 
 export async function deleteDiscountAction(formData: FormData): Promise<void> {
-  const user = await requireAdmin();
+  const user = await requireAdminCapability("promotions:manage");
   const id = requireString(formData, "id");
   const used = await prisma.order.count({ where: { discountCodeId: id } });
   if (used > 0) {

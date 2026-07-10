@@ -1,21 +1,21 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionUser } from "@/lib/auth/session";
+import { hasAdminCapability } from "@/lib/auth/admin-authorization";
 import { formatCents } from "@/lib/money";
 import { effectivePrice } from "@/lib/services/catalog";
 import { listInventory } from "@/lib/services/inventory";
 import { audit } from "@/lib/audit";
+import { csvCell } from "@/lib/security/csv";
 
 export const dynamic = "force-dynamic";
-
-function csvCell(value: unknown): string {
-  const raw = value === null || value === undefined ? "" : String(value);
-  return /[",;\n]/.test(raw) ? `"${raw.replace(/"/g, '""')}"` : raw;
-}
 
 /** Export CSV dello stock per sede (rispetta i filtri correnti della pagina magazzino). */
 export async function GET(request: NextRequest) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Non autorizzato" }, { status: 401 });
+  if (!hasAdminCapability(user.role, "exports:download")) {
+    return NextResponse.json({ error: "Permessi insufficienti" }, { status: 403 });
+  }
 
   const params = request.nextUrl.searchParams;
   const rows = await listInventory({

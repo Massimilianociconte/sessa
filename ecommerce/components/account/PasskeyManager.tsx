@@ -43,6 +43,7 @@ export default function PasskeyManager({ passkeys }: { passkeys: PasskeyView[] }
   const router = useRouter();
   const [supported, setSupported] = useState<boolean | null>(null);
   const [name, setName] = useState("");
+  const [password, setPassword] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -59,7 +60,11 @@ export default function PasskeyManager({ passkeys }: { passkeys: PasskeyView[] }
     setError(null);
     setSuccess(null);
     try {
-      const start = await startPasskeyRegistrationAction();
+      if (!password) {
+        setError("Inserisci la password attuale per aggiungere una passkey.");
+        return;
+      }
+      const start = await startPasskeyRegistrationAction(password);
       if (!start.ok) {
         setError(start.error);
         return;
@@ -71,6 +76,7 @@ export default function PasskeyManager({ passkeys }: { passkeys: PasskeyView[] }
         return;
       }
       setSuccess(`Passkey "${finish.data.name}" creata: da questo dispositivo puoi accedere senza password.`);
+      setPassword("");
       router.refresh();
     } catch (err) {
       const domError = err as Error & { name?: string };
@@ -123,6 +129,19 @@ export default function PasskeyManager({ passkeys }: { passkeys: PasskeyView[] }
                 }}
               >
                 <input type="hidden" name="passkeyId" value={pk.id} />
+                <label className="sr-only" htmlFor={`delete-passkey-password-${pk.id}`}>
+                  Password attuale per eliminare {pk.name}
+                </label>
+                <input
+                  id={`delete-passkey-password-${pk.id}`}
+                  name="password"
+                  type="password"
+                  required
+                  maxLength={128}
+                  autoComplete="current-password"
+                  className="input-field !w-44 !py-2 text-xs"
+                  placeholder="Password attuale"
+                />
                 <button type="submit" className="btn-ghost !text-terracotta">
                   Elimina
                 </button>
@@ -133,7 +152,7 @@ export default function PasskeyManager({ passkeys }: { passkeys: PasskeyView[] }
       )}
 
       <div className="passkey-create">
-        <div className="grid gap-3 sm:grid-cols-[1fr_auto] sm:items-end">
+        <div className="grid gap-3 sm:grid-cols-2 sm:items-end">
           <div>
             <label htmlFor="passkeyName" className="label-field">Nome del dispositivo</label>
             <input
@@ -145,7 +164,19 @@ export default function PasskeyManager({ passkeys }: { passkeys: PasskeyView[] }
               placeholder="Es. iPhone di Maria"
             />
           </div>
-          <button type="button" onClick={create} disabled={busy || supported === null} className="btn-primary">
+          <div>
+            <label htmlFor="passkeyPassword" className="label-field">Password attuale</label>
+            <input
+              id="passkeyPassword"
+              type="password"
+              value={password}
+              onChange={(event) => setPassword(event.target.value)}
+              maxLength={128}
+              autoComplete="current-password"
+              className="input-field"
+            />
+          </div>
+          <button type="button" onClick={create} disabled={busy || supported === null} className="btn-primary sm:col-span-2">
             {busy ? "Attendi…" : passkeys.length > 0 ? "Aggiungi passkey" : "Crea passkey"}
           </button>
         </div>

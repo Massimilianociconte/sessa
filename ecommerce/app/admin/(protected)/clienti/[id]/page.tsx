@@ -5,6 +5,8 @@ import { OrderStatusBadge } from "@/components/admin/StatusBadge";
 import { saveCustomerNotesAction } from "@/lib/actions/admin/customers";
 import { formatCents } from "@/lib/money";
 import { getCustomer } from "@/lib/services/customers";
+import { requireAdminCapability } from "@/lib/auth/session";
+import { formatRomeDate } from "@/lib/datetime";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +19,7 @@ export default async function AdminCustomerDetailPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ msg?: string; err?: string }>;
 }) {
+  await requireAdminCapability("customers:manage");
   const [{ id }, { msg, err }] = await Promise.all([params, searchParams]);
   const customer = await getCustomer(id);
   if (!customer) notFound();
@@ -54,7 +57,7 @@ export default async function AdminCustomerDetailPage({
                       </Link>
                     </td>
                     <td className="py-2 text-xs text-ink/50">
-                      {order.placedAt.toLocaleDateString("it-IT")}
+                      {formatRomeDate(order.placedAt)}
                     </td>
                     <td className="py-2">
                       <OrderStatusBadge status={order.status} />
@@ -73,7 +76,7 @@ export default async function AdminCustomerDetailPage({
             <p>{customer.email}</p>
             {customer.phone && <p>{customer.phone}</p>}
             <p className="mt-2 text-xs text-ink/50">
-              Iscritto il {customer.createdAt.toLocaleDateString("it-IT")} · Marketing:{" "}
+              Iscritto il {formatRomeDate(customer.createdAt)} · Marketing:{" "}
               {customer.marketingOptIn ? "sì" : "no"}
             </p>
             {customer.addresses.length > 0 && (
@@ -93,6 +96,7 @@ export default async function AdminCustomerDetailPage({
               <input type="hidden" name="id" value={customer.id} />
               <textarea
                 name="notes"
+                maxLength={2000}
                 rows={4}
                 defaultValue={customer.notes ?? ""}
                 className="input-field"

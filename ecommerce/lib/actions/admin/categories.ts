@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
-import { requireAdmin } from "@/lib/auth/session";
+import { requireAdminCapability } from "@/lib/auth/session";
 import { audit } from "@/lib/audit";
 import { categorySchema, formDataToObject } from "@/lib/validation";
 import { backWithError, backWithMessage, firstZodMessage, requireString } from "./helpers";
@@ -11,7 +11,7 @@ import { invalidateMemo } from "@/lib/ttl-cache";
 const PATH = "/admin/categorie";
 
 export async function createCategoryAction(formData: FormData): Promise<void> {
-  const user = await requireAdmin();
+  const user = await requireAdminCapability("catalog:manage");
   const parsed = categorySchema.safeParse({
     ...formDataToObject(formData),
     isActive: formData.get("isActive") !== "off"
@@ -28,7 +28,7 @@ export async function createCategoryAction(formData: FormData): Promise<void> {
 }
 
 export async function updateCategoryAction(formData: FormData): Promise<void> {
-  const user = await requireAdmin();
+  const user = await requireAdminCapability("catalog:manage");
   const id = requireString(formData, "id");
   const parsed = categorySchema.safeParse({
     ...formDataToObject(formData),
@@ -48,7 +48,7 @@ export async function updateCategoryAction(formData: FormData): Promise<void> {
 }
 
 export async function deleteCategoryAction(formData: FormData): Promise<void> {
-  const user = await requireAdmin();
+  const user = await requireAdminCapability("catalog:manage");
   const id = requireString(formData, "id");
   const productCount = await prisma.product.count({ where: { categoryId: id } });
   if (productCount > 0) {

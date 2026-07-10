@@ -50,6 +50,15 @@ export async function loadDiscount(code: string): Promise<DiscountWithLinks | nu
 
 export function evaluateDiscount(discount: DiscountWithLinks, ctx: DiscountContext): DiscountEval {
   if (!discount.isActive) return { ok: false, reason: "Codice sconto non valido." };
+  if (discount.scope === "LOCATIONS" && discount.locations.length === 0) {
+    return { ok: false, reason: "Codice non configurato per alcuna sede." };
+  }
+  if (discount.scope === "CATEGORIES" && discount.categories.length === 0) {
+    return { ok: false, reason: "Codice non configurato per alcuna categoria." };
+  }
+  if (discount.scope === "PRODUCTS" && discount.products.length === 0) {
+    return { ok: false, reason: "Codice non configurato per alcun prodotto." };
+  }
 
   const now = new Date();
   if (discount.startsAt && discount.startsAt > now) {
@@ -63,6 +72,9 @@ export function evaluateDiscount(discount: DiscountWithLinks, ctx: DiscountConte
   }
   if (discount.customerId && discount.customerId !== ctx.customerId) {
     return { ok: false, reason: "Codice riservato a un altro cliente." };
+  }
+  if (discount.perUserLimit !== null && !ctx.customerId) {
+    return { ok: false, reason: "Accedi al tuo account per usare questo codice." };
   }
   if (
     discount.minSubtotalCents !== null &&

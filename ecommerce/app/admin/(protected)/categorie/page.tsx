@@ -5,6 +5,7 @@ import {
   updateCategoryAction
 } from "@/lib/actions/admin/categories";
 import { prisma } from "@/lib/db";
+import { requireAdminCapability } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
@@ -68,6 +69,7 @@ export default async function AdminCategoriesPage({
 }: {
   searchParams: Promise<{ msg?: string; err?: string }>;
 }) {
+  await requireAdminCapability("catalog:manage");
   const { msg, err } = await searchParams;
   const categories = await prisma.category.findMany({
     include: { _count: { select: { products: true } } },

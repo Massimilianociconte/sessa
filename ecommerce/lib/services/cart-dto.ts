@@ -1,13 +1,16 @@
-import { buildCartView, getCartByToken, getCartGiftCard } from "@/lib/services/cart";
+import { buildCartViewForCustomer, getCartByToken, getCartGiftCard } from "@/lib/services/cart";
 import { EMPTY_CART, type CartDTO } from "@/lib/cart-types";
 
 /** Costruisce il DTO leggero del carrello per le API del drawer. */
-export async function loadCartDTO(token: string | null | undefined): Promise<CartDTO> {
+export async function loadCartDTO(
+  token: string | null | undefined,
+  customerId?: string | null
+): Promise<CartDTO> {
   if (!token) return EMPTY_CART;
   const cart = await getCartByToken(token);
   if (!cart) return EMPTY_CART;
-  const view = buildCartView(cart);
-  const giftCard = await getCartGiftCard(cart);
+  const view = await buildCartViewForCustomer(cart, customerId);
+  const giftCard = await getCartGiftCard(cart, customerId);
 
   return {
     empty: view.lines.length === 0,

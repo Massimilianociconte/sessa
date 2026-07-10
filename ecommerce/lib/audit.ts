@@ -1,4 +1,5 @@
 import { prisma } from "@/lib/db";
+import { safeErrorMetadata } from "@/lib/safe-log";
 
 /**
  * Traccia ogni azione di scrittura del gestionale.
@@ -22,6 +23,6 @@ export async function audit(
       }
     });
   } catch (error) {
-    console.error("Audit log fallito:", error);
+    console.error("Audit log fallito", safeErrorMetadata(error));
   }
 }

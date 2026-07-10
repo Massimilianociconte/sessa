@@ -28,8 +28,8 @@ export default async function AccountProfilePage({
         title="Profilo"
         description="Mantieni aggiornati i dati essenziali per checkout, ricevute, assistenza sede e comunicazioni utili."
       />
-      {msg && <p className="rounded-xl bg-brilliant/10 px-4 py-3 text-sm font-semibold text-emerald-800">{decodeURIComponent(msg)}</p>}
-      {err && <p className="rounded-xl bg-terracotta/10 px-4 py-3 text-sm font-semibold text-terracotta">{decodeURIComponent(err)}</p>}
+      {msg && <p className="rounded-xl bg-brilliant/10 px-4 py-3 text-sm font-semibold text-emerald-800">{msg}</p>}
+      {err && <p className="rounded-xl bg-terracotta/10 px-4 py-3 text-sm font-semibold text-terracotta">{err}</p>}
 
       <AccountInfoGrid>
         <AccountInfoTile label="Email" value={customer.emailVerified ? "Verificata" : "Da verificare"} description={customer.email} tone="ceramic" />
@@ -114,12 +114,12 @@ export default async function AccountProfilePage({
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
-              <label htmlFor="newPassword" className="label-field">Nuova password (min 10)</label>
-              <input id="newPassword" name="newPassword" type="password" required minLength={10} autoComplete="new-password" className="input-field" />
+              <label htmlFor="newPassword" className="label-field">Nuova password (min 12)</label>
+              <input id="newPassword" name="newPassword" type="password" required minLength={12} maxLength={128} autoComplete="new-password" className="input-field" />
             </div>
             <div>
               <label htmlFor="confirmPassword" className="label-field">Conferma</label>
-              <input id="confirmPassword" name="confirmPassword" type="password" required minLength={10} autoComplete="new-password" className="input-field" />
+              <input id="confirmPassword" name="confirmPassword" type="password" required minLength={12} maxLength={128} autoComplete="new-password" className="input-field" />
             </div>
           </div>
           <button type="submit" className="btn-secondary">Aggiorna password</button>

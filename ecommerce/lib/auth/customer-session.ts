@@ -1,38 +1,18 @@
 import "server-only";
 import { createHash, randomBytes } from "node:crypto";
-import { cookies, headers } from "next/headers";
+import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { cache } from "react";
 import { prisma } from "@/lib/db";
 import { CUSTOMER_SESSION_COOKIE } from "@/lib/auth/constants";
-import { invalidateMemo, memoTtl } from "@/lib/ttl-cache";
-
-// Memo breve della sessione per istanza lambda: il DB è in un'altra regione e
-// questa è LA query pagata da ogni pagina/action autenticata. Ogni revoca
-// invalida la cache dell'istanza; su altre istanze una sessione revocata può
-// sopravvivere al massimo SESSION_MEMO_TTL_MS (finestra accettata, vedi docs).
-const SESSION_MEMO_TTL_MS = 20_000;
+import { getRequestSecurityContext } from "@/lib/auth/request-context";
 
 const SESSION_DAYS = 30;
 const SESSION_TOUCH_INTERVAL_MS = 5 * 60 * 1000;
-const MAX_USER_AGENT_LENGTH = 500;
-const MAX_IP_LENGTH = 80;
+const MAX_SESSIONS_PER_CUSTOMER = 20;
 
 function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
-}
-
-function trimNullable(value: string | null, max: number): string | null {
-  const clean = value?.trim();
-  if (!clean) return null;
-  return clean.slice(0, max);
-}
-
-async function getRequestSessionContext() {
-  const h = await headers();
-  return {
-    userAgent: trimNullable(h.get("user-agent"), MAX_USER_AGENT_LENGTH),
-    ipAddress: trimNullable(h.get("x-forwarded-for")?.split(",")[0] ?? h.get("x-real-ip") ?? "local", MAX_IP_LENGTH)
-  };
 }
 
 async function currentSessionTokenHash(): Promise<string | null> {
@@ -44,7 +24,7 @@ async function currentSessionTokenHash(): Promise<string | null> {
 /** Crea la sessione cliente a DB e imposta il cookie (solo l'hash del token tocca il DB). */
 export async function createCustomerSession(customerId: string) {
   const token = randomBytes(32).toString("hex");
-  const context = await getRequestSessionContext();
+  const context = await getRequestSecurityContext();
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000);
   const session = await prisma.customerSession.create({
     data: {
@@ -64,6 +44,17 @@ export async function createCustomerSession(customerId: string) {
       createdAt: true
     }
   });
+  const overflow = await prisma.customerSession.findMany({
+    where: { customerId },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    skip: MAX_SESSIONS_PER_CUSTOMER,
+    select: { id: true }
+  });
+  if (overflow.length > 0) {
+    await prisma.customerSession.deleteMany({
+      where: { id: { in: overflow.map((item) => item.id) } }
+    });
+  }
   const cookieStore = await cookies();
   cookieStore.set(CUSTOMER_SESSION_COOKIE, token, {
     httpOnly: true,
@@ -80,14 +71,12 @@ export async function destroyCustomerSession(): Promise<void> {
   const token = cookieStore.get(CUSTOMER_SESSION_COOKIE)?.value;
   if (token) {
     await prisma.customerSession.deleteMany({ where: { tokenHash: hashToken(token) } });
-    invalidateMemo(`sess:${hashToken(token)}`);
   }
   cookieStore.delete(CUSTOMER_SESSION_COOKIE);
 }
 
 export async function destroyAllCustomerSessions(customerId: string): Promise<void> {
   await prisma.customerSession.deleteMany({ where: { customerId } });
-  invalidateMemo("sess:");
   const cookieStore = await cookies();
   cookieStore.delete(CUSTOMER_SESSION_COOKIE);
 }
@@ -104,7 +93,6 @@ export async function destroyOtherCustomerSessions(customerId: string): Promise<
       NOT: { tokenHash }
     }
   });
-  invalidateMemo("sess:");
 }
 
 export async function destroyCustomerSessionById(customerId: string, sessionId: string): Promise<"current" | "other" | "missing"> {
@@ -116,7 +104,6 @@ export async function destroyCustomerSessionById(customerId: string, sessionId: 
   if (!target) return "missing";
 
   await prisma.customerSession.deleteMany({ where: { id: sessionId, customerId } });
-  invalidateMemo(`sess:${target.tokenHash}`);
   if (target.tokenHash === tokenHash) {
     const cookieStore = await cookies();
     cookieStore.delete(CUSTOMER_SESSION_COOKIE);
@@ -140,44 +127,43 @@ export const getSessionCustomer = cache(async (): Promise<SessionCustomer | null
   const token = cookieStore.get(CUSTOMER_SESSION_COOKIE)?.value;
   if (!token) return null;
   const tokenHash = hashToken(token);
-  // Il touch di lastSeenAt avviene solo sul miss del memo: la risoluzione
-  // effettiva resta ~TOUCH_INTERVAL + TTL, più che sufficiente per l'elenco
-  // dispositivi della sezione Sicurezza.
-  const context = await getRequestSessionContext();
-  return memoTtl(`sess:${tokenHash}`, SESSION_MEMO_TTL_MS, async () => {
-    const session = await prisma.customerSession.findUnique({
-      where: { tokenHash },
-      include: { customer: true }
-    });
-    if (!session || session.expiresAt < new Date()) return null;
-    const lastSeenAt = session.lastSeenAt ?? session.createdAt;
-
-    if (Date.now() - lastSeenAt.getTime() > SESSION_TOUCH_INTERVAL_MS) {
-      await prisma.customerSession.update({
-        where: { id: session.id },
-        data: {
-          lastSeenAt: new Date(),
-          userAgent: context.userAgent ?? session.userAgent,
-          ipAddress: context.ipAddress ?? session.ipAddress
-        }
-      });
-    }
-
-    const { id, email, firstName, lastName, phone, referralCode, emailVerified } = session.customer;
-    return { id, email, firstName, lastName, phone, referralCode, emailVerified };
+  // Nessuna cache cross-request: logout/reset/revoca devono essere immediati
+  // anche quando la richiesta successiva atterra sulla stessa lambda calda.
+  const context = await getRequestSecurityContext();
+  const session = await prisma.customerSession.findUnique({
+    where: { tokenHash },
+    include: { customer: true }
   });
+  if (!session || session.expiresAt < new Date() || session.customer.anonymizedAt) return null;
+  const lastSeenAt = session.lastSeenAt ?? session.createdAt;
+
+  if (Date.now() - lastSeenAt.getTime() > SESSION_TOUCH_INTERVAL_MS) {
+    const touched = await prisma.customerSession.updateMany({
+      where: { id: session.id, tokenHash, expiresAt: { gt: new Date() } },
+      data: {
+        lastSeenAt: new Date(),
+        userAgent: context.userAgent ?? session.userAgent,
+        ipAddress: context.ipAddress ?? session.ipAddress
+      }
+    });
+    if (touched.count !== 1) return null;
+  }
+
+  const { id, email, firstName, lastName, phone, referralCode, emailVerified } = session.customer;
+  return { id, email, firstName, lastName, phone, referralCode, emailVerified };
 });
 
-export async function requireCustomer(): Promise<SessionCustomer> {
+export async function requireCustomer(nextPath = "/account"): Promise<SessionCustomer> {
   const customer = await getSessionCustomer();
-  if (!customer) throw new Error("Non autorizzato: accesso cliente richiesto.");
+  if (!customer) {
+    redirect(`/account/login?expired=1&next=${encodeURIComponent(nextPath)}`);
+  }
   return customer;
 }
 
 /** Invalida tutte le sessioni del cliente e ne apre una nuova (dopo cambio password). */
 export async function rotateCustomerSessions(customerId: string): Promise<void> {
   await prisma.customerSession.deleteMany({ where: { customerId } });
-  invalidateMemo("sess:");
   await createCustomerSession(customerId);
 }
 

@@ -1,15 +1,8 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { prisma } from "@/lib/db";
-import { getPaymentProvider } from "@/lib/payments";
 import { getOrderForTracking } from "@/lib/services/orders";
-
-function prismaErrorCode(error: unknown): string | null {
-  return typeof error === "object" && error !== null && "code" in error
-    ? String((error as { code?: unknown }).code)
-    : null;
-}
+import { initializeOrderPayment } from "@/lib/services/payment-attempts";
 
 export async function retryOrderPaymentAction(formData: FormData): Promise<void> {
   const code = String(formData.get("code") ?? "");
@@ -28,58 +21,9 @@ export async function retryOrderPaymentAction(formData: FormData): Promise<void>
 
   if (!canRetry) redirect(`${backUrl}&payment=retry-unavailable`);
 
-  const provider = getPaymentProvider(order.paymentProvider);
-  const init = await provider.init({
-    orderId: order.id,
-    orderCode: order.code,
-    publicToken: order.publicToken,
-    totalCents: amountDueCents,
-    email: order.email,
-    method: order.paymentMethod
-  });
-
-  if (!init.ok) {
-    await prisma.order.update({ where: { id: order.id }, data: { paymentStatus: "FAILED" } });
-    await prisma.orderEvent.create({
-      data: {
-        orderId: order.id,
-        type: "PAYMENT",
-        message: `Nuovo tentativo di pagamento non riuscito: ${init.error}`,
-        actor: "storefront"
-      }
-    });
+  const launch = await initializeOrderPayment(order.id);
+  if (launch.error) {
     redirect(`${backUrl}&payment=failed`);
   }
-
-  try {
-    await prisma.order.update({
-      where: { id: order.id },
-      data: {
-        paymentStatus: "PENDING",
-        paymentRef: init.reference
-      }
-    });
-  } catch (error) {
-    if (prismaErrorCode(error) !== "P2002") throw error;
-    await prisma.order.update({ where: { id: order.id }, data: { paymentStatus: "FAILED" } });
-    await prisma.orderEvent.create({
-      data: {
-        orderId: order.id,
-        type: "PAYMENT",
-        message: "Nuovo tentativo non collegato: riferimento pagamento gia associato a un altro ordine.",
-        actor: "storefront"
-      }
-    });
-    redirect(`${backUrl}&payment=failed`);
-  }
-  await prisma.orderEvent.create({
-    data: {
-      orderId: order.id,
-      type: "PAYMENT",
-      message: "Cliente reindirizzato a Stripe per un nuovo tentativo di pagamento.",
-      actor: "storefront"
-    }
-  });
-
-  redirect(init.redirectUrl ?? `${backUrl}&payment=retry-unavailable`);
+  redirect(launch.redirectUrl ?? `${backUrl}&payment=retry-unavailable`);
 }

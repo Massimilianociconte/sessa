@@ -1,6 +1,5 @@
 "use server";
 
-import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
@@ -12,14 +11,10 @@ import { setCustomerDisplayNameCookie } from "@/lib/auth/display-name";
 import { enqueueEmail } from "@/lib/services/email";
 import { requestEmailChange, sendVerificationEmail } from "@/lib/services/customer-verification";
 import { formDataToObject, profileSchema } from "@/lib/validation";
+import { getClientIp, rateLimitKey } from "@/lib/auth/request-context";
 
 function back(path: string, key: "msg" | "err", value: string): never {
   redirect(`${path}?${key}=${encodeURIComponent(value)}`);
-}
-
-async function clientIp(): Promise<string> {
-  const h = await headers();
-  return h.get("x-forwarded-for")?.split(",")[0]?.trim() || h.get("x-real-ip") || "local";
 }
 
 export async function updateProfileAction(formData: FormData): Promise<void> {
@@ -49,13 +44,21 @@ export async function changeCustomerPasswordAction(formData: FormData): Promise<
   const next = String(formData.get("newPassword") ?? "");
   const confirm = String(formData.get("confirmPassword") ?? "");
 
-  if (next.length < 10) back("/account/profilo", "err", "La nuova password deve avere almeno 10 caratteri.");
+  if (next.length < 12 || next.length > 128) {
+    back("/account/profilo", "err", "La nuova password deve avere tra 12 e 128 caratteri.");
+  }
   if (next !== confirm) back("/account/profilo", "err", "Le password non coincidono.");
 
+  const rateKey = rateLimitKey("customer-password-change", await getClientIp(), customer.id);
+  if ((await isRateLimited(rateKey)) !== null) {
+    back("/account/profilo", "err", "Troppi tentativi. Riprova più tardi.");
+  }
   const dbCustomer = await prisma.customer.findUnique({ where: { id: customer.id } });
   if (!dbCustomer?.passwordHash || !verifyPassword(current, dbCustomer.passwordHash)) {
+    await registerFailedAttempt(rateKey);
     back("/account/profilo", "err", "Password attuale errata.");
   }
+  await clearAttempts(rateKey);
   await prisma.customer.update({
     where: { id: customer.id },
     data: { passwordHash: hashPassword(next) }
@@ -66,14 +69,14 @@ export async function changeCustomerPasswordAction(formData: FormData): Promise<
     subject: "Password account Sessa 1930 aggiornata",
     type: "SECURITY_PASSWORD_CHANGED",
     body: `Ciao ${customer.firstName},\n\nla password del tuo account Sessa 1930 è stata aggiornata. Per sicurezza abbiamo disconnesso gli altri dispositivi.\n\nSe non sei stato tu, contatta subito Sessa e usa il recupero password.`
-  });
+  }).catch(() => undefined);
   back("/account/profilo", "msg", "Password aggiornata. Le altre sessioni sono state disconnesse.");
 }
 
 /** Reinvia l'email di verifica (rate-limited per evitare abusi sulla coda). */
 export async function resendVerificationAction(): Promise<void> {
   const customer = await requireCustomer();
-  const rateKey = `verify-resend:${await clientIp()}:${customer.id}`;
+  const rateKey = rateLimitKey("verify-resend", await getClientIp(), customer.id);
   if ((await isRateLimited(rateKey)) !== null) {
     back("/account/profilo", "err", "Hai già richiesto una verifica da poco. Riprova più tardi.");
   }
@@ -98,7 +101,7 @@ export async function requestEmailChangeAction(formData: FormData): Promise<void
     back("/account/profilo", "err", "Inserisci una email valida.");
   }
 
-  const rateKey = `email-change:${await clientIp()}:${customer.id}`;
+  const rateKey = rateLimitKey("email-change", await getClientIp(), customer.id);
   const blockedMs = await isRateLimited(rateKey);
   if (blockedMs !== null) {
     back("/account/profilo", "err", "Troppi tentativi. Riprova più tardi.");

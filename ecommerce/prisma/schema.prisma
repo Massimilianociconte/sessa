@@ -1,7 +1,7 @@
-// Schema e-commerce Sessa 1930 — piattaforma multi-sede.
-// SQLite in sviluppo; per produzione basta cambiare provider/url in Postgres.
-// SQLite non supporta enum Prisma: i campi "stato" sono String vincolati
-// dalle union TypeScript in lib/domain.ts e validati con Zod ai confini.
+// Schema e-commerce Sessa 1930 — piattaforma multi-sede su PostgreSQL.
+// I campi di stato restano String per mantenere evolvibili le state machine;
+// le union TypeScript validano i confini e le migration SQL aggiungono CHECK
+// constraint alle invarianti che Prisma non sa esprimere nel datamodel.
 //
 // Principio multi-sede: prezzo e stock vivono su StoreVariant (assortimento per
 // sede). ProductVariant è la definizione del prodotto (nome, SKU, prezzo base, IVA).
@@ -161,6 +161,9 @@ model StockMovement {
   actor          String? // email admin o "system" / "storefront"
   createdAt      DateTime     @default(now())
 
+  // Un ordine puo generare un solo movimento dello stesso tipo per variante.
+  // reference null (rettifiche manuali) resta ripetibile su PostgreSQL.
+  @@unique([storeVariantId, reason, reference])
   @@index([storeVariantId, createdAt])
 }
 
@@ -169,17 +172,21 @@ model StockMovement {
 // ---------------------------------------------------------------------------
 
 model Cart {
-  id             String        @id @default(cuid())
-  token          String        @unique
-  status         String        @default("ACTIVE") // ACTIVE | CONVERTED
-  locationId     String
-  location       Location      @relation(fields: [locationId], references: [id], onDelete: Cascade)
-  items          CartItem[]
-  discountCodeId String?
-  discountCode   DiscountCode? @relation(fields: [discountCodeId], references: [id], onDelete: SetNull)
-  giftCardCode   String? // gift card applicata (validata al checkout)
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  id               String        @id @default(cuid())
+  token            String        @unique
+  status           String        @default("ACTIVE") // ACTIVE | CONVERTED
+  locationId       String
+  location         Location      @relation(fields: [locationId], references: [id], onDelete: Cascade)
+  items            CartItem[]
+  discountCodeId   String?
+  discountCode     DiscountCode? @relation(fields: [discountCodeId], references: [id], onDelete: SetNull)
+  giftCardCode     String? // gift card applicata (validata al checkout)
+  giftCard         GiftCard?     @relation(fields: [giftCardCode], references: [code], onDelete: SetNull)
+  convertedOrderId String?       @unique
+  convertedOrder   Order?        @relation("ConvertedCart", fields: [convertedOrderId], references: [id], onDelete: SetNull)
+  convertedAt      DateTime?
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
 
   @@index([locationId])
   @@index([status, updatedAt])
@@ -204,40 +211,41 @@ model CartItem {
 // ---------------------------------------------------------------------------
 
 model Customer {
-  id             String               @id @default(cuid())
-  email          String               @unique
-  firstName      String
-  lastName       String
-  phone          String?
-  notes          String?
-  marketingOptIn Boolean              @default(false)
-  passwordHash   String? // null = ospite (checkout senza registrazione)
-  emailVerified  Boolean              @default(false)
-  referralCode   String?              @unique
+  id                   String               @id @default(cuid())
+  email                String               @unique
+  firstName            String
+  lastName             String
+  phone                String?
+  notes                String?
+  marketingOptIn       Boolean              @default(false)
+  passwordHash         String? // null = ospite (checkout senza registrazione)
+  emailVerified        Boolean              @default(false)
+  referralCode         String?              @unique
   // Preferenze effettive (usate da checkout/header; fallback: inferenza da ultimo ordine)
-  preferredLocationId   String?
-  preferredLocation     Location?    @relation("PreferredLocation", fields: [preferredLocationId], references: [id], onDelete: SetNull)
-  preferredFulfillment  String? // PICKUP | DELIVERY
-  birthday              DateTime?
+  preferredLocationId  String?
+  preferredLocation    Location?            @relation("PreferredLocation", fields: [preferredLocationId], references: [id], onDelete: SetNull)
+  preferredFulfillment String? // PICKUP | DELIVERY
+  birthday             DateTime?
   // Account anonimizzato (GDPR): dati personali rimossi, ordini snapshot conservati
-  anonymizedAt          DateTime?
+  anonymizedAt         DateTime?
   // 2FA TOTP (RFC 6238): secret base32; enabledAt null = non attiva (secret in attesa di conferma)
-  totpSecret            String?
-  totpEnabledAt         DateTime?
-  totpLastStep          Int? // anti-replay: ultimo time-step accettato
-  backupCodes           CustomerBackupCode[]
-  passkeys              CustomerPasskey[]
-  orders         Order[]
-  addresses      Address[]
-  sessions       CustomerSession[]
-  resetTokens    PasswordResetToken[]
-  actionTokens   CustomerToken[]
-  redemptions    DiscountRedemption[]
-  giftCards      GiftCard[]
-  referralsMade  Referral[]           @relation("Referrer")
-  referralUsed   Referral?            @relation("Invited")
-  createdAt      DateTime             @default(now())
-  updatedAt      DateTime             @updatedAt
+  totpSecret           String?
+  totpEnabledAt        DateTime?
+  totpLastStep         Int? // anti-replay: ultimo time-step accettato
+  backupCodes          CustomerBackupCode[]
+  passkeys             CustomerPasskey[]
+  orders               Order[]
+  addresses            Address[]
+  sessions             CustomerSession[]
+  resetTokens          PasswordResetToken[]
+  actionTokens         CustomerToken[]
+  redemptions          DiscountRedemption[]
+  reservedDiscounts    DiscountCode[]       @relation("ReservedDiscounts")
+  giftCards            GiftCard[]
+  referralsMade        Referral[]           @relation("Referrer")
+  referralUsed         Referral?            @relation("Invited")
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
 
   @@index([createdAt])
   @@index([marketingOptIn])
@@ -428,9 +436,12 @@ model Order {
   trackingCarrier String?
   trackingCode    String?
 
-  items       OrderItem[]
-  events      OrderEvent[]
-  redemptions DiscountRedemption[]
+  items              OrderItem[]
+  events             OrderEvent[]
+  redemptions        DiscountRedemption[]
+  paymentAttempts    PaymentAttempt[]
+  sourceCart         Cart?                @relation("ConvertedCart")
+  referralConversion Referral?            @relation("ReferralRedeemedOrder")
 
   placedAt    DateTime  @default(now())
   paidAt      DateTime?
@@ -460,6 +471,34 @@ model OrderCounter {
   year      Int      @id
   value     Int      @default(0)
   updatedAt DateTime @updatedAt
+}
+
+// Ogni inizializzazione presso un provider e un tentativo immutabile e
+// riconciliabile. Non si sovrascrive piu l'unico riferimento dell'ordine quando
+// il cliente riprova: i webhook vengono associati al tentativo esatto.
+model PaymentAttempt {
+  id                 String    @id @default(cuid())
+  orderId            String
+  order              Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  provider           String
+  method             String?
+  amountCents        Int
+  currency           String    @default("EUR")
+  status             String    @default("CREATED") // CREATED | INITIALIZING | PENDING | PAID | FAILED | EXPIRED | REFUNDED | REVIEW
+  idempotencyKey     String    @unique
+  providerRef        String?   @unique // Stripe Checkout Session / riferimento manuale
+  providerPaymentRef String?   @unique // Stripe PaymentIntent / transazione acquisita
+  checkoutUrl        String?
+  instructions       String?
+  error              String?
+  expiresAt          DateTime?
+  completedAt        DateTime?
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  @@index([orderId, createdAt])
+  @@index([orderId, status])
+  @@index([provider, status, updatedAt])
 }
 
 model OrderItem {
@@ -514,6 +553,7 @@ model DiscountCode {
 
   // Se valorizzato, il codice è riservato a quel cliente (es. referral/gift promo).
   customerId String?
+  customer   Customer? @relation("ReservedDiscounts", fields: [customerId], references: [id], onDelete: Cascade)
 
   startsAt DateTime?
   endsAt   DateTime?
@@ -569,15 +609,17 @@ model DiscountProduct {
 
 // Riscatto: chi/quando/quale ordine ha usato un codice (per perUserLimit e tracciamento).
 model DiscountRedemption {
-  id          String       @id @default(cuid())
-  discountId  String
-  discount    DiscountCode @relation(fields: [discountId], references: [id], onDelete: Cascade)
-  customerId  String?
-  customer    Customer?    @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  orderId     String?
-  order       Order?       @relation(fields: [orderId], references: [id], onDelete: SetNull)
-  amountCents Int          @default(0)
-  createdAt   DateTime     @default(now())
+  id             String       @id @default(cuid())
+  discountId     String
+  discount       DiscountCode @relation(fields: [discountId], references: [id], onDelete: Cascade)
+  customerId     String?
+  customer       Customer?    @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  orderId        String?      @unique
+  order          Order?       @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  amountCents    Int          @default(0)
+  reversedAt     DateTime?
+  reversalReason String?
+  createdAt      DateTime     @default(now())
 
   @@index([discountId])
   @@index([customerId])
@@ -600,6 +642,7 @@ model GiftCard {
   customerId   String? // se assegnata a un cliente specifico
   customer     Customer?             @relation(fields: [customerId], references: [id], onDelete: SetNull)
   transactions GiftCardTransaction[]
+  carts        Cart[]
   createdAt    DateTime              @default(now())
   updatedAt    DateTime              @updatedAt
 
@@ -616,6 +659,7 @@ model GiftCardTransaction {
   reference  String? // codice ordine
   createdAt  DateTime @default(now())
 
+  @@unique([giftCardId, reason, reference])
   @@index([giftCardId, createdAt])
   @@index([reference])
 }
@@ -632,7 +676,8 @@ model Referral {
   invitedCustomerId String?   @unique
   invitedCustomer   Customer? @relation("Invited", fields: [invitedCustomerId], references: [id], onDelete: SetNull)
   status            String    @default("PENDING") // PENDING | SIGNED_UP | REDEEMED
-  redeemedOrderId   String?
+  redeemedOrderId   String?   @unique
+  redeemedOrder     Order?    @relation("ReferralRedeemedOrder", fields: [redeemedOrderId], references: [id], onDelete: SetNull)
   redeemedAt        DateTime?
   createdAt         DateTime  @default(now())
 

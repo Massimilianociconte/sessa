@@ -1,11 +1,11 @@
 /**
  * Test d'integrazione dei flussi critici multi-sede.
- * Gira contro dev.db; ripulisce i dati che crea.
- * Uso: npx tsx prisma/verify-flow.ts
+ * Gira SOLO contro PostgreSQL locale dedicato e ripulisce i dati che crea.
+ * Uso: NODE_ENV=test ALLOW_DESTRUCTIVE_TESTS=1 DATABASE_URL=postgresql://.../sessa_audit npx tsx prisma/verify-flow.ts
  */
 import { PrismaClient } from "@prisma/client";
 import { placeOrder } from "@/lib/services/checkout";
-import { getCartByToken, getOrCreateCartForLocation, addItemToCart } from "@/lib/services/cart";
+import { getCartByToken, getOrCreateCartForLocation, addItemToCart, attachDiscount } from "@/lib/services/cart";
 import { checkDiscount } from "@/lib/services/discounts";
 import { transitionOrder } from "@/lib/services/orders";
 import { DomainError } from "@/lib/domain";
@@ -53,6 +53,23 @@ import { attachGiftCard } from "@/lib/services/cart";
 import { issueGiftCard } from "@/lib/services/giftcards";
 import { linkReferralOnSignup } from "@/lib/services/referral";
 import { isStripeConfigured } from "@/lib/payments";
+import { refundOrder } from "@/lib/services/payment-attempts";
+
+function assertSafeTestDatabase(): void {
+  if (process.env.NODE_ENV !== "test" || process.env.ALLOW_DESTRUCTIVE_TESTS !== "1") {
+    throw new Error("verify-flow richiede NODE_ENV=test e ALLOW_DESTRUCTIVE_TESTS=1");
+  }
+  const raw = process.env.DATABASE_URL;
+  if (!raw) throw new Error("DATABASE_URL test obbligatoria");
+  const url = new URL(raw);
+  const localHosts = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
+  const database = url.pathname.replace(/^\//, "");
+  if (!localHosts.has(url.hostname) || !["sessa_audit", "sessa_test"].includes(database)) {
+    throw new Error("verify-flow rifiuta database non locale/non allowlisted");
+  }
+}
+
+assertSafeTestDatabase();
 
 const prisma = new PrismaClient();
 
@@ -100,7 +117,12 @@ async function cleanupLeftovers() {
     where: { OR: [{ email: { in: testEmails } }, { customerId: { in: ids } }] },
     select: { id: true }
   });
+  const oldCodes = await prisma.order.findMany({
+    where: { id: { in: orders.map((o) => o.id) } },
+    select: { code: true }
+  });
   await prisma.discountRedemption.deleteMany({ where: { orderId: { in: orders.map((o) => o.id) } } });
+  await prisma.stockMovement.deleteMany({ where: { reference: { in: oldCodes.map((o) => o.code) } } });
   await prisma.order.deleteMany({ where: { id: { in: orders.map((o) => o.id) } } });
   await prisma.emailMessage.deleteMany({ where: { toEmail: { in: testEmails } } });
   await prisma.referral.deleteMany({
@@ -198,22 +220,23 @@ async function main() {
   await prisma.customer.deleteMany({ where: { email: { in: raceEmails } } });
   await prisma.storeVariant.update({ where: { id: sv.id }, data: { stockQty: raceStockBefore } });
 
-  // ---- 3c. Pagamento esterno non inizializzato: ordine annullato + stock rilasciato ----
-  console.log("3c. Fallimento pagamento e rilascio stock");
+  // ---- 3c. Carta non configurata: fail-fast prima di ordine/stock ----
+  console.log("3c. Carta non configurata fail-fast");
   if (!isStripeConfigured()) {
     const failStockBefore = (await prisma.storeVariant.findUnique({ where: { id: sv.id } }))!.stockQty;
     const tokenPayFail = `verify-payfail-${sv.id.slice(0, 6)}`;
     const cartPayFail = await getOrCreateCartForLocation(tokenPayFail, ottaviano.id);
     await addItemToCart(cartPayFail.id, sv.id, 1);
     const freshPayFail = await getCartByToken(tokenPayFail);
-    const placedFail = await placeOrder(freshPayFail!, { ...BASE, email: "payment-fail@example.com", paymentMethod: "card" });
-    const failOrder = await prisma.order.findUnique({ where: { code: placedFail.code } });
-    check("fallimento init pagamento tracciato", Boolean(placedFail.paymentInitError));
-    check("ordine fallito viene annullato", failOrder!.status === "CANCELLED" && failOrder!.paymentStatus === "FAILED");
-    check("stock rilasciato dopo pagamento non inizializzato", (await prisma.storeVariant.findUnique({ where: { id: sv.id } }))!.stockQty === failStockBefore);
-    await prisma.emailMessage.deleteMany({ where: { toEmail: "payment-fail@example.com" } });
-    await prisma.order.deleteMany({ where: { email: "payment-fail@example.com" } });
-    await prisma.customer.deleteMany({ where: { email: "payment-fail@example.com" } });
+    let unavailableBlocked = false;
+    try {
+      await placeOrder(freshPayFail!, { ...BASE, email: "payment-fail@example.com", paymentMethod: "card" });
+    } catch (error) {
+      unavailableBlocked = error instanceof DomainError;
+    }
+    check("carta non configurata rifiutata", unavailableBlocked);
+    check("nessun ordine creato", (await prisma.order.count({ where: { email: "payment-fail@example.com" } })) === 0);
+    check("stock invariato", (await prisma.storeVariant.findUnique({ where: { id: sv.id } }))!.stockQty === failStockBefore);
   } else {
     check("test fallimento Stripe locale saltato: Stripe configurato", true);
   }
@@ -248,8 +271,8 @@ async function main() {
   await prisma.customer.deleteMany({ where: { email: { in: seqEmails } } });
   await prisma.storeVariant.update({ where: { id: sv.id }, data: { stockQty: seqStockBefore } });
 
-  // ---- 4. Macchina a stati (percorso ritiro) + restock su annullo ----
-  console.log("4. Transizioni ritiro + restock");
+  // ---- 4. Macchina a stati + rimborso coerente e restock ----
+  console.log("4. Transizioni ritiro + rimborso");
   await transitionOrder(order!.id, "PAID", "test@admin");
   await transitionOrder(order!.id, "PROCESSING", "test@admin");
   await transitionOrder(order!.id, "READY", "test@admin");
@@ -261,8 +284,9 @@ async function main() {
     illegal = e instanceof DomainError;
   }
   check("READY → SHIPPED bloccato", illegal);
-  await transitionOrder(order!.id, "CANCELLED", "test@admin", { note: "test" });
-  check("stock ricaricato su annullo", (await prisma.storeVariant.findUnique({ where: { id: sv.id } }))!.stockQty === cur + 2);
+  await refundOrder(order!.id, "test@admin", "test");
+  check("ordine marcato rimborsato", (await prisma.order.findUnique({ where: { id: order!.id } }))!.status === "REFUNDED");
+  check("stock ricaricato su rimborso", (await prisma.storeVariant.findUnique({ where: { id: sv.id } }))!.stockQty === cur + 2);
 
   // ---- 5. Sconto scoped per categoria (BOXREGALO20 su box-regalo) ----
   console.log("5. Sconto per categoria");
@@ -275,6 +299,23 @@ async function main() {
     lines: [{ productId: sv.variant.productId, categoryId: sv.variant.product.categoryId, lineCents: unit }]
   });
   check("BOXREGALO20 valido su box-regalo", evalCat.ok && evalCat.amountCents === Math.round(unit * 0.2));
+  if (evalCat.ok) {
+    const usedBefore = evalCat.discount.usedCount;
+    await attachDiscount(cart3.id, evalCat.discount.id);
+    const discountOrder = await placeOrder((await getCartByToken(token3))!, BASE);
+    const discountOrderRow = await prisma.order.findUniqueOrThrow({ where: { code: discountOrder.code } });
+    check(
+      "uso coupon incrementato",
+      (await prisma.discountCode.findUniqueOrThrow({ where: { id: evalCat.discount.id } })).usedCount === usedBefore + 1
+    );
+    await transitionOrder(discountOrderRow.id, "CANCELLED", "test@admin");
+    const reversed = await prisma.discountRedemption.findUnique({ where: { orderId: discountOrderRow.id } });
+    check("riscatto coupon stornato", reversed?.reversedAt !== null);
+    check(
+      "capacita coupon ripristinata",
+      (await prisma.discountCode.findUniqueOrThrow({ where: { id: evalCat.discount.id } })).usedCount === usedBefore
+    );
+  }
 
   // ---- 6. Sconto scoped per SEDE errata (BABAMERLATA15 a Ottaviano) ----
   console.log("6. Sconto vincolato a sede");
@@ -311,7 +352,11 @@ async function main() {
   const cartA = await getOrCreateCartForLocation(tokenA, ottaviano.id);
   await addItemToCart(cartA.id, sv.id, 1);
   const freshA = await getCartByToken(tokenA);
-  const placedA = await placeOrder(freshA!, { ...BASE, email: accEmail, firstName: "Anna", lastName: "Verdi" });
+  const placedA = await placeOrder(
+    freshA!,
+    { ...BASE, email: accEmail, firstName: "Anna", lastName: "Verdi" },
+    { authenticatedCustomerId: custId }
+  );
   const orderA = await prisma.order.findUnique({ where: { code: placedA.code } });
   check("ordine collegato all'account (customerId)", orderA!.customerId === custId);
   check("data/ora richiesta salvata sull'ordine", orderA!.fulfillmentAt !== null);
@@ -356,6 +401,12 @@ async function main() {
   const gcAfter = await prisma.giftCard.findUnique({ where: { id: gc.id } });
   check("saldo gift card azzerato", gcAfter!.balanceCents === 0);
   check("movimento REDEEM registrato", (await prisma.giftCardTransaction.count({ where: { giftCardId: gc.id, reason: "REDEEM" } })) === 1);
+  await transitionOrder(orderG!.id, "CANCELLED", "test@admin");
+  check("saldo gift card ripristinato su annullo", (await prisma.giftCard.findUniqueOrThrow({ where: { id: gc.id } })).balanceCents === 1000);
+  check(
+    "movimento REFUND gift card idempotente",
+    (await prisma.giftCardTransaction.count({ where: { giftCardId: gc.id, reason: "REFUND", reference: placedG.code } })) === 1
+  );
 
   // Copertura totale
   const gc2 = await issueGiftCard({ amountCents: 100000 }); // 1000€
@@ -390,7 +441,13 @@ async function main() {
   const cartR = await getOrCreateCartForLocation(tokenR, ottaviano.id);
   await addItemToCart(cartR.id, sv.id, 1);
   const freshR = await getCartByToken(tokenR);
-  await placeOrder(freshR!, { ...BASE, email: "ref-b@example.com", firstName: "Inv", lastName: "B" });
+  const placedR = await placeOrder(
+    freshR!,
+    { ...BASE, email: "ref-b@example.com", firstName: "Inv", lastName: "B" },
+    { authenticatedCustomerId: refBId }
+  );
+  const orderR = await prisma.order.findUnique({ where: { code: placedR.code }, select: { id: true } });
+  await transitionOrder(orderR!.id, "PAID", "test@admin");
   const refConv = await prisma.referral.findUnique({ where: { id: referral!.id } });
   check("referral convertito REDEEMED", refConv?.status === "REDEEMED");
   check("ricompensa referrer emessa", (await prisma.discountCode.count({ where: { customerId: refAId } })) === 1);
@@ -453,7 +510,11 @@ async function main() {
   const cartEnt = await getOrCreateCartForLocation(tokenEnt, ottaviano.id);
   await addItemToCart(cartEnt.id, sv.id, 2);
   const freshEnt = await getCartByToken(tokenEnt);
-  const entOrder = await placeOrder(freshEnt!, { ...BASE, email: entEmail2, firstName: "Enter", lastName: "Prise" });
+  const entOrder = await placeOrder(
+    freshEnt!,
+    { ...BASE, email: entEmail2, firstName: "Enter", lastName: "Prise" },
+    { authenticatedCustomerId: entId }
+  );
   const entOrderRow = await prisma.order.findUnique({ where: { code: entOrder.code }, select: { id: true } });
   const stockDuringEnt = (await prisma.storeVariant.findUnique({ where: { id: sv.id } }))!.stockQty;
   await transitionOrder(entOrderRow!.id, "CANCELLED", entEmail2, { note: "Annullato dal cliente (test)." });
@@ -470,13 +531,15 @@ async function main() {
   // GDPR: eliminazione → anonimizzazione, ordini conservati
   await deleteCustomerAccount(entId);
   entCustomer = await prisma.customer.findUnique({ where: { id: entId } });
-  const entOrdersKept = await prisma.order.count({ where: { customerId: entId } });
+  const anonymizedOrder = await prisma.order.findUnique({ where: { id: entOrderRow!.id } });
   check(
     "account anonimizzato e ordini conservati",
     entCustomer?.anonymizedAt !== null &&
       entCustomer?.passwordHash === null &&
       entCustomer?.email.endsWith(".invalid") === true &&
-      entOrdersKept === 1
+      anonymizedOrder?.customerId === null &&
+      anonymizedOrder?.email.endsWith(".invalid") === true &&
+      anonymizedOrder.shipFullName === "Cliente anonimizzato"
   );
   let exportAfterDeleteBlocked = false;
   try {
@@ -545,12 +608,12 @@ async function main() {
   console.log("\nPulizia dati di test…");
   await prisma.cart.deleteMany({ where: { token: { startsWith: "verify-" } } });
   await prisma.emailMessage.deleteMany({ where: { toEmail: BASE.email } });
-  const testOrders = await prisma.order.findMany({ where: { email: BASE.email }, select: { id: true } });
+  const testOrders = await prisma.order.findMany({ where: { email: BASE.email }, select: { id: true, code: true } });
   await prisma.discountRedemption.deleteMany({ where: { orderId: { in: testOrders.map((o) => o.id) } } });
+  await prisma.stockMovement.deleteMany({ where: { reference: { in: testOrders.map((o) => o.code) } } });
   await prisma.order.deleteMany({ where: { email: BASE.email } });
   await prisma.customer.deleteMany({ where: { email: BASE.email } });
   await prisma.storeVariant.update({ where: { id: sv.id }, data: { stockQty: startStock } });
-  await prisma.stockMovement.deleteMany({ where: { storeVariantId: sv.id, reason: { in: ["ORDER", "CANCEL_RESTOCK"] } } });
 
   console.log(`\nRisultato: ${passed} passati, ${failed} falliti`);
   if (failed > 0) process.exit(1);

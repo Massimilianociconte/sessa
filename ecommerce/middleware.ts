@@ -19,13 +19,22 @@ const PUBLIC_ACCOUNT = new Set([
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  const loginRedirect = (loginPath: "/admin/login" | "/account/login") => {
+    const target = request.nextUrl.clone();
+    target.pathname = loginPath;
+    target.search = "";
+    target.searchParams.set("expired", "1");
+    target.searchParams.set("next", `${pathname}${request.nextUrl.search}`);
+    return NextResponse.redirect(target);
+  };
+
   // Area gestionale
   if (pathname.startsWith("/admin")) {
     // /admin/setup è il bootstrap del primo account: si autodisattiva a DB
     // (redirect a login se esiste già un admin) + token env in produzione.
     if (pathname === "/admin/login" || pathname === "/admin/setup") return NextResponse.next();
     if (!request.cookies.has(SESSION_COOKIE)) {
-      return NextResponse.redirect(new URL("/admin/login", request.url));
+      return loginRedirect("/admin/login");
     }
     return NextResponse.next();
   }
@@ -34,7 +43,7 @@ export function middleware(request: NextRequest) {
   if (pathname.startsWith("/account")) {
     if (PUBLIC_ACCOUNT.has(pathname)) return NextResponse.next();
     if (!request.cookies.has(CUSTOMER_SESSION_COOKIE)) {
-      return NextResponse.redirect(new URL("/account/login", request.url));
+      return loginRedirect("/account/login");
     }
     return NextResponse.next();
   }

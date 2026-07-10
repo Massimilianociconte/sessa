@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { lowStockVariants } from "@/lib/services/inventory";
+import { romeDateKey, romeDayRange } from "@/lib/datetime";
 
 /** Stati che contano come ricavo (ordine non annullato/rimborsato). */
 const REVENUE_STATUSES = ["PAID", "PROCESSING", "READY", "SHIPPED", "DELIVERED"];
@@ -19,26 +20,34 @@ export const DASHBOARD_RANGE_LABELS: Record<DashboardRange, string> = {
 };
 
 function rangeBounds(range: DashboardRange): { from: Date; prevFrom: Date; prevTo: Date } {
-  const now = new Date();
-  const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const todayKey = romeDateKey(new Date());
+  const [year, month, day] = todayKey.split("-").map(Number);
+  const keyAtOffset = (days: number) => {
+    const value = new Date(Date.UTC(year, month - 1, day + days));
+    return `${value.getUTCFullYear()}-${String(value.getUTCMonth() + 1).padStart(2, "0")}-${String(value.getUTCDate()).padStart(2, "0")}`;
+  };
+  const startAtOffset = (days: number) => romeDayRange(keyAtOffset(days))!.start;
+  const startOfDay = startAtOffset(0);
   switch (range) {
     case "today":
       return {
         from: startOfDay,
-        prevFrom: new Date(startOfDay.getTime() - 24 * 60 * 60 * 1000),
+        prevFrom: startAtOffset(-1),
         prevTo: startOfDay
       };
     case "7d": {
-      const from = new Date(startOfDay.getTime() - 6 * 24 * 60 * 60 * 1000);
-      return { from, prevFrom: new Date(from.getTime() - 7 * 24 * 60 * 60 * 1000), prevTo: from };
+      const from = startAtOffset(-6);
+      return { from, prevFrom: startAtOffset(-13), prevTo: from };
     }
     case "30d": {
-      const from = new Date(startOfDay.getTime() - 29 * 24 * 60 * 60 * 1000);
-      return { from, prevFrom: new Date(from.getTime() - 30 * 24 * 60 * 60 * 1000), prevTo: from };
+      const from = startAtOffset(-29);
+      return { from, prevFrom: startAtOffset(-59), prevTo: from };
     }
     case "month": {
-      const from = new Date(now.getFullYear(), now.getMonth(), 1);
-      return { from, prevFrom: new Date(now.getFullYear(), now.getMonth() - 1, 1), prevTo: from };
+      const from = romeDayRange(`${todayKey.slice(0, 7)}-01`)!.start;
+      const previousMonth = new Date(Date.UTC(year, month - 2, 1));
+      const previousKey = `${previousMonth.getUTCFullYear()}-${String(previousMonth.getUTCMonth() + 1).padStart(2, "0")}-01`;
+      return { from, prevFrom: romeDayRange(previousKey)!.start, prevTo: from };
     }
   }
 }
@@ -72,6 +81,7 @@ export async function getDashboardData(filter?: DashboardFilter) {
     prisma.order.count({ where: { ...scope, placedAt: { gte: from } } }),
     prisma.order.aggregate({
       _sum: { totalCents: true },
+      _count: { _all: true },
       where: { ...scope, placedAt: { gte: from }, status: { in: REVENUE_STATUSES } }
     }),
     prisma.order.count({ where: { ...scope, placedAt: { gte: prevFrom, lt: prevTo } } }),
@@ -127,7 +137,10 @@ export async function getDashboardData(filter?: DashboardFilter) {
     locationId: locationId ?? null,
     ordersInRange,
     revenueCents,
-    avgOrderCents: ordersInRange > 0 ? Math.round(revenueCents / ordersInRange) : 0,
+    avgOrderCents:
+      revenueInRange._count._all > 0
+        ? Math.round(revenueCents / revenueInRange._count._all)
+        : 0,
     prevOrders,
     prevRevenueCents,
     pendingCount,

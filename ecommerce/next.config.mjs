@@ -2,11 +2,25 @@ import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
 
 const projectRoot = dirname(fileURLToPath(import.meta.url));
+const contentSecurityPolicy = [
+  "base-uri 'self'",
+  "object-src 'none'",
+  "frame-ancestors 'none'",
+  "form-action 'self'",
+  ...(process.env.NODE_ENV === "production" ? ["upgrade-insecure-requests"] : [])
+].join("; ");
 
 const securityHeaders = [
   { key: "X-Content-Type-Options", value: "nosniff" },
+  { key: "X-Frame-Options", value: "DENY" },
+  { key: "X-Permitted-Cross-Domain-Policies", value: "none" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
-  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" }
+  { key: "Permissions-Policy", value: "camera=(), microphone=(), geolocation=()" },
+  { key: "Cross-Origin-Opener-Policy", value: "same-origin-allow-popups" },
+  {
+    key: "Content-Security-Policy",
+    value: contentSecurityPolicy
+  }
 ];
 
 const noStoreHeaders = [
@@ -16,11 +30,13 @@ const noStoreHeaders = [
   { key: "Cloudflare-CDN-Cache-Control", value: "no-store" }
 ];
 
-const longStaticHeaders = [
+// Questi URL pubblici non hanno hash nel nome: un anno + immutable renderebbe
+// invisibile una sostituzione di logo/icona/immagine dopo un deploy.
+const publicAssetHeaders = [
   ...securityHeaders,
-  { key: "Cache-Control", value: "public, max-age=31536000, immutable" },
-  { key: "CDN-Cache-Control", value: "public, max-age=31536000, immutable" },
-  { key: "Cloudflare-CDN-Cache-Control", value: "public, max-age=31536000, immutable" }
+  { key: "Cache-Control", value: "public, max-age=86400, stale-while-revalidate=604800" },
+  { key: "CDN-Cache-Control", value: "public, max-age=604800, stale-while-revalidate=604800" },
+  { key: "Cloudflare-CDN-Cache-Control", value: "public, max-age=604800, stale-while-revalidate=604800" }
 ];
 
 const productImageHeaders = [
@@ -32,6 +48,7 @@ const productImageHeaders = [
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  poweredByHeader: false,
   images: {
     unoptimized: true
   },
@@ -48,10 +65,12 @@ const nextConfig = {
       { source: "/admin", headers: noStoreHeaders },
       { source: "/admin/:path*", headers: noStoreHeaders },
       { source: "/ordine/:path*", headers: noStoreHeaders },
-      { source: "/icons/:path*", headers: longStaticHeaders },
-      { source: "/brand/:path*", headers: longStaticHeaders },
-      { source: "/patterns/:path*", headers: longStaticHeaders },
-      { source: "/images/stickers/:path*", headers: longStaticHeaders },
+      { source: "/icons/:path*", headers: publicAssetHeaders },
+      { source: "/brand/:path*", headers: publicAssetHeaders },
+      { source: "/patterns/:path*", headers: publicAssetHeaders },
+      { source: "/images/stickers/:path*", headers: publicAssetHeaders },
+      { source: "/images/sfondo-sedi/:path*", headers: publicAssetHeaders },
+      { source: "/images/404/:path*", headers: publicAssetHeaders },
       { source: "/images/products/:path*", headers: productImageHeaders },
       {
         source: "/manifest.webmanifest",

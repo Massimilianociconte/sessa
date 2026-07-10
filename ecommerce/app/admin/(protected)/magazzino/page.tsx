@@ -6,6 +6,9 @@ import { prisma } from "@/lib/db";
 import { formatCents } from "@/lib/money";
 import { effectivePrice } from "@/lib/services/catalog";
 import { listInventory, listRecentMovements } from "@/lib/services/inventory";
+import { formatRomeDateTime } from "@/lib/datetime";
+import { requireAdminCapability } from "@/lib/auth/session";
+import { hasAdminCapability } from "@/lib/auth/admin-authorization";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +19,11 @@ export default async function AdminInventoryPage({
 }: {
   searchParams: Promise<{ sede?: string; q?: string; soglia?: string; msg?: string; err?: string }>;
 }) {
-  const { sede, q, soglia, msg, err } = await searchParams;
+  const [{ sede, q, soglia, msg, err }, user] = await Promise.all([
+    searchParams,
+    requireAdminCapability("inventory:manage")
+  ]);
+  const canExport = hasAdminCapability(user.role, "exports:download");
   const locations = await prisma.location.findMany({ orderBy: { position: "asc" } });
   const locationId = locations.find((l) => l.id === sede)?.id;
   const lowOnly = soglia === "1";
@@ -45,9 +52,11 @@ export default async function AdminInventoryPage({
           <h1 className="font-serif text-3xl font-semibold">Magazzino</h1>
           <p className="mt-1 text-sm text-ink/50">Stock per sede. Ogni variazione genera un movimento tracciato.</p>
         </div>
-        <a href={exportHref} className="btn-secondary" download>
-          Esporta CSV ({variants.length})
-        </a>
+        {canExport && (
+          <a href={exportHref} className="btn-secondary" download>
+            Esporta CSV ({variants.length})
+          </a>
+        )}
       </div>
       <div className="mt-4">
         <Flash msg={msg} err={err} />
@@ -152,7 +161,7 @@ export default async function AdminInventoryPage({
             {movements.map((m) => (
               <tr key={m.id} className="border-t border-ink/5">
                 <td className="py-2 text-xs text-ink/50">
-                  {m.createdAt.toLocaleString("it-IT", { dateStyle: "short", timeStyle: "short" })}
+                  {formatRomeDateTime(m.createdAt)}
                 </td>
                 <td className="py-2 text-xs text-ink/60">{m.storeVariant.location.name}</td>
                 <td className="py-2">

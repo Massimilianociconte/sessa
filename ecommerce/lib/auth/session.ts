@@ -1,12 +1,21 @@
 import "server-only";
 import { createHash, randomBytes } from "node:crypto";
 import { cookies } from "next/headers";
+import { redirect } from "next/navigation";
 import { cache } from "react";
 import { prisma } from "@/lib/db";
 import { SESSION_COOKIE } from "@/lib/auth/constants";
+import {
+  hasAdminCapability,
+  isAdminRole,
+  type AdminCapability
+} from "@/lib/auth/admin-authorization";
+import type { AdminRole } from "@/lib/domain";
+import { getRequestSecurityContext } from "@/lib/auth/request-context";
 
 export { SESSION_COOKIE };
 const SESSION_DAYS = 7;
+const MAX_SESSIONS_PER_ADMIN = 10;
 
 function hashToken(token: string): string {
   return createHash("sha256").update(token).digest("hex");
@@ -16,9 +25,19 @@ function hashToken(token: string): string {
 export async function createSession(userId: string, userAgent?: string): Promise<void> {
   const token = randomBytes(32).toString("hex");
   const expiresAt = new Date(Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000);
+  const context = userAgent === undefined ? await getRequestSecurityContext() : null;
   await prisma.adminSession.create({
-    data: { tokenHash: hashToken(token), userId, expiresAt, userAgent }
+    data: { tokenHash: hashToken(token), userId, expiresAt, userAgent: userAgent ?? context?.userAgent }
   });
+  const overflow = await prisma.adminSession.findMany({
+    where: { userId },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    skip: MAX_SESSIONS_PER_ADMIN,
+    select: { id: true }
+  });
+  if (overflow.length > 0) {
+    await prisma.adminSession.deleteMany({ where: { id: { in: overflow.map((item) => item.id) } } });
+  }
   const cookieStore = await cookies();
   cookieStore.set(SESSION_COOKIE, token, {
     httpOnly: true,
@@ -42,7 +61,7 @@ export type SessionUser = {
   id: string;
   email: string;
   name: string;
-  role: string;
+  role: AdminRole;
 };
 
 /**
@@ -61,6 +80,7 @@ export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
     return null;
   }
   const { id, email, name, role } = session.user;
+  if (!isAdminRole(role)) return null;
   return { id, email, name, role };
 });
 
@@ -68,7 +88,15 @@ export const getSessionUser = cache(async (): Promise<SessionUser | null> => {
 export async function requireAdmin(): Promise<SessionUser> {
   const user = await getSessionUser();
   if (!user) {
-    throw new Error("Non autorizzato: sessione admin mancante o scaduta.");
+    redirect("/admin/login?expired=1");
+  }
+  return user;
+}
+
+export async function requireAdminCapability(capability: AdminCapability): Promise<SessionUser> {
+  const user = await requireAdmin();
+  if (!hasAdminCapability(user.role, capability)) {
+    redirect(`/admin?denied=${encodeURIComponent("Permessi insufficienti per questa operazione.")}`);
   }
   return user;
 }

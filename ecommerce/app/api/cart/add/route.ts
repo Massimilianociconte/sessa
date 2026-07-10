@@ -1,9 +1,12 @@
 import { randomBytes } from "node:crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
+import type { CartDTO } from "@/lib/cart-types";
 import { DomainError } from "@/lib/domain";
 import { addItemToCart, CART_COOKIE, getOrCreateCartForLocation } from "@/lib/services/cart";
 import { loadCartDTO } from "@/lib/services/cart-dto";
+import { enforceCartRateLimit } from "@/lib/services/cart-rate-limit";
+import { getSessionCustomer } from "@/lib/auth/customer-session";
 
 export const dynamic = "force-dynamic";
 
@@ -27,14 +30,30 @@ export async function POST(request: NextRequest) {
   }
 
   try {
+    await enforceCartRateLimit(request.headers, token, "mutation");
     const cart = await getOrCreateCartForLocation(token, parsed.data.locationId);
     await addItemToCart(cart.id, parsed.data.storeVariantId, parsed.data.qty);
   } catch (error) {
     const message = error instanceof DomainError ? error.message : "Impossibile aggiungere il prodotto.";
-    return NextResponse.json({ error: message }, { status: 400 });
+    return NextResponse.json(
+      { error: message },
+      { status: error instanceof DomainError && error.code === "RATE_LIMITED" ? 429 : 400 }
+    );
   }
 
-  const dto = await loadCartDTO(token);
+  let dto: CartDTO;
+  try {
+    const customer = await getSessionCustomer();
+    dto = await loadCartDTO(token, customer?.id);
+  } catch (error) {
+    console.error("[cart.add] Aggiornamento eseguito ma risposta non disponibile", {
+      errorType: error instanceof Error ? error.name : "UnknownError"
+    });
+    return NextResponse.json(
+      { error: "Il prodotto potrebbe essere stato aggiunto, ma non riusciamo a verificare il carrello. Aprilo prima di riprovare." },
+      { status: 503, headers: { "Retry-After": "2" } }
+    );
+  }
   const response = NextResponse.json(dto);
   if (setCookie) {
     response.cookies.set(CART_COOKIE, token, {

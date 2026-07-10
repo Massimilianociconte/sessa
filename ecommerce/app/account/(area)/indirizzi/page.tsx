@@ -79,8 +79,8 @@ export default async function AccountAddressesPage({
         title="Indirizzi salvati"
         description="Gestisci casa, lavoro o altri recapiti: il checkout li usera per ridurre campi e passaggi."
       />
-      {msg && <p className="rounded-xl bg-brilliant/10 px-4 py-3 text-sm font-semibold text-emerald-800">{decodeURIComponent(msg)}</p>}
-      {err && <p className="rounded-xl bg-terracotta/10 px-4 py-3 text-sm font-semibold text-terracotta">{decodeURIComponent(err)}</p>}
+      {msg && <p className="rounded-xl bg-brilliant/10 px-4 py-3 text-sm font-semibold text-emerald-800">{msg}</p>}
+      {err && <p className="rounded-xl bg-terracotta/10 px-4 py-3 text-sm font-semibold text-terracotta">{err}</p>}
 
       <AccountPanel
         eyebrow="Rubrica"

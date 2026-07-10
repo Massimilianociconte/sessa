@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getSessionUser } from "@/lib/auth/session";
+import { hasAdminCapability } from "@/lib/auth/admin-authorization";
 import {
   FULFILLMENT_LABELS,
   ORDER_STATUS_LABELS,
@@ -14,27 +15,25 @@ import {
 import { formatCents } from "@/lib/money";
 import { listOrdersForExport, type OrderFilter } from "@/lib/services/orders";
 import { audit } from "@/lib/audit";
+import { csvCell } from "@/lib/security/csv";
+import { romeDayRange } from "@/lib/datetime";
 
 export const dynamic = "force-dynamic";
 
-function csvCell(value: unknown): string {
-  const raw = value === null || value === undefined ? "" : String(value);
-  return /[",;\n]/.test(raw) ? `"${raw.replace(/"/g, '""')}"` : raw;
-}
-
 function parseDay(value: string | null): Date | undefined {
-  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return undefined;
-  const date = new Date(`${value}T00:00:00`);
-  return Number.isNaN(date.getTime()) ? undefined : date;
+  return value ? romeDayRange(value)?.start : undefined;
 }
 
 /** Export CSV degli ordini filtrati. Middleware = primo cancello; qui la sessione admin è rivalidata a DB. */
 export async function GET(request: NextRequest) {
   const user = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Non autorizzato" }, { status: 401 });
+  if (!hasAdminCapability(user.role, "exports:download")) {
+    return NextResponse.json({ error: "Permessi insufficienti" }, { status: 403 });
+  }
 
   const params = request.nextUrl.searchParams;
-  const placedTo = parseDay(params.get("a"));
+  const placedTo = params.get("a") ? romeDayRange(params.get("a")!)?.end : undefined;
   const filter: OrderFilter = {
     status: ORDER_STATUSES.includes(params.get("stato") as OrderStatus)
       ? (params.get("stato") as OrderStatus)
@@ -52,7 +51,7 @@ export async function GET(request: NextRequest) {
       : undefined,
     discountCode: params.get("codice") ?? undefined,
     placedFrom: parseDay(params.get("da")),
-    placedTo: placedTo ? new Date(placedTo.getTime() + 24 * 60 * 60 * 1000) : undefined,
+    placedTo,
     fulfillmentOn: parseDay(params.get("giorno"))
   };
 

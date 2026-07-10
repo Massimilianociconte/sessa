@@ -147,6 +147,11 @@ export async function linkReferralOnSignup(
 export async function maybeConvertReferral(invitedCustomerId: string, orderId: string): Promise<void> {
   const config = await getReferralConfig();
   const reward = await prisma.$transaction(async (tx) => {
+    const paidOrder = await tx.order.findFirst({
+      where: { id: orderId, customerId: invitedCustomerId, status: "PAID", paymentStatus: "PAID" },
+      select: { id: true }
+    });
+    if (!paidOrder) return null;
     const referral = await tx.referral.findUnique({
       where: { invitedCustomerId },
       include: { referrer: true }
@@ -167,6 +172,11 @@ export async function maybeConvertReferral(invitedCustomerId: string, orderId: s
       minSubtotalCents: config.minSubtotalCents,
       firstOrderOnly: false,
       description: "Ricompensa referral: un amico ha ordinato"
+    });
+
+    await tx.order.update({
+      where: { id: orderId },
+      data: { referralCodeSnapshot: referral.code }
     });
 
     return { toEmail: referral.referrer.email, rewardCode };

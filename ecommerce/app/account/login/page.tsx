@@ -4,6 +4,7 @@ import AuthShell from "@/components/account/AuthShell";
 import { CustomerLoginForm } from "@/components/account/CustomerAuthForms";
 import PasskeyLoginButton from "@/components/account/PasskeyLoginButton";
 import { getSessionCustomer } from "@/lib/auth/customer-session";
+import { safeNextPath } from "@/lib/auth/redirects";
 
 export const dynamic = "force-dynamic";
 
@@ -12,10 +13,23 @@ export const metadata = { title: "Accedi", robots: { index: false, follow: false
 export default async function CustomerLoginPage({
   searchParams
 }: {
-  searchParams: Promise<{ reset?: string; all?: string; msg?: string; err?: string }>;
+  searchParams: Promise<{
+    reset?: string;
+    all?: string;
+    expired?: string;
+    registration?: string;
+    next?: string;
+    dev?: string;
+    msg?: string;
+    err?: string;
+  }>;
 }) {
-  const [{ reset, all, msg, err }, customer] = await Promise.all([searchParams, getSessionCustomer()]);
-  if (customer) redirect("/account");
+  const [{ reset, all, expired, registration, next, dev, msg, err }, customer] = await Promise.all([
+    searchParams,
+    getSessionCustomer()
+  ]);
+  const nextPath = safeNextPath(next, "/account", "/account");
+  if (customer) redirect(nextPath);
 
   return (
     <AuthShell
@@ -46,10 +60,21 @@ export default async function CustomerLoginPage({
           Tutte le sessioni sono state chiuse. Accedi di nuovo da questo dispositivo.
         </p>
       )}
-      {msg && <p className="auth-notice" role="status">{decodeURIComponent(msg)}</p>}
-      {err && <p className="auth-notice" data-tone="warn" role="alert">{decodeURIComponent(err)}</p>}
-      <CustomerLoginForm />
-      <PasskeyLoginButton />
+      {expired && (
+        <p className="auth-notice" data-tone="warn" role="status">
+          La sessione è scaduta o è stata revocata. Accedi di nuovo per continuare.
+        </p>
+      )}
+      {registration && (
+        <p className="auth-notice" role="status">
+          Controlla la casella email: dal link ricevuto potrai verificare l&apos;indirizzo e scegliere la password.
+          {dev && <span className="mt-2 block break-all text-xs">Link sviluppo: {dev}</span>}
+        </p>
+      )}
+      {msg && <p className="auth-notice" role="status">{msg}</p>}
+      {err && <p className="auth-notice" data-tone="warn" role="alert">{err}</p>}
+      <CustomerLoginForm nextPath={nextPath} />
+      <PasskeyLoginButton nextPath={nextPath} />
     </AuthShell>
   );
 }

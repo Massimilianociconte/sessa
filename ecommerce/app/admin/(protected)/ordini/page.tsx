@@ -17,15 +17,16 @@ import {
 import { prisma } from "@/lib/db";
 import { formatCents } from "@/lib/money";
 import { listOrders, orderFilterStats, type OrderFilter } from "@/lib/services/orders";
+import { formatRomeDateTime, romeDayRange } from "@/lib/datetime";
+import { requireAdminCapability } from "@/lib/auth/session";
+import { hasAdminCapability } from "@/lib/auth/admin-authorization";
 
 export const dynamic = "force-dynamic";
 
 export const metadata = { title: "Ordini" };
 
 function parseDay(value?: string): Date | undefined {
-  if (!value || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return undefined;
-  const date = new Date(`${value}T00:00:00`);
-  return Number.isNaN(date.getTime()) ? undefined : date;
+  return value ? romeDayRange(value)?.start : undefined;
 }
 
 export default async function AdminOrdersPage({
@@ -47,7 +48,8 @@ export default async function AdminOrdersPage({
     err?: string;
   }>;
 }) {
-  const sp = await searchParams;
+  const [sp, user] = await Promise.all([searchParams, requireAdminCapability("orders:manage")]);
+  const canExport = hasAdminCapability(user.role, "exports:download");
   const locations = await prisma.location.findMany({ orderBy: { position: "asc" } });
 
   const status = ORDER_STATUSES.includes(sp.stato as OrderStatus) ? (sp.stato as OrderStatus) : undefined;
@@ -56,7 +58,7 @@ export default async function AdminOrdersPage({
   const fulfillmentType = sp.evasione === "PICKUP" || sp.evasione === "DELIVERY" ? sp.evasione : undefined;
   const locationId = locations.find((l) => l.id === sp.sede)?.id;
   const placedFrom = parseDay(sp.da);
-  const placedToDay = parseDay(sp.a);
+  const placedTo = sp.a ? romeDayRange(sp.a)?.end : undefined;
   const page = Math.max(1, Number.parseInt(sp.pagina ?? "1", 10) || 1);
 
   const filter: OrderFilter = {
@@ -68,7 +70,7 @@ export default async function AdminOrdersPage({
     fulfillmentType,
     discountCode: sp.codice,
     placedFrom,
-    placedTo: placedToDay ? new Date(placedToDay.getTime() + 24 * 60 * 60 * 1000) : undefined,
+    placedTo,
     fulfillmentOn: parseDay(sp.giorno),
     page
   };
@@ -104,9 +106,11 @@ export default async function AdminOrdersPage({
     <>
       <div className="flex flex-wrap items-end justify-between gap-4">
         <h1 className="font-serif text-3xl font-semibold">Ordini</h1>
-        <a href={exportHref} className="btn-secondary" download>
-          Esporta CSV ({stats.total})
-        </a>
+        {canExport && (
+          <a href={exportHref} className="btn-secondary" download>
+            Esporta CSV ({stats.total})
+          </a>
+        )}
       </div>
       <div className="mt-4">
         <Flash msg={sp.msg} err={sp.err} />
@@ -248,7 +252,7 @@ export default async function AdminOrdersPage({
                   </Link>
                 </td>
                 <td className="px-4 py-3 text-ink/60">
-                  {order.placedAt.toLocaleString("it-IT", { dateStyle: "short", timeStyle: "short" })}
+                  {formatRomeDateTime(order.placedAt)}
                 </td>
                 <td className="px-4 py-3 text-ink/60">{order.location?.name ?? order.locationName ?? "—"}</td>
                 <td className="px-4 py-3">
@@ -261,7 +265,7 @@ export default async function AdminOrdersPage({
                   </p>
                   <p>
                     {order.fulfillmentAt
-                      ? order.fulfillmentAt.toLocaleString("it-IT", { dateStyle: "short", timeStyle: "short" })
+                      ? formatRomeDateTime(order.fulfillmentAt)
                       : "Da concordare"}
                   </p>
                 </td>

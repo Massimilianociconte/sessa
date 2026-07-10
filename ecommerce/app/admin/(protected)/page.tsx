@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { OrderStatusBadge } from "@/components/admin/StatusBadge";
 import { FULFILLMENT_LABELS, type FulfillmentType } from "@/lib/domain";
+import { formatRomeDate, formatRomeDateTime } from "@/lib/datetime";
 import { formatCents } from "@/lib/money";
 import {
   DASHBOARD_RANGE_LABELS,
@@ -30,13 +31,13 @@ function Kpi({ label, value, hint }: { label: string; value: string; hint?: stri
 
 function formatFulfillmentAt(date: Date | null): string {
   if (!date) return "Da concordare";
-  return date.toLocaleString("it-IT", { dateStyle: "short", timeStyle: "short" });
+  return formatRomeDateTime(date);
 }
 
 export default async function AdminDashboardPage({
   searchParams
 }: {
-  searchParams: Promise<{ sede?: string; periodo?: string }>;
+  searchParams: Promise<{ sede?: string; periodo?: string; denied?: string }>;
 }) {
   const sp = await searchParams;
   const range = DASHBOARD_RANGES.includes(sp.periodo as DashboardRange)
@@ -47,6 +48,11 @@ export default async function AdminDashboardPage({
 
   return (
     <>
+      {sp.denied && (
+        <p className="mb-4 rounded-xl bg-terracotta/10 px-4 py-3 text-sm font-semibold text-terracotta" role="alert">
+          {sp.denied}
+        </p>
+      )}
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="font-serif text-3xl font-semibold">Dashboard</h1>
@@ -190,7 +196,7 @@ export default async function AdminDashboardPage({
                       {!data.locationId && (
                         <td className="py-2 text-xs text-ink/50">{order.location?.name ?? order.locationName}</td>
                       )}
-                      <td className="py-2 text-xs text-ink/50">{order.placedAt.toLocaleDateString("it-IT")}</td>
+                      <td className="py-2 text-xs text-ink/50">{formatRomeDate(order.placedAt)}</td>
                       <td className="py-2">
                         <OrderStatusBadge status={order.status} />
                       </td>

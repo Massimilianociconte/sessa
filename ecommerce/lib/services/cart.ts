@@ -2,8 +2,9 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { DomainError } from "@/lib/domain";
 import { effectivePrice } from "@/lib/services/catalog";
-import { evaluateDiscount, type DiscountLine } from "@/lib/services/discounts";
+import { evaluateDiscount, type DiscountContext, type DiscountLine } from "@/lib/services/discounts";
 import { checkGiftCard, loadGiftCard } from "@/lib/services/giftcards";
+import { serializableTransaction } from "@/lib/services/transaction";
 
 export const CART_COOKIE = "sessa_cart";
 
@@ -24,6 +25,23 @@ const cartInclude = {
 
 export type CartWithItems = Prisma.CartGetPayload<{ include: typeof cartInclude }>;
 
+let lastCartPruneAt = 0;
+const CART_PRUNE_INTERVAL_MS = 60 * 60 * 1000;
+
+async function maybePruneStaleCarts(): Promise<void> {
+  const now = Date.now();
+  if (now - lastCartPruneAt < CART_PRUNE_INTERVAL_MS) return;
+  lastCartPruneAt = now;
+  await prisma.cart.deleteMany({
+    where: {
+      OR: [
+        { status: "ACTIVE", updatedAt: { lt: new Date(now - 45 * 24 * 60 * 60 * 1000) } },
+        { status: "CONVERTED", convertedAt: { lt: new Date(now - 7 * 24 * 60 * 60 * 1000) } }
+      ]
+    }
+  }).catch(() => undefined);
+}
+
 export async function getCartByToken(token: string): Promise<CartWithItems | null> {
   return prisma.cart.findFirst({ where: { token, status: "ACTIVE" }, include: cartInclude });
 }
@@ -36,78 +54,114 @@ export async function getOrCreateCartForLocation(
   token: string,
   locationId: string
 ): Promise<CartWithItems> {
-  const existing = await getCartByToken(token);
-  if (existing) {
-    if (existing.locationId === locationId) return existing;
-    await prisma.cartItem.deleteMany({ where: { cartId: existing.id } });
-    await prisma.cart.update({
-      where: { id: existing.id },
-      data: { locationId, discountCodeId: null }
+  await maybePruneStaleCarts();
+  return serializableTransaction(async (tx) => {
+    const location = await tx.location.findUnique({ where: { id: locationId }, select: { isActive: true } });
+    if (!location?.isActive) throw new DomainError("Sede non disponibile.");
+
+    const existing = await tx.cart.upsert({
+      where: { token },
+      create: { token, locationId },
+      update: {},
+      include: cartInclude
     });
-    return (await getCartByToken(token))!;
-  }
-  await prisma.cart.create({ data: { token, locationId } });
-  return (await getCartByToken(token))!;
+    if (existing.status !== "ACTIVE") {
+      throw new DomainError("Il carrello precedente e gia stato convertito.", "CART_ALREADY_CONVERTED");
+    }
+    if (existing.locationId === locationId) return existing;
+
+    // Cambio sede indivisibile: non puo lasciare righe della vecchia sede su un
+    // cart gia riassegnato, ne conservare coupon/gift card fuori contesto.
+    await tx.cartItem.deleteMany({ where: { cartId: existing.id } });
+    await tx.cart.updateMany({
+      where: { id: existing.id, status: "ACTIVE" },
+      data: { locationId, discountCodeId: null, giftCardCode: null }
+    });
+    const switched = await tx.cart.findUnique({ where: { id: existing.id }, include: cartInclude });
+    if (!switched) throw new DomainError("Carrello non trovato.");
+    return switched;
+  });
 }
 
 export async function addItemToCart(cartId: string, storeVariantId: string, qty: number): Promise<void> {
-  const cart = await prisma.cart.findUnique({ where: { id: cartId } });
-  if (!cart) throw new DomainError("Carrello non trovato.");
+  if (!Number.isInteger(qty) || qty <= 0 || qty > 99) throw new DomainError("Quantita non valida.");
+  await serializableTransaction(async (tx) => {
+    const cart = await tx.cart.findUnique({ where: { id: cartId } });
+    if (!cart || cart.status !== "ACTIVE") throw new DomainError("Carrello non disponibile.");
 
-  const sv = await prisma.storeVariant.findUnique({
-    where: { id: storeVariantId },
-    include: { variant: { include: { product: true } } }
-  });
-  if (
-    !sv ||
-    sv.locationId !== cart.locationId ||
-    !sv.isAvailable ||
-    !sv.variant.isActive ||
-    sv.variant.product.status !== "ACTIVE"
-  ) {
-    throw new DomainError("Prodotto non disponibile in questa sede.");
-  }
+    const sv = await tx.storeVariant.findUnique({
+      where: { id: storeVariantId },
+      include: { variant: { include: { product: true } } }
+    });
+    if (
+      !sv ||
+      sv.locationId !== cart.locationId ||
+      !sv.isAvailable ||
+      !sv.variant.isActive ||
+      sv.variant.product.status !== "ACTIVE"
+    ) {
+      throw new DomainError("Prodotto non disponibile in questa sede.");
+    }
 
-  const existing = await prisma.cartItem.findUnique({
-    where: { cartId_storeVariantId: { cartId, storeVariantId } }
-  });
-  const requested = (existing?.qty ?? 0) + qty;
-  const clamped = Math.min(requested, sv.stockQty);
-  if (clamped <= 0) throw new DomainError("Prodotto esaurito.");
+    const existing = await tx.cartItem.findUnique({
+      where: { cartId_storeVariantId: { cartId, storeVariantId } }
+    });
+    const requested = (existing?.qty ?? 0) + qty;
+    const clamped = Math.min(requested, sv.stockQty, 99);
+    if (clamped <= 0) throw new DomainError("Prodotto esaurito.");
 
-  await prisma.cartItem.upsert({
-    where: { cartId_storeVariantId: { cartId, storeVariantId } },
-    update: { qty: clamped },
-    create: { cartId, storeVariantId, qty: clamped }
+    await tx.cartItem.upsert({
+      where: { cartId_storeVariantId: { cartId, storeVariantId } },
+      update: { qty: clamped },
+      create: { cartId, storeVariantId, qty: clamped }
+    });
+    await tx.cart.update({ where: { id: cartId }, data: { updatedAt: new Date() } });
   });
 }
 
 export async function setItemQty(cartId: string, itemId: string, qty: number): Promise<void> {
-  const item = await prisma.cartItem.findFirst({
-    where: { id: itemId, cartId },
-    include: { storeVariant: true }
-  });
-  if (!item) return;
-  if (qty <= 0) {
-    await prisma.cartItem.delete({ where: { id: item.id } });
-    return;
-  }
-  await prisma.cartItem.update({
-    where: { id: item.id },
-    data: { qty: Math.min(qty, item.storeVariant.stockQty) }
+  if (!Number.isInteger(qty) || qty < 0 || qty > 99) throw new DomainError("Quantita non valida.");
+  await serializableTransaction(async (tx) => {
+    const cart = await tx.cart.findUnique({ where: { id: cartId }, select: { status: true } });
+    if (!cart || cart.status !== "ACTIVE") throw new DomainError("Carrello non disponibile.");
+    const item = await tx.cartItem.findFirst({
+      where: { id: itemId, cartId },
+      include: { storeVariant: true }
+    });
+    if (!item) return;
+    const clamped = Math.min(qty, item.storeVariant.stockQty, 99);
+    if (clamped <= 0) {
+      await tx.cartItem.delete({ where: { id: item.id } });
+    } else {
+      await tx.cartItem.update({ where: { id: item.id }, data: { qty: clamped } });
+    }
+    await tx.cart.update({ where: { id: cartId }, data: { updatedAt: new Date() } });
   });
 }
 
 export async function removeItem(cartId: string, itemId: string): Promise<void> {
-  await prisma.cartItem.deleteMany({ where: { id: itemId, cartId } });
+  await prisma.$transaction(async (tx) => {
+    const cart = await tx.cart.findUnique({ where: { id: cartId }, select: { status: true } });
+    if (!cart || cart.status !== "ACTIVE") return;
+    await tx.cartItem.deleteMany({ where: { id: itemId, cartId } });
+    await tx.cart.update({ where: { id: cartId }, data: { updatedAt: new Date() } });
+  });
 }
 
 export async function attachDiscount(cartId: string, discountCodeId: string | null): Promise<void> {
-  await prisma.cart.update({ where: { id: cartId }, data: { discountCodeId } });
+  const updated = await prisma.cart.updateMany({
+    where: { id: cartId, status: "ACTIVE" },
+    data: { discountCodeId }
+  });
+  if (updated.count === 0) throw new DomainError("Carrello non disponibile.");
 }
 
 export async function attachGiftCard(cartId: string, giftCardCode: string | null): Promise<void> {
-  await prisma.cart.update({ where: { id: cartId }, data: { giftCardCode } });
+  const updated = await prisma.cart.updateMany({
+    where: { id: cartId, status: "ACTIVE" },
+    data: { giftCardCode }
+  });
+  if (updated.count === 0) throw new DomainError("Carrello non disponibile.");
 }
 
 export type CartGiftCard =
@@ -161,7 +215,10 @@ export function toDiscountLines(lines: CartLine[]): DiscountLine[] {
   return lines.map((l) => ({ productId: l.productId, categoryId: l.categoryId, lineCents: l.totalCents }));
 }
 
-export function buildCartView(cart: CartWithItems): CartView {
+export function buildCartView(
+  cart: CartWithItems,
+  customerContext?: Pick<DiscountContext, "customerId" | "isFirstOrder" | "customerRedemptions">
+): CartView {
   const lines: CartLine[] = cart.items.map((item) => {
     const sv = item.storeVariant;
     const variant = sv.variant;
@@ -194,7 +251,8 @@ export function buildCartView(cart: CartWithItems): CartView {
     const evaluated = evaluateDiscount(cart.discountCode, {
       locationId: cart.locationId,
       subtotalCents,
-      lines: toDiscountLines(lines)
+      lines: toDiscountLines(lines),
+      ...customerContext
     });
     if (evaluated.ok) discountCents = evaluated.amountCents;
     else discountWarning = evaluated.reason;
@@ -212,4 +270,23 @@ export function buildCartView(cart: CartWithItems): CartView {
     discountCode,
     discountWarning
   };
+}
+
+export async function buildCartViewForCustomer(
+  cart: CartWithItems,
+  customerId: string | null | undefined
+): Promise<CartView> {
+  if (!customerId) return buildCartView(cart, { customerId: null });
+  if (!cart.discountCodeId) return buildCartView(cart, { customerId });
+  const priorOrders = await prisma.order.count({
+    where: { customerId, status: { notIn: ["CANCELLED", "REFUNDED"] } }
+  });
+  const customerRedemptions = await prisma.discountRedemption.count({
+    where: { discountId: cart.discountCodeId, customerId, reversedAt: null }
+  });
+  return buildCartView(cart, {
+    customerId,
+    isFirstOrder: priorOrders === 0,
+    customerRedemptions
+  });
 }

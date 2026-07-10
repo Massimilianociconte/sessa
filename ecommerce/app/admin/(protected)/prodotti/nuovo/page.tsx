@@ -3,6 +3,7 @@ import Flash from "@/components/admin/Flash";
 import ProductFields from "@/components/admin/ProductFields";
 import { createProductAction } from "@/lib/actions/admin/products";
 import { prisma } from "@/lib/db";
+import { requireAdminCapability } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
@@ -13,6 +14,7 @@ export default async function NewProductPage({
 }: {
   searchParams: Promise<{ err?: string }>;
 }) {
+  await requireAdminCapability("catalog:manage");
   const { err } = await searchParams;
   const categories = await prisma.category.findMany({ orderBy: { position: "asc" } });
 

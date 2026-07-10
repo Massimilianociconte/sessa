@@ -15,6 +15,7 @@ import { prisma } from "@/lib/db";
 type Attempt = { count: number; firstAt: number; blockedUntil: number };
 
 const memoryAttempts = new Map<string, Attempt>();
+const MAX_MEMORY_ENTRIES = 5_000;
 
 const WINDOW_MS = 15 * 60 * 1000; // finestra di conteggio
 const MAX_ATTEMPTS = 8; // tentativi falliti prima del blocco
@@ -32,6 +33,15 @@ function memoryIsLimited(key: string, now: number): number | null {
 function memoryRegisterFailure(key: string, now: number): void {
   const entry = memoryAttempts.get(key);
   if (!entry || now - entry.firstAt > WINDOW_MS) {
+    if (memoryAttempts.size >= MAX_MEMORY_ENTRIES) {
+      for (const [candidate, value] of memoryAttempts) {
+        if (now - value.firstAt > PRUNE_AFTER_MS) memoryAttempts.delete(candidate);
+      }
+      if (memoryAttempts.size >= MAX_MEMORY_ENTRIES) {
+        const oldest = memoryAttempts.keys().next().value as string | undefined;
+        if (oldest) memoryAttempts.delete(oldest);
+      }
+    }
     memoryAttempts.set(key, { count: 1, firstAt: now, blockedUntil: 0 });
     return;
   }
@@ -61,9 +71,16 @@ export async function registerFailedAttempt(key: string): Promise<void> {
   const now = Date.now();
   memoryRegisterFailure(key, now);
   try {
-    // 1. Finestra scaduta → riparte il conteggio (update condizionale, niente race).
+    // 1. Finestra o blocco scaduti → riparte il conteggio. Senza azzerare
+    // blockedUntil, un Date passato resterebbe truthy e impedirebbe futuri blocchi.
     await prisma.rateLimitEntry.updateMany({
-      where: { key, firstAt: { lt: new Date(now - WINDOW_MS) } },
+      where: {
+        key,
+        OR: [
+          { firstAt: { lt: new Date(now - WINDOW_MS) } },
+          { blockedUntil: { not: null, lte: new Date(now) } }
+        ]
+      },
       data: { count: 0, firstAt: new Date(now), blockedUntil: null }
     });
     // 2. Conta il fallimento (upsert nativo: sicuro sotto concorrenza).
@@ -93,4 +110,19 @@ export async function registerFailedAttempt(key: string): Promise<void> {
 export async function clearAttempts(key: string): Promise<void> {
   memoryAttempts.delete(key);
   await prisma.rateLimitEntry.deleteMany({ where: { key } }).catch(() => null);
+}
+
+/** Controlla più dimensioni (es. IP globale + singolo account) senza fail-fast informativo. */
+export async function blockedForAny(keys: readonly string[]): Promise<number | null> {
+  const results = await Promise.all(keys.map((key) => isRateLimited(key)));
+  const blocked = results.filter((value): value is number => value !== null);
+  return blocked.length > 0 ? Math.max(...blocked) : null;
+}
+
+export async function registerFailedAttempts(keys: readonly string[]): Promise<void> {
+  await Promise.all(keys.map((key) => registerFailedAttempt(key)));
+}
+
+export async function clearAttemptKeys(keys: readonly string[]): Promise<void> {
+  await Promise.all(keys.map((key) => clearAttempts(key)));
 }

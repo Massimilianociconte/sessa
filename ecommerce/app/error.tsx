@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect } from "react";
 
 export default function Error({
@@ -35,9 +36,9 @@ export default function Error({
             <button onClick={reset} className="btn-primary">
               Riprova
             </button>
-            <a href="/" className="btn-secondary">
+            <Link href="/" className="btn-secondary">
               Torna allo shop
-            </a>
+            </Link>
           </div>
           <div className="not-found-trust mt-7 grid gap-2 sm:grid-cols-3">
             <span>Carrello protetto</span>

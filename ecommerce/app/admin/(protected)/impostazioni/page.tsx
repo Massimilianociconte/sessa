@@ -14,6 +14,8 @@ import {
 import { requireAdmin } from "@/lib/auth/session";
 import { prisma } from "@/lib/db";
 import { getSettings } from "@/lib/services/settings";
+import { hasAdminCapability } from "@/lib/auth/admin-authorization";
+import { formatRomeDateTime } from "@/lib/datetime";
 
 export const dynamic = "force-dynamic";
 
@@ -27,19 +29,24 @@ export default async function AdminSettingsPage({
   const { msg, err } = await searchParams;
   const currentUser = await requireAdmin();
   const isOwner = currentUser.role === "OWNER";
+  const canManageSettings = hasAdminCapability(currentUser.role, "settings:manage");
   const [settings, zones, adminUsers] = await Promise.all([
-    getSettings([
-      "store.name",
-      "store.email",
-      "store.phone",
-      "store.address",
-      "store.vat",
-      "payments.bankTransferInstructions"
-    ]),
-    prisma.shippingZone.findMany({
-      include: { rates: { orderBy: { position: "asc" } } },
-      orderBy: { position: "asc" }
-    }),
+    canManageSettings
+      ? getSettings([
+          "store.name",
+          "store.email",
+          "store.phone",
+          "store.address",
+          "store.vat",
+          "payments.bankTransferInstructions"
+        ])
+      : Promise.resolve({} as Record<string, unknown>),
+    canManageSettings
+      ? prisma.shippingZone.findMany({
+          include: { rates: { orderBy: { position: "asc" } } },
+          orderBy: { position: "asc" }
+        })
+      : Promise.resolve([]),
     isOwner
       ? prisma.adminUser.findMany({
           orderBy: [{ role: "asc" }, { createdAt: "asc" }],
@@ -58,7 +65,7 @@ export default async function AdminSettingsPage({
       </div>
 
       <div className="mt-4 grid gap-6 xl:grid-cols-2">
-        <section className="card h-fit p-6">
+        {canManageSettings && <section className="card h-fit p-6">
           <h2 className="mb-4 font-serif text-xl font-semibold">Negozio</h2>
           <form action={saveStoreSettingsAction} className="space-y-3">
             <div>
@@ -119,10 +126,10 @@ export default async function AdminSettingsPage({
               Salva impostazioni
             </button>
           </form>
-        </section>
+        </section>}
 
         <div className="space-y-6">
-          <section className="card p-6">
+          {canManageSettings && <section className="card p-6">
             <h2 className="mb-4 font-serif text-xl font-semibold">Spedizioni</h2>
             {zones.map((zone) => (
               <div key={zone.id} className="mb-4">
@@ -202,7 +209,7 @@ export default async function AdminSettingsPage({
                 </details>
               </div>
             ))}
-          </section>
+          </section>}
 
           <section className="card p-6">
             <h2 className="mb-4 font-serif text-xl font-semibold">Cambia password</h2>
@@ -219,12 +226,13 @@ export default async function AdminSettingsPage({
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
                 <div>
-                  <label className="label-field">Nuova password (min 10)</label>
+                  <label className="label-field">Nuova password (min 12)</label>
                   <input
                     name="newPassword"
                     type="password"
                     required
-                    minLength={10}
+                    minLength={12}
+                    maxLength={128}
                     autoComplete="new-password"
                     className="input-field"
                   />
@@ -235,6 +243,8 @@ export default async function AdminSettingsPage({
                     name="confirmPassword"
                     type="password"
                     required
+                    minLength={12}
+                    maxLength={128}
                     autoComplete="new-password"
                     className="input-field"
                   />
@@ -268,12 +278,22 @@ export default async function AdminSettingsPage({
                         <p className="text-xs text-ink/50">
                           {adminUser.email}
                           {adminUser.lastLoginAt &&
-                            ` · ultimo accesso ${adminUser.lastLoginAt.toLocaleString("it-IT", { dateStyle: "short", timeStyle: "short" })}`}
+                            ` · ultimo accesso ${formatRomeDateTime(adminUser.lastLoginAt)}`}
                         </p>
                       </div>
                       {adminUser.role !== "OWNER" && (
-                        <form action={toggleAdminUserAction}>
+                        <form action={toggleAdminUserAction} className="flex flex-wrap items-center justify-end gap-2">
                           <input type="hidden" name="userId" value={adminUser.id} />
+                          <input
+                            name="ownerPassword"
+                            type="password"
+                            required
+                            maxLength={128}
+                            autoComplete="current-password"
+                            className="input-field !w-40 !py-2 text-xs"
+                            placeholder="Password owner"
+                            aria-label="Password proprietario"
+                          />
                           <button type="submit" className="btn-ghost text-xs">
                             {adminUser.isActive ? "Disattiva" : "Riattiva"}
                           </button>
@@ -289,7 +309,11 @@ export default async function AdminSettingsPage({
                           <input type="hidden" name="userId" value={adminUser.id} />
                           <div className="min-w-56 flex-1">
                             <label className="label-field">Nuova password (min 12)</label>
-                            <input name="password" type="password" required minLength={12} autoComplete="new-password" className="input-field" />
+                            <input name="password" type="password" required minLength={12} maxLength={128} autoComplete="new-password" className="input-field" />
+                          </div>
+                          <div className="min-w-56 flex-1">
+                            <label className="label-field">Password proprietario</label>
+                            <input name="ownerPassword" type="password" required maxLength={128} autoComplete="current-password" className="input-field" />
                           </div>
                           <button type="submit" className="btn-secondary !py-2 text-xs">
                             Reimposta
@@ -319,7 +343,7 @@ export default async function AdminSettingsPage({
                   <div className="grid gap-3 sm:grid-cols-2">
                     <div>
                       <label className="label-field">Password iniziale (min 12)</label>
-                      <input name="password" type="password" required minLength={12} autoComplete="new-password" className="input-field" />
+                      <input name="password" type="password" required minLength={12} maxLength={128} autoComplete="new-password" className="input-field" />
                     </div>
                     <div>
                       <label className="label-field">Ruolo</label>
@@ -328,6 +352,10 @@ export default async function AdminSettingsPage({
                         <option value="ADMIN">Admin (completo)</option>
                       </select>
                     </div>
+                  </div>
+                  <div>
+                    <label className="label-field">Password proprietario</label>
+                    <input name="ownerPassword" type="password" required maxLength={128} autoComplete="current-password" className="input-field" />
                   </div>
                   <button type="submit" className="btn-primary">
                     Crea utente

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { FormEvent } from "react";
 import { centsToAnalyticsValue, trackEcommerceEvent } from "@/lib/analytics";
 import type { CartDTO } from "@/lib/cart-types";
@@ -46,6 +46,7 @@ export default function AddToCartForm({
   const [qty, setQty] = useState(1);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const submittingRef = useRef(false);
   const selectedVariant = variants.find((v) => v.storeVariantId === selected);
   const maxQty = Math.max(1, selectedVariant?.stockQty ?? 1);
   const safeQty = Math.min(Math.max(1, qty), maxQty);
@@ -56,7 +57,8 @@ export default function AddToCartForm({
 
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (!selected) return;
+    if (!selected || submittingRef.current) return;
+    submittingRef.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -71,6 +73,11 @@ export default function AddToCartForm({
         return;
       }
       const nextCart = (await res.json().catch(() => null)) as CartDTO | null;
+      if (!nextCart) {
+        setError("Il server ha risposto in modo incompleto. Riprova: il carrello verrà verificato.");
+        notifyCartChanged();
+        return;
+      }
       const variant = variants.find((v) => v.storeVariantId === selected);
       if (variant) {
         trackEcommerceEvent("add_to_cart", {
@@ -91,12 +98,13 @@ export default function AddToCartForm({
           ]
         });
       }
-      notifyCartChanged(nextCart ?? undefined);
-      if (openDrawerOnAdded) openCart(nextCart ?? undefined);
+      notifyCartChanged(nextCart);
+      if (openDrawerOnAdded) openCart(nextCart);
       onAdded?.();
     } catch {
       setError("Errore di rete. Riprova.");
     } finally {
+      submittingRef.current = false;
       setBusy(false);
     }
   }
@@ -143,7 +151,7 @@ export default function AddToCartForm({
       </fieldset>
 
       {error && (
-        <p className="rounded-xl bg-terracotta/10 px-4 py-3 text-sm font-semibold text-terracotta">{error}</p>
+        <p role="alert" className="rounded-xl bg-terracotta/10 px-4 py-3 text-sm font-semibold text-terracotta">{error}</p>
       )}
 
       <div className={`flex items-end gap-4 ${stickySubmit ? "quick-add-form-footer" : ""}`}>

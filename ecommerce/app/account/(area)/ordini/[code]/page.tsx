@@ -13,6 +13,7 @@ import {
 import { requireCustomer } from "@/lib/auth/customer-session";
 import { formatCents } from "@/lib/money";
 import { getCustomerOrderByCode } from "@/lib/services/customer-account";
+import { formatRomeDateTime } from "@/lib/datetime";
 
 export const metadata = { title: "Dettaglio ordine" };
 
@@ -64,14 +65,14 @@ export default async function AccountOrderDetailPage({
       <AccountPageIntro
         kicker="Dettaglio ordine"
         title={order.code}
-        description={`Creato il ${order.placedAt.toLocaleString("it-IT")} per ${order.locationName || "Sessa 1930"}.`}
+        description={`Creato il ${formatRomeDateTime(order.placedAt)} per ${order.locationName || "Sessa 1930"}.`}
       >
         <OrderStatusBadge status={order.status} />
         <PaymentStatusBadge status={order.paymentStatus} />
       </AccountPageIntro>
 
-      {msg && <p className="rounded-xl bg-brilliant/10 px-4 py-3 text-sm font-semibold text-emerald-800">{decodeURIComponent(msg)}</p>}
-      {err && <p className="rounded-xl bg-terracotta/10 px-4 py-3 text-sm font-semibold text-terracotta">{decodeURIComponent(err)}</p>}
+      {msg && <p className="rounded-xl bg-brilliant/10 px-4 py-3 text-sm font-semibold text-emerald-800">{msg}</p>}
+      {err && <p className="rounded-xl bg-terracotta/10 px-4 py-3 text-sm font-semibold text-terracotta">{err}</p>}
 
       <AccountInfoGrid>
         <AccountInfoTile
@@ -82,7 +83,7 @@ export default async function AccountOrderDetailPage({
         />
         <AccountInfoTile
           label={isPickup ? "Ritiro" : "Consegna"}
-          value={order.fulfillmentAt ? order.fulfillmentAt.toLocaleString("it-IT") : "Da confermare"}
+          value={order.fulfillmentAt ? formatRomeDateTime(order.fulfillmentAt) : "Da confermare"}
           description={isPickup ? "La sede ti aggiornera quando l'ordine sara pronto." : shippingAddress || order.shippingMethodName}
           tone="ceramic"
         />

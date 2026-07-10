@@ -1,5 +1,5 @@
 -- CreateTable
-CREATE TABLE "RateLimitEntry" (
+CREATE TABLE IF NOT EXISTS "RateLimitEntry" (
     "key" TEXT NOT NULL,
     "count" INTEGER NOT NULL DEFAULT 0,
     "firstAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -10,5 +10,4 @@ CREATE TABLE "RateLimitEntry" (
 );
 
 -- CreateIndex
-CREATE INDEX "RateLimitEntry_updatedAt_idx" ON "RateLimitEntry"("updatedAt");
-
+CREATE INDEX IF NOT EXISTS "RateLimitEntry_updatedAt_idx" ON "RateLimitEntry"("updatedAt");

@@ -9,15 +9,15 @@ import { DomainError } from "@/lib/domain";
  * così non si può mai spendere più del saldo né usarla due volte in parallelo.
  */
 
-/** Codice leggibile e univoco, es. GIFT-1A2B-3C4D. */
+/** Codice leggibile con 80 bit di entropia; i vecchi codici restano validi. */
 export async function generateGiftCardCode(): Promise<string> {
   for (let i = 0; i < 6; i++) {
-    const raw = randomBytes(4).toString("hex").toUpperCase();
-    const code = `GIFT-${raw.slice(0, 4)}-${raw.slice(4, 8)}`;
+    const raw = randomBytes(10).toString("hex").toUpperCase();
+    const code = `GIFT-${raw.match(/.{1,4}/g)!.join("-")}`;
     const clash = await prisma.giftCard.findUnique({ where: { code } });
     if (!clash) return code;
   }
-  return `GIFT-${randomBytes(6).toString("hex").toUpperCase()}`;
+  return `GIFT-${randomBytes(16).toString("hex").toUpperCase()}`;
 }
 
 export async function issueGiftCard(input: {
@@ -58,7 +58,7 @@ export function checkGiftCard(card: GiftCard | null, customerId?: string | null)
   if (!card || !card.isActive) return { ok: false, reason: "Gift card non valida." };
   if (card.expiresAt && card.expiresAt < new Date()) return { ok: false, reason: "Gift card scaduta." };
   if (card.balanceCents <= 0) return { ok: false, reason: "Gift card esaurita." };
-  if (card.customerId && customerId && card.customerId !== customerId) {
+  if (card.customerId && card.customerId !== customerId) {
     return { ok: false, reason: "Gift card intestata a un altro cliente." };
   }
   return { ok: true, card };
@@ -81,7 +81,12 @@ export async function redeemGiftCardInTx(
 ): Promise<number> {
   if (amountCents <= 0) return 0;
   const updated = await tx.giftCard.updateMany({
-    where: { id: giftCardId, isActive: true, balanceCents: { gte: amountCents } },
+    where: {
+      id: giftCardId,
+      isActive: true,
+      balanceCents: { gte: amountCents },
+      OR: [{ expiresAt: null }, { expiresAt: { gt: new Date() } }]
+    },
     data: { balanceCents: { decrement: amountCents } }
   });
   if (updated.count === 0) return 0;

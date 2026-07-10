@@ -9,6 +9,7 @@ import {
 import { requireCustomer } from "@/lib/auth/customer-session";
 import { formatCents } from "@/lib/money";
 import { getReferralConfig, getReferralStats, referralLink } from "@/lib/services/referral";
+import { formatRomeDate } from "@/lib/datetime";
 
 export const metadata = { title: "Invita amici" };
 
@@ -92,7 +93,7 @@ export default async function InvitePage() {
                 <div>
                   <strong>{r.invitedCustomer?.firstName ?? "Amico invitato"}</strong>
                   <span>
-                    {r.createdAt.toLocaleDateString("it-IT")}
+                    {formatRomeDate(r.createdAt)}
                   </span>
                 </div>
                 <span

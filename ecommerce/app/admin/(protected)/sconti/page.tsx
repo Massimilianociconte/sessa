@@ -7,6 +7,7 @@ import {
 import { DISCOUNT_SCOPE_LABELS, type DiscountScope } from "@/lib/domain";
 import { prisma } from "@/lib/db";
 import { formatCents } from "@/lib/money";
+import { requireAdminCapability } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
@@ -17,6 +18,7 @@ export default async function AdminDiscountsPage({
 }: {
   searchParams: Promise<{ msg?: string; err?: string }>;
 }) {
+  await requireAdminCapability("promotions:manage");
   const { msg, err } = await searchParams;
   const [discounts, locations, categories, products] = await Promise.all([
     prisma.discountCode.findMany({
@@ -194,10 +196,7 @@ export default async function AdminDiscountsPage({
                   <input type="checkbox" name="firstOrderOnly" className="accent-terracotta" />
                   Solo primo ordine
                 </label>
-                <label className="flex items-center gap-2">
-                  <input type="checkbox" name="stackable" className="accent-terracotta" />
-                  Cumulabile
-                </label>
+                <span className="text-xs text-ink/55">Un solo codice per ordine (non cumulabile).</span>
               </div>
             </div>
             <div className="grid grid-cols-2 gap-3">

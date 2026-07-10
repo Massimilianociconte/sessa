@@ -2,7 +2,6 @@ import Link from "next/link";
 import AccountMenu from "@/components/storefront/AccountMenu";
 import CartWidget from "@/components/storefront/CartWidget";
 import { logoutCustomerAction } from "@/lib/actions/account/auth";
-import { readCustomerDisplayName } from "@/lib/auth/display-name";
 
 type HeaderLocationContext = {
   slug: string;
@@ -11,12 +10,17 @@ type HeaderLocationContext = {
 
 /**
  * Header a nastro terracotta, coerente col sito vetrina.
- * Il nome utente arriva dal cookie display-name (zero query DB): così ogni
- * pagina — homepage compresa — mostra subito chi è loggato, senza flash.
+ * Sulle pagine autenticate il nome può arrivare dal layout. Sulla vetrina il
+ * menu legge il cookie visuale (mai usato per auth) lato client: il dato non
+ * rende dinamica l'intera pagina e la CDN può quindi cachearla.
  */
-export default async function Header({ currentLocation }: { currentLocation?: HeaderLocationContext }) {
-  const displayName = await readCustomerDisplayName();
-
+export default function Header({
+  currentLocation,
+  displayName = null
+}: {
+  currentLocation?: HeaderLocationContext;
+  displayName?: string | null;
+}) {
   return (
     <header className="brand-ribbon sticky top-0 z-40 text-ivory backdrop-blur">
       <div className="mx-auto flex min-h-[72px] max-w-6xl items-center justify-between gap-3 px-4 py-3">
@@ -25,8 +29,9 @@ export default async function Header({ currentLocation }: { currentLocation?: He
           <img
             src="/brand/sessa-logo-white.webp"
             alt="Sessa 1930"
-            width={3600}
-            height={978}
+            width={720}
+            height={196}
+            fetchPriority="high"
             decoding="async"
             className="h-9 w-auto transition group-hover:scale-[1.02] sm:h-10"
           />

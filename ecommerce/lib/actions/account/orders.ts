@@ -7,6 +7,7 @@ import { DomainError } from "@/lib/domain";
 import { requireCustomer } from "@/lib/auth/customer-session";
 import { enqueueEmail } from "@/lib/services/email";
 import { transitionOrder } from "@/lib/services/orders";
+import { refundOrder } from "@/lib/services/payment-attempts";
 
 /** Stati da cui il CLIENTE può ancora annullare: prima che il laboratorio inizi la preparazione. */
 const CUSTOMER_CANCELLABLE = ["PENDING_PAYMENT", "PAID"];
@@ -29,9 +30,15 @@ export async function cancelCustomerOrderAction(formData: FormData): Promise<voi
   }
 
   try {
-    await transitionOrder(order.id, "CANCELLED", customer.email, {
-      note: "Annullato dal cliente dall'area personale."
-    });
+    if (order.status === "PAID" && (order.paymentProvider === "stripe" || order.paymentMethod === "gift_card")) {
+      await refundOrder(order.id, customer.email, "Rimborso richiesto dal cliente dall'area personale.");
+    } else if (order.status === "PAID") {
+      throw new DomainError("Per annullare un ordine gia pagato con metodo manuale, contatta la sede.");
+    } else {
+      await transitionOrder(order.id, "CANCELLED", customer.email, {
+        note: "Annullato dal cliente dall'area personale."
+      });
+    }
   } catch (error) {
     if (error instanceof DomainError) redirect(`${back}?err=${encodeURIComponent(error.message)}`);
     throw error;

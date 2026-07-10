@@ -1,14 +1,14 @@
 "use server";
 
-import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import QRCode from "qrcode";
 import { prisma } from "@/lib/db";
 import { DomainError } from "@/lib/domain";
 import { verifyPassword } from "@/lib/auth/password";
-import { getSessionCustomer } from "@/lib/auth/customer-session";
+import { getSessionCustomer, rotateCustomerSessions } from "@/lib/auth/customer-session";
 import { clearAttempts, isRateLimited, registerFailedAttempt } from "@/lib/auth/rate-limit";
+import { getClientIp, rateLimitKey } from "@/lib/auth/request-context";
 import type { TwoFactorState } from "@/lib/actions/account/twofactor-state";
 import {
   confirmTotpEnrollment,
@@ -16,11 +16,6 @@ import {
   regenerateBackupCodes,
   startTotpEnrollment
 } from "@/lib/services/customer-2fa";
-
-async function clientIp(): Promise<string> {
-  const h = await headers();
-  return h.get("x-forwarded-for")?.split(",")[0]?.trim() || h.get("x-real-ip") || "local";
-}
 
 async function currentCustomerOrLogin() {
   const customer = await getSessionCustomer();
@@ -37,9 +32,15 @@ async function verifyOwnPassword(customerId: string, password: string): Promise<
 export async function startTotpAction(_prev: TwoFactorState, formData: FormData): Promise<TwoFactorState> {
   const customer = await currentCustomerOrLogin();
   const password = String(formData.get("password") ?? "");
+  const rateKey = rateLimitKey("totp-start", await getClientIp(), customer.id);
+  if ((await isRateLimited(rateKey)) !== null) {
+    return { error: "Troppi tentativi: riprova tra qualche minuto.", step: "idle" };
+  }
   if (!(await verifyOwnPassword(customer.id, password))) {
+    await registerFailedAttempt(rateKey);
     return { error: "Password errata.", step: "idle" };
   }
+  await clearAttempts(rateKey);
   try {
     const { secret, uri } = await startTotpEnrollment(customer.id);
     const qrDataUrl = await QRCode.toDataURL(uri, { margin: 1, width: 220 });
@@ -54,12 +55,13 @@ export async function startTotpAction(_prev: TwoFactorState, formData: FormData)
 export async function confirmTotpAction(_prev: TwoFactorState, formData: FormData): Promise<TwoFactorState> {
   const customer = await currentCustomerOrLogin();
   const code = String(formData.get("code") ?? "");
-  const rateKey = `totp-confirm:${await clientIp()}:${customer.id}`;
+  const rateKey = rateLimitKey("totp-confirm", await getClientIp(), customer.id);
   if ((await isRateLimited(rateKey)) !== null) {
     return { error: "Troppi tentativi: riprova tra qualche minuto.", step: "pending" };
   }
   try {
     const backupCodes = await confirmTotpEnrollment(customer.id, code);
+    await rotateCustomerSessions(customer.id);
     await clearAttempts(rateKey);
     revalidatePath("/account/sicurezza");
     return { error: null, step: "enabled", backupCodes };
@@ -79,7 +81,7 @@ export async function regenerateBackupCodesAction(
 ): Promise<TwoFactorState> {
   const customer = await currentCustomerOrLogin();
   const code = String(formData.get("code") ?? "");
-  const rateKey = `totp-regen:${await clientIp()}:${customer.id}`;
+  const rateKey = rateLimitKey("totp-regen", await getClientIp(), customer.id);
   if ((await isRateLimited(rateKey)) !== null) {
     return { error: "Troppi tentativi: riprova tra qualche minuto.", step: "idle" };
   }
@@ -102,7 +104,7 @@ export async function disableTotpAction(formData: FormData): Promise<void> {
   const customer = await currentCustomerOrLogin();
   const password = String(formData.get("password") ?? "");
   const code = String(formData.get("code") ?? "");
-  const rateKey = `totp-disable:${await clientIp()}:${customer.id}`;
+  const rateKey = rateLimitKey("totp-disable", await getClientIp(), customer.id);
   if ((await isRateLimited(rateKey)) !== null) {
     redirect(`/account/sicurezza?err=${encodeURIComponent("Troppi tentativi: riprova più tardi.")}`);
   }
@@ -112,6 +114,7 @@ export async function disableTotpAction(formData: FormData): Promise<void> {
   }
   try {
     await disableTotp(customer.id, code);
+    await rotateCustomerSessions(customer.id);
   } catch (error) {
     if (error instanceof DomainError) {
       await registerFailedAttempt(rateKey);

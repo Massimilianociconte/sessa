@@ -47,7 +47,7 @@ export default function AuthShell({
         <div className="auth-brand-inner">
           <Link href="/" className="auth-brand-logo" aria-label="Sessa 1930 — torna allo shop">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/brand/sessa-logo-white.webp" alt="" width={150} height={53} loading="eager" decoding="async" />
+            <img src="/brand/sessa-logo-white.webp" alt="" width={720} height={196} loading="eager" fetchPriority="high" decoding="async" />
           </Link>
           <p className="auth-brand-kicker">{variant === "admin" ? "Gestionale multi-sede" : "Pasticceria dal 1930"}</p>
           <h2 className="auth-brand-claim">{brandClaim}</h2>

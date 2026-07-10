@@ -43,8 +43,8 @@ export default async function AccountPreferencesPage({
         <Link href="/account/profilo" className="btn-secondary">Aggiorna dati</Link>
       </AccountPageIntro>
 
-      {msg && <p className="rounded-xl bg-brilliant/10 px-4 py-3 text-sm font-semibold text-emerald-800">{decodeURIComponent(msg)}</p>}
-      {err && <p className="rounded-xl bg-terracotta/10 px-4 py-3 text-sm font-semibold text-terracotta">{decodeURIComponent(err)}</p>}
+      {msg && <p className="rounded-xl bg-brilliant/10 px-4 py-3 text-sm font-semibold text-emerald-800">{msg}</p>}
+      {err && <p className="rounded-xl bg-terracotta/10 px-4 py-3 text-sm font-semibold text-terracotta">{err}</p>}
 
       <AccountInfoGrid>
         <AccountInfoTile

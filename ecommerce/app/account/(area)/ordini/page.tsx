@@ -6,6 +6,7 @@ import { FULFILLMENT_LABELS, type FulfillmentType } from "@/lib/domain";
 import { requireCustomer } from "@/lib/auth/customer-session";
 import { formatCents } from "@/lib/money";
 import { listCustomerOrders } from "@/lib/services/customer-account";
+import { formatRomeDate } from "@/lib/datetime";
 
 export const metadata = { title: "I miei ordini" };
 
@@ -44,7 +45,7 @@ export default async function AccountOrdersPage({
 
       {err && (
         <p className="rounded-xl bg-terracotta/10 px-4 py-3 text-sm font-semibold text-terracotta">
-          {decodeURIComponent(err)}
+          {err}
         </p>
       )}
 
@@ -93,7 +94,7 @@ export default async function AccountOrdersPage({
                     <Link href={`/account/ordini/${order.code}`} className="account-order-code">
                       {order.code}
                     </Link>
-                    <span>{order.placedAt.toLocaleDateString("it-IT")}</span>
+                    <span>{formatRomeDate(order.placedAt)}</span>
                   </div>
                   <p>
                     {FULFILLMENT_LABELS[order.fulfillmentType as FulfillmentType]}

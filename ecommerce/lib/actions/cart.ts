@@ -2,10 +2,11 @@
 
 import { randomBytes } from "node:crypto";
 import { revalidatePath } from "next/cache";
-import { cookies } from "next/headers";
+import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { DomainError } from "@/lib/domain";
+import { getSessionCustomer } from "@/lib/auth/customer-session";
 import {
   addItemToCart,
   attachDiscount,
@@ -18,8 +19,10 @@ import {
   setItemQty,
   toDiscountLines
 } from "@/lib/services/cart";
-import { checkDiscount } from "@/lib/services/discounts";
+import { evaluateDiscount, loadDiscount } from "@/lib/services/discounts";
+import { prisma } from "@/lib/db";
 import { checkGiftCard, loadGiftCard } from "@/lib/services/giftcards";
+import { enforceCartRateLimit } from "@/lib/services/cart-rate-limit";
 
 async function ensureCartToken(): Promise<string> {
   const store = await cookies();
@@ -56,8 +59,9 @@ export async function addToCartAction(formData: FormData): Promise<void> {
   if (!parsed.success) redirect("/carrello?err=Selezione non valida");
 
   const token = await ensureCartToken();
-  const cart = await getOrCreateCartForLocation(token, parsed.data.locationId);
   try {
+    await enforceCartRateLimit(await headers(), token, "mutation");
+    const cart = await getOrCreateCartForLocation(token, parsed.data.locationId);
     await addItemToCart(cart.id, parsed.data.storeVariantId, parsed.data.qty);
   } catch (error) {
     if (error instanceof DomainError) redirect(`/carrello?err=${encodeURIComponent(error.message)}`);
@@ -72,6 +76,7 @@ const qtySchema = z.object({ itemId: z.string().min(1), qty: z.coerce.number().i
 export async function updateCartItemAction(formData: FormData): Promise<void> {
   const token = await readCartToken();
   if (!token) redirect("/carrello");
+  await enforceCartRateLimit(await headers(), token, "mutation");
   const cart = await getCartByToken(token);
   if (!cart) redirect("/carrello");
   const parsed = qtySchema.safeParse({ itemId: formData.get("itemId"), qty: formData.get("qty") });
@@ -84,6 +89,7 @@ export async function removeCartItemAction(formData: FormData): Promise<void> {
   const token = await readCartToken();
   const itemId = formData.get("itemId");
   if (token && typeof itemId === "string") {
+    await enforceCartRateLimit(await headers(), token, "mutation");
     const cart = await getCartByToken(token);
     if (cart) await removeItem(cart.id, itemId);
   }
@@ -95,14 +101,29 @@ export async function applyDiscountAction(formData: FormData): Promise<void> {
   const token = await readCartToken();
   const code = formData.get("code");
   if (!token || typeof code !== "string" || code.trim() === "") redirect("/carrello");
+  await enforceCartRateLimit(await headers(), token, "discount");
   const cart = await getCartByToken(token);
   if (!cart) redirect("/carrello");
 
   const view = buildCartView(cart);
-  const evaluated = await checkDiscount(code, {
+  const customer = await getSessionCustomer();
+  const discount = await loadDiscount(code);
+  if (!discount) redirect(`/carrello?err=${encodeURIComponent("Codice sconto non valido.")}`);
+  const priorOrders = customer
+    ? await prisma.order.count({ where: { customerId: customer.id, status: { notIn: ["CANCELLED", "REFUNDED"] } } })
+    : 0;
+  const customerRedemptions = customer
+    ? await prisma.discountRedemption.count({
+        where: { discountId: discount.id, customerId: customer.id, reversedAt: null }
+      })
+    : 0;
+  const evaluated = evaluateDiscount(discount, {
     locationId: cart.locationId,
     subtotalCents: view.subtotalCents,
-    lines: toDiscountLines(view.lines)
+    lines: toDiscountLines(view.lines),
+    customerId: customer?.id ?? null,
+    isFirstOrder: customer ? priorOrders === 0 : undefined,
+    customerRedemptions: customer ? customerRedemptions : undefined
   });
   if (!evaluated.ok) redirect(`/carrello?err=${encodeURIComponent(evaluated.reason)}`);
   await attachDiscount(cart.id, evaluated.discount.id);
@@ -124,12 +145,13 @@ export async function applyGiftCardAction(formData: FormData): Promise<void> {
   const token = await readCartToken();
   const code = formData.get("giftCardCode");
   if (!token || typeof code !== "string" || code.trim() === "") redirect("/carrello");
+  await enforceCartRateLimit(await headers(), token, "giftcard");
   const cart = await getCartByToken(token);
   if (!cart) redirect("/carrello");
 
-  const card = await loadGiftCard(code);
-  const check = checkGiftCard(card);
-  if (!check.ok) redirect(`/carrello?err=${encodeURIComponent(check.reason)}`);
+  const [card, customer] = await Promise.all([loadGiftCard(code), getSessionCustomer()]);
+  const check = checkGiftCard(card, customer?.id ?? null);
+  if (!check.ok) redirect(`/carrello?err=${encodeURIComponent("Gift card non valida o non disponibile.")}`);
   await attachGiftCard(cart.id, check.card.code);
   revalidatePath("/carrello");
   redirect("/carrello");

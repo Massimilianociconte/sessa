@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
@@ -22,6 +22,17 @@ function isStandalone(): boolean {
   );
 }
 
+function subscribeToDisplayMode(onStoreChange: () => void): () => void {
+  const media = window.matchMedia("(display-mode: standalone)");
+  queueMicrotask(onStoreChange);
+  media.addEventListener("change", onStoreChange);
+  window.addEventListener("appinstalled", onStoreChange);
+  return () => {
+    media.removeEventListener("change", onStoreChange);
+    window.removeEventListener("appinstalled", onStoreChange);
+  };
+}
+
 /**
  * Bottone "Installa app" del gestionale.
  * - Android/desktop Chromium: usa il prompt nativo (beforeinstallprompt).
@@ -32,32 +43,32 @@ function isStandalone(): boolean {
 export default function AdminPwaInstall() {
   const [prompt, setPrompt] = useState<BeforeInstallPromptEvent | null>(null);
   const [showIosHint, setShowIosHint] = useState(false);
-  const [visible, setVisible] = useState(false);
+  const [installed, setInstalled] = useState(false);
+  const standalone = useSyncExternalStore(subscribeToDisplayMode, isStandalone, () => false);
 
   useEffect(() => {
-    if (isStandalone()) return;
-    setVisible(true);
+    if (standalone) return;
 
     const onPrompt = (event: Event) => {
       event.preventDefault();
       setPrompt(event as BeforeInstallPromptEvent);
     };
     window.addEventListener("beforeinstallprompt", onPrompt);
-    const onInstalled = () => setVisible(false);
+    const onInstalled = () => setInstalled(true);
     window.addEventListener("appinstalled", onInstalled);
     return () => {
       window.removeEventListener("beforeinstallprompt", onPrompt);
       window.removeEventListener("appinstalled", onInstalled);
     };
-  }, []);
+  }, [standalone]);
 
-  if (!visible) return null;
+  if (standalone || installed) return null;
 
   const install = async () => {
     if (prompt) {
       await prompt.prompt();
       const choice = await prompt.userChoice;
-      if (choice.outcome === "accepted") setVisible(false);
+      if (choice.outcome === "accepted") setInstalled(true);
       setPrompt(null);
       return;
     }

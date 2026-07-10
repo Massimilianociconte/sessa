@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { prisma } from "@/lib/db";
 import { memoTtl } from "@/lib/ttl-cache";
 
@@ -158,7 +159,7 @@ export async function listStoreProducts(
   return normalized.occasion ? products.filter((product) => matchesOccasion(product, normalized.occasion)) : products;
 }
 
-export async function getStoreProduct(
+export const getStoreProduct = cache(async function getStoreProduct(
   locationId: string,
   slug: string
 ): Promise<StoreProductView | null> {
@@ -171,7 +172,7 @@ export async function getStoreProduct(
     include: storeProductInclude(locationId)
   });
   return row ? toView(row as RawProduct) : null;
-}
+});
 
 /** Categorie che hanno almeno un prodotto acquistabile nella sede. */
 export async function listStoreCategories(locationId: string) {

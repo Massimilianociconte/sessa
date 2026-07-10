@@ -3,8 +3,8 @@
 Applicazione **standalone** (non tocca il sito vetrina nella cartella padre). Contiene
 lo **storefront** (negozio online) e il **gestionale** `/admin`, una **PWA** installabile.
 
-Stack: **Next.js 16 (App Router, Server Actions)** · **Prisma + SQLite** (dev, con migrazioni tracciate) ·
-**TypeScript strict** · **Tailwind** · **Zod** · pagamenti con astrazione provider.
+Stack: **Next.js 16 (App Router, Server Actions)** · **Prisma + PostgreSQL** ·
+**TypeScript strict** · **Tailwind** · **Zod** · pagamenti manuali e **Stripe Checkout**.
 
 > Base tecnica solida e sicura. L'estetica è volutamente minimale e coerente col brand
 > (colori/font ripresi dal sito): sarà rivista in una fase successiva.
@@ -16,21 +16,31 @@ Stack: **Next.js 16 (App Router, Server Actions)** · **Prisma + SQLite** (dev, 
 ```bash
 cd ecommerce
 npm install
-npm run db:push      # crea lo schema SQLite
-npm run db:seed      # carica catalogo reale Sessa + admin + impostazioni
+npm run db:bootstrap # solo su un database PostgreSQL nuovo e vuoto
+npm run db:seed      # carica catalogo, sedi e impostazioni iniziali
 npm run dev          # http://localhost:3001
 ```
 
+Prima dell'avvio, copiare `.env.example` in `.env` e configurare un database di
+sviluppo dedicato. `DATABASE_URL` è la connessione runtime al transaction pooler;
+`DIRECT_URL` è la connessione diretta/session pooler riservata alle migrazioni.
+Non puntare i comandi locali al database di produzione.
+
 - Storefront: `http://localhost:3001`
 - Gestionale: `http://localhost:3001/admin`
-- Credenziali admin iniziali: **admin@sessa1930.com** / valore di `SEED_ADMIN_PASSWORD`
-  (fallback locale: **sessa1930!admin**) — cambiale subito da _Impostazioni → Cambia password_.
+- Primo admin: usare `/admin/setup` con un `ADMIN_SETUP_TOKEN` forte oppure
+  valorizzare `SEED_ADMIN_PASSWORD` prima del seed. Non usare credenziali fallback
+  in produzione.
 
 Verifica dei flussi critici (ordini, stock, transizioni):
 
 ```bash
-npm run build              # type-check + build produzione
-npx tsx prisma/verify-flow.ts   # 45 controlli di sicurezza end-to-end
+npm run lint
+npx tsc --noEmit --pretty false
+npm run test:security
+npm run build
+# Solo contro un database di test sacrificabile:
+npx tsx prisma/verify-flow.ts
 ```
 
 ---
@@ -39,8 +49,9 @@ npx tsx prisma/verify-flow.ts   # 45 controlli di sicurezza end-to-end
 
 ```
 app/
-  page.tsx                catalogo (filtro per categoria)
-  prodotti/[slug]/        pagina prodotto con selezione variante
+  page.tsx                selezione sede
+  sede/[slug]/            catalogo per sede e filtri
+  sede/[slug]/prodotti/   pagina prodotto con selezione variante
   carrello/               carrello server-side + codice sconto
   checkout/               checkout (useActionState)
   ordine/[code]/          tracking pubblico (protetto da token)
@@ -56,11 +67,11 @@ lib/
   auth/                   scrypt, sessioni (token hashato a DB)
   services/               logica di dominio (catalogo, carrello,
                           checkout, ordini, magazzino, sconti, spedizioni)
-  payments/               astrazione provider (manual attivo, stripe predisposto)
+  payments/               provider manuale + Stripe Checkout e rimborsi
   actions/                server actions (storefront + admin)
 prisma/
   schema.prisma           modello dati
-  migrations/             baseline SQL tracciata
+  migrations-postgres/    bootstrap + migrazioni additive PostgreSQL
   seed.ts                 catalogo reale Sessa
   verify-flow.ts          test d'integrazione di sicurezza
 public/
@@ -97,7 +108,7 @@ Principi:
 | **Oversell** (vendere più dello stock) | Scarico con update condizionale `stockQty >= qty`; se non tocca righe → rollback dell'intera transazione. |
 | **Sconto usato oltre il limite** | Consumo atomico: `usedCount < maxUses` in update condizionale. Sconto e prezzi **rivalidati dal DB** al checkout, mai fidandosi del client. |
 | **Prezzi manomessi dal client** | Il client non invia prezzi: totali ricalcolati server-side dalle varianti. |
-| **Dati carta** | Nessun dato sensibile salvato: provider "manual" (bonifico / ritiro). Stripe predisposto via webhook. |
+| **Dati carta** | Nessun dato carta salvato: Stripe Checkout gestisce l'acquisizione; webhook firmato e tentativi idempotenti riconciliano l'ordine. |
 | **Password admin** | Hash **scrypt** con sale per-utente; mai in chiaro. Al cambio password **tutte** le sessioni vengono invalidate (rotazione), resta attiva solo quella corrente. |
 | **Brute-force login** | Throttle IP+email: dopo 8 tentativi falliti in 15 min, blocco di 15 min (non blocca l'admin legittimo da un altro IP). |
 | **Sessioni** | Token 32 byte in cookie `httpOnly`+`sameSite=lax` (+`secure` in prod); nel DB solo l'**hash SHA-256**. Scadenza 7 giorni, pruning automatico. |
@@ -108,11 +119,14 @@ Principi:
 | **Tracciabilità** | `AuditLog` su ogni scrittura admin + `OrderEvent` sulla storia di ogni ordine. |
 | **Integrità referenziale** | Prodotti/varianti/sconti presenti in ordini storici non eliminabili (si archiviano/disattivano). |
 
-## Persistenza & sincronizzazione gestionale → storefront
+## Cache & sincronizzazione gestionale → storefront
 
-- Le pagine storefront sono `dynamic = "force-dynamic"`: leggono sempre lo stato attuale.
-- Ogni azione admin che cambia il catalogo chiama `revalidatePath("/", "layout")`:
-  **le modifiche dal gestionale sono immediatamente visibili sul negozio**.
+- Home, cataloghi e pagine prodotto hanno una cache breve (`revalidate = 30`);
+  le query di catalogo hanno lo stesso TTL.
+- I filtri basati su query string possono essere renderizzati dinamicamente.
+  Carrello, checkout, ordine, account, admin e API sono privati e `no-store`.
+- Le azioni admin che cambiano il catalogo invalidano le route storefront coinvolte;
+  il TTL limita comunque la propagazione massima a circa 30 secondi.
 - Il seed è **idempotente** (upsert su slug/SKU/codice): rilanciabile senza duplicati.
 - Il seed accetta `SEED_ADMIN_PASSWORD` e `SEED_CUSTOMER_PASSWORD`; in produzione
   fallisce se non sono configurate, evitando credenziali demo involontarie.
@@ -133,17 +147,14 @@ robots e metadati assoluti).
 
 ## Passare in produzione
 
-1. **Database**: cambiare `datasource` in `schema.prisma` a `postgresql` e impostare
-   `DATABASE_URL`. Il codice è già scritto con guardie transazionali adatte a Postgres.
-2. **`SESSION_SECRET`**: valorizzare con stringa casuale lunga.
-3. **`ADMIN_SETUP_TOKEN`**: token forte per creare il primo utente gestionale in produzione.
-4. **SMTP**: configurare `SMTP_HOST`, `SMTP_PORT`, `SMTP_SECURE`, `SMTP_USER`,
-   `SMTP_PASS`, `SMTP_FROM` per rendere effettivi verifica email, reset password e avvisi sicurezza.
-5. **Migrazione Netlify**: `netlify.toml` esegue `npm run db:deploy` prima del build,
-   applicando la migrazione Postgres additiva per account/sessioni/email.
-6. **Pagamenti Stripe**: seguire le istruzioni in `lib/payments/stripe.ts`
-   (installare `stripe`, implementare `init()`, aggiungere il webhook, impostare
-   `payments.provider = "stripe"` dalle impostazioni).
-7. **Immagini prodotto**: sono copiate in `public/images/products/`. In produzione si
-   possono caricare da gestionale (campo URL/percorso già presente) o servire da CDN.
-```
+1. Configurare `DATABASE_URL` sul transaction pooler e `DIRECT_URL` sulla
+   connessione diretta/session pooler. Su un DB esistente usare `npm run db:deploy`;
+   `db:bootstrap` è riservato a un database nuovo e vuoto.
+2. Valorizzare `SESSION_SECRET`, `ADMIN_SETUP_TOKEN`, `NEXT_PUBLIC_SITE_URL` e le
+   credenziali SMTP in Netlify.
+3. Per Stripe, configurare `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` e il webhook
+   `/api/webhooks/stripe`; senza chiave resta disponibile il pagamento manuale.
+4. Eseguire preview e smoke test con `npm run deploy:preview`. Pubblicare solo con
+   il comando esplicito `npm run deploy:prod`.
+
+Il runbook completo è in [`docs/DEPLOY_NETLIFY.md`](docs/DEPLOY_NETLIFY.md).

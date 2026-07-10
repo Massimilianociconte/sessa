@@ -82,8 +82,8 @@ export default async function AccountSecurityPage({
         description="Passkey, verifica in due passaggi, dispositivi connessi e controllo dei tuoi dati: tutto in una pagina."
       />
 
-      {msg && <p className="rounded-xl bg-brilliant/10 px-4 py-3 text-sm font-semibold text-emerald-800">{decodeURIComponent(msg)}</p>}
-      {err && <p className="rounded-xl bg-terracotta/10 px-4 py-3 text-sm font-semibold text-terracotta">{decodeURIComponent(err)}</p>}
+      {msg && <p className="rounded-xl bg-brilliant/10 px-4 py-3 text-sm font-semibold text-emerald-800">{msg}</p>}
+      {err && <p className="rounded-xl bg-terracotta/10 px-4 py-3 text-sm font-semibold text-terracotta">{err}</p>}
 
       <AccountInfoGrid>
         <AccountInfoTile
@@ -249,14 +249,26 @@ export default async function AccountSecurityPage({
         description="Scarica una copia completa dei tuoi dati o elimina definitivamente l'account. Gli ordini restano conservati in forma anonima per gli obblighi fiscali."
       >
         <div className="space-y-6">
-          <div>
-            <a href="/account/esporta-dati" className="btn-secondary" download>
+          <form action="/account/esporta-dati" method="post" className="space-y-3">
+            <div className="max-w-sm">
+              <label htmlFor="exportPassword" className="label-field">Password attuale</label>
+              <input
+                id="exportPassword"
+                name="password"
+                type="password"
+                required
+                maxLength={128}
+                autoComplete="current-password"
+                className="input-field"
+              />
+            </div>
+            <button type="submit" className="btn-secondary">
               Scarica i miei dati (JSON)
-            </a>
+            </button>
             <p className="mt-2 text-xs text-ink/45">
-              Include profilo, indirizzi, storico ordini, gift card, sconti usati e referral.
+              Include profilo, indirizzi, storico ordini, gift card, sconti, referral e metadati di sicurezza.
             </p>
-          </div>
+          </form>
           <form action={deleteAccountAction} className="space-y-3 rounded-2xl border border-terracotta/30 bg-terracotta/5 p-4">
             <p className="text-sm font-semibold text-terracotta">Elimina account</p>
             <p className="text-xs leading-5 text-ink/60">

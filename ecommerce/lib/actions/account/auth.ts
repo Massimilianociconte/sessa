@@ -1,12 +1,12 @@
 "use server";
 
-import { cookies, headers } from "next/headers";
+import { cookies } from "next/headers";
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { DomainError } from "@/lib/domain";
 import { linkReferralOnSignup, REFERRAL_COOKIE } from "@/lib/services/referral";
-import { verifyPassword } from "@/lib/auth/password";
+import { verifyPasswordOrDummy } from "@/lib/auth/password";
 import {
   createCustomerSession,
   destroyAllCustomerSessions,
@@ -16,20 +16,28 @@ import {
   getSessionCustomer,
   pruneExpiredCustomerSessions
 } from "@/lib/auth/customer-session";
-import { clearAttempts, isRateLimited, registerFailedAttempt } from "@/lib/auth/rate-limit";
+import {
+  blockedForAny,
+  clearAttempts,
+  clearAttemptKeys,
+  isRateLimited,
+  registerFailedAttempt,
+  registerFailedAttempts
+} from "@/lib/auth/rate-limit";
 import { clearCustomerDisplayNameCookie, setCustomerDisplayNameCookie } from "@/lib/auth/display-name";
 import {
+  beginCustomerRegistrationRequest,
   consumeResetToken,
-  createResetToken,
-  registerCustomer
+  createResetToken
 } from "@/lib/services/customer-account";
-import { sendVerificationEmail } from "@/lib/services/customer-verification";
 import { verifySecondFactor } from "@/lib/services/customer-2fa";
 import { enqueueEmail } from "@/lib/services/email";
 import { SITE_URL } from "@/lib/site";
+import { getClientIp, rateLimitKey } from "@/lib/auth/request-context";
+import { safeNextPath } from "@/lib/auth/redirects";
 import {
   customerLoginSchema,
-  customerRegisterSchema,
+  customerRegistrationRequestSchema,
   resetRequestSchema,
   resetSchema
 } from "@/lib/validation";
@@ -40,11 +48,6 @@ export type AuthState = {
   needsTotp?: boolean;
 };
 
-async function clientIp(): Promise<string> {
-  const h = await headers();
-  return h.get("x-forwarded-for")?.split(",")[0]?.trim() || h.get("x-real-ip") || "local";
-}
-
 function describeSessionForEmail(session: { ipAddress: string | null; userAgent: string | null }): string {
   return [
     session.ipAddress ? `IP: ${session.ipAddress}` : null,
@@ -53,39 +56,51 @@ function describeSessionForEmail(session: { ipAddress: string | null; userAgent:
 }
 
 export async function registerCustomerAction(_prev: AuthState, formData: FormData): Promise<AuthState> {
-  const parsed = customerRegisterSchema.safeParse({
+  const parsed = customerRegistrationRequestSchema.safeParse({
     email: formData.get("email"),
-    password: formData.get("password"),
     firstName: formData.get("firstName"),
     lastName: formData.get("lastName"),
-    phone: formData.get("phone") ?? "",
-    marketingOptIn: formData.get("marketingOptIn") === "on"
+    phone: formData.get("phone") ?? ""
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Dati non validi." };
   }
-  let customerId: string;
+
+  const ip = await getClientIp();
+  const throttleKeys = [
+    rateLimitKey("registration-ip", ip),
+    rateLimitKey("registration-email", parsed.data.email)
+  ];
+  if ((await blockedForAny(throttleKeys)) !== null) {
+    return { error: "Troppe richieste. Riprova tra qualche minuto." };
+  }
+  await registerFailedAttempts(throttleKeys);
+
   try {
-    customerId = await registerCustomer(parsed.data);
+    // Nessuna password viene accettata prima della prova di possesso email.
+    const request = await beginCustomerRegistrationRequest(parsed.data);
+    const token = await createResetToken(request.email);
+    if (!token) return { error: "Impossibile avviare la registrazione. Riprova." };
+    const link = `${SITE_URL}/account/reset?token=${token}&activate=1`;
+    const delivery = await enqueueEmail({
+      toEmail: request.email,
+      subject: request.alreadyRegistered
+        ? "Accesso al tuo account Sessa 1930"
+        : "Completa il tuo account Sessa 1930",
+      body: request.alreadyRegistered
+        ? `Ciao ${request.firstName},\n\nè stata richiesta una registrazione con questa email. Il tuo account esiste già: usa il link seguente per scegliere una nuova password in modo sicuro.\n${link}\n\nSe non sei stato tu, ignora questa email.`
+        : `Ciao ${request.firstName},\n\ncompleta la registrazione scegliendo la password dal link seguente (valido 1 ora):\n${link}\n\nLa password viene scelta solo dopo la verifica dell'email, così nessuno può reclamare il tuo storico ordini.`,
+      type: "PASSWORD_RESET"
+    });
+    if (delivery.status === "FAILED") {
+      return { error: "Non siamo riusciti a inviare il link. Riprova più tardi." };
+    }
+    const dev = process.env.NODE_ENV !== "production" ? `&dev=${encodeURIComponent(link)}` : "";
+    redirect(`/account/login?registration=1${dev}`);
   } catch (error) {
     if (error instanceof DomainError) return { error: error.message };
     throw error;
   }
-
-  // Collega un eventuale referral (cookie impostato da /r/[code]) e lo consuma.
-  const cookieStore = await cookies();
-  const refCode = cookieStore.get(REFERRAL_COOKIE)?.value;
-  if (refCode) {
-    await linkReferralOnSignup(customerId, parsed.data.email, refCode);
-    cookieStore.delete(REFERRAL_COOKIE);
-  }
-
-  // Verifica indirizzo: parte subito, ma la registrazione non fallisce se l'invio ha problemi.
-  await sendVerificationEmail(customerId).catch(() => null);
-
-  await createCustomerSession(customerId);
-  await setCustomerDisplayNameCookie(parsed.data.firstName);
-  redirect("/account");
 }
 
 export async function loginCustomerAction(_prev: AuthState, formData: FormData): Promise<AuthState> {
@@ -95,17 +110,27 @@ export async function loginCustomerAction(_prev: AuthState, formData: FormData):
   });
   if (!parsed.success) return { error: "Inserisci email e password." };
 
-  const rateKey = `cust:${await clientIp()}:${parsed.data.email}`;
-  const blockedMs = await isRateLimited(rateKey);
+  const ip = await getClientIp();
+  const rateKeys = [
+    rateLimitKey("customer-login-ip", ip),
+    rateLimitKey("customer-login-account", parsed.data.email)
+  ];
+  const blockedMs = await blockedForAny(rateKeys);
   if (blockedMs !== null) {
     const minutes = Math.ceil(blockedMs / 60000);
     return { error: `Troppi tentativi. Riprova tra ${minutes} minut${minutes === 1 ? "o" : "i"}.` };
   }
 
   const customer = await prisma.customer.findUnique({ where: { email: parsed.data.email } });
-  if (!customer || !customer.passwordHash || !verifyPassword(parsed.data.password, customer.passwordHash)) {
-    await registerFailedAttempt(rateKey);
+  const passwordValid = verifyPasswordOrDummy(parsed.data.password, customer?.passwordHash);
+  if (!customer || customer.anonymizedAt || !customer.passwordHash || !passwordValid) {
+    await registerFailedAttempts(rateKeys);
     return { error: "Credenziali non valide." };
+  }
+  if (!customer.emailVerified) {
+    return {
+      error: "Conferma prima l'email. Se il link è scaduto, usa «Password dimenticata?» per riceverne uno nuovo."
+    };
   }
 
   // Secondo fattore: se attivo, la password da sola non basta.
@@ -115,7 +140,7 @@ export async function loginCustomerAction(_prev: AuthState, formData: FormData):
       // Password corretta → la form mostra il campo codice (nessuna sessione creata).
       return { error: null, needsTotp: true };
     }
-    const totpKey = `cust-totp:${await clientIp()}:${customer.id}`;
+    const totpKey = rateLimitKey("customer-totp", ip, customer.id);
     const totpBlocked = await isRateLimited(totpKey);
     if (totpBlocked !== null) {
       const minutes = Math.ceil(totpBlocked / 60000);
@@ -128,7 +153,7 @@ export async function loginCustomerAction(_prev: AuthState, formData: FormData):
     await clearAttempts(totpKey);
   }
 
-  await clearAttempts(rateKey);
+  await clearAttemptKeys(rateKeys);
   await pruneExpiredCustomerSessions();
   const session = await createCustomerSession(customer.id);
   await setCustomerDisplayNameCookie(customer.firstName);
@@ -137,8 +162,8 @@ export async function loginCustomerAction(_prev: AuthState, formData: FormData):
     subject: "Nuovo accesso al tuo account Sessa 1930",
     type: "SECURITY_LOGIN",
     body: `Ciao ${customer.firstName},\n\nabbiamo registrato un nuovo accesso al tuo account Sessa 1930.\n${describeSessionForEmail(session)}\n\nSe sei stato tu, non devi fare nulla. Se non riconosci questo accesso, entra nella sezione Sicurezza e chiudi le sessioni attive.`
-  });
-  redirect("/account");
+  }).catch(() => undefined);
+  redirect(safeNextPath(formData.get("next"), "/account", "/account"));
 }
 
 export async function logoutCustomerAction(): Promise<void> {
@@ -185,9 +210,13 @@ export async function requestResetAction(formData: FormData): Promise<void> {
   if (!parsed.success) redirect("/account/recupera?err=Email non valida");
 
   const email = parsed.data.email.toLowerCase();
-  const resetKey = `cust-reset:${await clientIp()}:${email}`;
-  if ((await isRateLimited(resetKey)) !== null) redirect("/account/recupera?sent=1");
-  await registerFailedAttempt(resetKey);
+  const ip = await getClientIp();
+  const resetKeys = [
+    rateLimitKey("customer-reset-ip", ip),
+    rateLimitKey("customer-reset-account", email)
+  ];
+  if ((await blockedForAny(resetKeys)) !== null) redirect("/account/recupera?sent=1");
+  await registerFailedAttempts(resetKeys);
 
   const token = await createResetToken(email);
   if (token) {
@@ -197,7 +226,7 @@ export async function requestResetAction(formData: FormData): Promise<void> {
       subject: "Reimposta la tua password — Sessa 1930",
       body: `Per reimpostare la password apri questo link (valido 1 ora):\n${link}`,
       type: "PASSWORD_RESET"
-    });
+    }).catch(() => undefined);
     if (process.env.NODE_ENV !== "production") {
       redirect(`/account/recupera?sent=1&dev=${encodeURIComponent(link)}`);
     }
@@ -212,7 +241,19 @@ export async function resetPasswordAction(_prev: AuthState, formData: FormData):
   });
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dati non validi." };
   try {
-    await consumeResetToken(parsed.data.token, parsed.data.password);
+    const result = await consumeResetToken(parsed.data.token, parsed.data.password);
+    const cookieStore = await cookies();
+    const refCode = cookieStore.get(REFERRAL_COOKIE)?.value;
+    if (refCode) {
+      if (result.activated) {
+        const customer = await prisma.customer.findUnique({
+          where: { id: result.customerId },
+          select: { email: true }
+        });
+        if (customer) await linkReferralOnSignup(result.customerId, customer.email, refCode);
+      }
+      cookieStore.delete(REFERRAL_COOKIE);
+    }
   } catch (error) {
     if (error instanceof DomainError) return { error: error.message };
     throw error;

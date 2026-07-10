@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import SubmitButton from "@/components/SubmitButton";
 import AnalyticsBeacon from "@/components/storefront/AnalyticsBeacon";
+import CartRefreshBeacon from "@/components/storefront/CartRefreshBeacon";
 import Footer from "@/components/storefront/Footer";
 import Header from "@/components/storefront/Header";
 import { retryOrderPaymentAction } from "@/lib/actions/order-payment";
@@ -86,6 +88,7 @@ export default async function OrderTrackingPage({
   return (
     <>
       <Header />
+      <CartRefreshBeacon />
       {order.paymentStatus === "PAID" && (
         <AnalyticsBeacon
           event="purchase"
@@ -133,9 +136,9 @@ export default async function OrderTrackingPage({
                   Importo da pagare: <strong>{formatCents(amountDueCents)}</strong>. Il nuovo tentativo non duplica l'ordine.
                 </p>
               </div>
-              <button type="submit" className="btn-primary shrink-0">
+              <SubmitButton pendingLabel="Apro Stripe…" className="btn-primary shrink-0">
                 Riprova pagamento
-              </button>
+              </SubmitButton>
             </div>
           </form>
         )}

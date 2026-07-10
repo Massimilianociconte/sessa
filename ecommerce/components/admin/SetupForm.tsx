@@ -28,19 +28,19 @@ export default function SetupForm({ requiresToken }: { requiresToken: boolean })
       )}
       <div>
         <label htmlFor="name" className="label-field">Nome e cognome</label>
-        <input id="name" name="name" required autoComplete="name" className="input-field" />
+        <input id="name" name="name" required maxLength={120} autoComplete="name" className="input-field" />
       </div>
       <div>
         <label htmlFor="email" className="label-field">Email</label>
-        <input id="email" name="email" type="email" required autoComplete="email" className="input-field" />
+        <input id="email" name="email" type="email" required maxLength={254} autoComplete="email" className="input-field" />
       </div>
       <div>
         <label htmlFor="password" className="label-field">Password (min 12 caratteri)</label>
-        <input id="password" name="password" type="password" required minLength={12} autoComplete="new-password" className="input-field" />
+        <input id="password" name="password" type="password" required minLength={12} maxLength={128} autoComplete="new-password" className="input-field" />
       </div>
       <div>
         <label htmlFor="confirmPassword" className="label-field">Conferma password</label>
-        <input id="confirmPassword" name="confirmPassword" type="password" required minLength={12} autoComplete="new-password" className="input-field" />
+        <input id="confirmPassword" name="confirmPassword" type="password" required minLength={12} maxLength={128} autoComplete="new-password" className="input-field" />
       </div>
       {state.error && (
         <p className="rounded-xl bg-terracotta/10 px-4 py-3 text-sm font-semibold text-terracotta">{state.error}</p>

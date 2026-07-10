@@ -3,26 +3,28 @@ import { redirect } from "next/navigation";
 import AdminPwaInstall from "@/components/admin/AdminPwaInstall";
 import { logoutAction } from "@/lib/actions/auth";
 import { getSessionUser } from "@/lib/auth/session";
+import { hasAdminCapability, type AdminCapability } from "@/lib/auth/admin-authorization";
 
 export const dynamic = "force-dynamic";
 
-const NAV = [
+const NAV: Array<{ href: string; label: string; capability?: AdminCapability }> = [
   { href: "/admin", label: "Dashboard" },
   { href: "/admin/ordini", label: "Ordini" },
-  { href: "/admin/prodotti", label: "Prodotti" },
-  { href: "/admin/categorie", label: "Categorie" },
-  { href: "/admin/sedi", label: "Sedi" },
+  { href: "/admin/prodotti", label: "Prodotti", capability: "catalog:manage" },
+  { href: "/admin/categorie", label: "Categorie", capability: "catalog:manage" },
+  { href: "/admin/sedi", label: "Sedi", capability: "catalog:manage" },
   { href: "/admin/magazzino", label: "Magazzino" },
-  { href: "/admin/sconti", label: "Sconti" },
-  { href: "/admin/gift-card", label: "Gift card" },
-  { href: "/admin/referral", label: "Referral" },
-  { href: "/admin/clienti", label: "Clienti" },
-  { href: "/admin/impostazioni", label: "Impostazioni" }
+  { href: "/admin/sconti", label: "Sconti", capability: "promotions:manage" },
+  { href: "/admin/gift-card", label: "Gift card", capability: "promotions:manage" },
+  { href: "/admin/referral", label: "Referral", capability: "customers:manage" },
+  { href: "/admin/clienti", label: "Clienti", capability: "customers:manage" },
+  { href: "/admin/impostazioni", label: "Profilo e impostazioni" }
 ];
 
 export default async function ProtectedAdminLayout({ children }: { children: React.ReactNode }) {
   const user = await getSessionUser();
   if (!user) redirect("/admin/login");
+  const nav = NAV.filter((item) => !item.capability || hasAdminCapability(user.role, item.capability));
 
   return (
     <div className="flex min-h-screen bg-cream">
@@ -34,7 +36,7 @@ export default async function ProtectedAdminLayout({ children }: { children: Rea
           </span>
         </Link>
         <nav className="mt-8 flex flex-1 flex-col gap-1">
-          {NAV.map((item) => (
+          {nav.map((item) => (
             <Link
               key={item.href}
               href={item.href}
@@ -60,7 +62,7 @@ export default async function ProtectedAdminLayout({ children }: { children: Rea
 
       <div className="min-w-0 flex-1">
         <header className="admin-mobile-nav sticky top-0 z-30 flex items-center gap-3 overflow-x-auto border-b border-ink/10 bg-white/90 px-4 py-3 backdrop-blur md:hidden">
-          {NAV.map((item) => (
+          {nav.map((item) => (
             <Link
               key={item.href}
               href={item.href}

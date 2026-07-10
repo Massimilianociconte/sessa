@@ -1,5 +1,6 @@
 import { cookies } from "next/headers";
-import { buildCartView, CART_COOKIE, getCartByToken, type CartView } from "@/lib/services/cart";
+import { buildCartViewForCustomer, CART_COOKIE, getCartByToken, type CartView } from "@/lib/services/cart";
+import { getSessionCustomer } from "@/lib/auth/customer-session";
 
 /** Carrello della richiesta corrente (solo lettura, per RSC). */
 export async function getCurrentCartView(): Promise<CartView | null> {
@@ -8,5 +9,6 @@ export async function getCurrentCartView(): Promise<CartView | null> {
   if (!token) return null;
   const cart = await getCartByToken(token);
   if (!cart) return null;
-  return buildCartView(cart);
+  const customer = await getSessionCustomer();
+  return buildCartViewForCustomer(cart, customer?.id);
 }

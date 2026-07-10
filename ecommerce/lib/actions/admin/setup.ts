@@ -1,14 +1,14 @@
 "use server";
 
 import { timingSafeEqual } from "node:crypto";
-import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { audit } from "@/lib/audit";
 import { hashPassword } from "@/lib/auth/password";
-import { isRateLimited, registerFailedAttempt } from "@/lib/auth/rate-limit";
+import { clearAttempts, isRateLimited, registerFailedAttempt } from "@/lib/auth/rate-limit";
 import { createSession } from "@/lib/auth/session";
 import type { SetupState } from "@/lib/actions/admin/setup-state";
+import { getClientIp, getRequestSecurityContext, rateLimitKey } from "@/lib/auth/request-context";
 
 function safeEqual(a: string, b: string): boolean {
   const bufA = Buffer.from(a);
@@ -24,9 +24,8 @@ function safeEqual(a: string, b: string): boolean {
  *   (unique su email + doppio count dentro la transazione contro le race).
  */
 export async function setupFirstAdminAction(_prev: SetupState, formData: FormData): Promise<SetupState> {
-  const h = await headers();
-  const ip = h.get("x-forwarded-for")?.split(",")[0]?.trim() || h.get("x-real-ip") || "local";
-  const rateKey = `admin-setup:${ip}`;
+  const ip = await getClientIp();
+  const rateKey = rateLimitKey("admin-setup", ip);
   if ((await isRateLimited(rateKey)) !== null) {
     return { error: "Troppi tentativi. Riprova tra qualche minuto." };
   }
@@ -53,9 +52,11 @@ export async function setupFirstAdminAction(_prev: SetupState, formData: FormDat
   const password = String(formData.get("password") ?? "");
   const confirm = String(formData.get("confirmPassword") ?? "");
 
-  if (name.length < 2) return { error: "Inserisci il nome." };
+  if (name.length < 2 || name.length > 120) return { error: "Inserisci un nome valido." };
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return { error: "Email non valida." };
-  if (password.length < 12) return { error: "La password deve avere almeno 12 caratteri." };
+  if (password.length < 12 || password.length > 128) {
+    return { error: "La password deve avere tra 12 e 128 caratteri." };
+  }
   if (password !== confirm) return { error: "Le password non coincidono." };
 
   let userId: string;
@@ -68,7 +69,7 @@ export async function setupFirstAdminAction(_prev: SetupState, formData: FormDat
         data: { name, email, passwordHash: hashPassword(password), role: "OWNER" }
       });
       return created.id;
-    });
+    }, { isolationLevel: "Serializable" });
   } catch (error) {
     if (error instanceof Error && error.message === "ALREADY_CONFIGURED") {
       return { error: "Il gestionale è già configurato: accedi dalla pagina di login." };
@@ -78,7 +79,9 @@ export async function setupFirstAdminAction(_prev: SetupState, formData: FormDat
     return { error: "Creazione non riuscita. Riprova." };
   }
 
+  await clearAttempts(rateKey);
   await audit(email, "auth.setup_owner", "AdminUser", userId, { ip });
-  await createSession(userId, h.get("user-agent") ?? undefined);
+  const context = await getRequestSecurityContext();
+  await createSession(userId, context.userAgent ?? undefined);
   redirect("/admin");
 }

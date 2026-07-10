@@ -6,7 +6,7 @@
  *  - Asset statici: stale-while-revalidate.
  *  - Richieste non GET: mai intercettate.
  */
-const VERSION = "sessa-shop-v5";
+const VERSION = "sessa-shop-v6";
 const OFFLINE_URL = "/offline.html";
 const PRECACHE = [
   OFFLINE_URL,
@@ -27,14 +27,25 @@ function canCacheNavigation(pathname) {
 }
 
 function isCacheableResponse(response) {
-  return response && response.ok && (response.type === "basic" || response.type === "default");
+  if (!response || !response.ok || (response.type !== "basic" && response.type !== "default")) {
+    return false;
+  }
+  const cacheControl = (response.headers.get("cache-control") || "").toLowerCase();
+  return !cacheControl.includes("no-store") && !cacheControl.includes("no-cache") && !cacheControl.includes("private");
 }
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
     caches
       .open(VERSION)
-      .then((cache) => cache.addAll(PRECACHE))
+      .then(async (cache) => {
+        // La pagina offline è il requisito minimo. Icone/manifest sono best-effort:
+        // un singolo asset temporaneamente assente non deve invalidare l'intero SW.
+        await cache.add(OFFLINE_URL);
+        await Promise.allSettled(PRECACHE.filter((url) => url !== OFFLINE_URL).map((url) => cache.add(url)));
+      })
+      // Rollout una-tantum di v6: sostituisce subito v5, che poteva conservare
+      // HTML pubblico marcato private/no-store. Rimuovere su v7 e usare la UI update.
       .then(() => self.skipWaiting())
   );
 });
@@ -62,19 +73,27 @@ self.addEventListener("fetch", (event) => {
   // Navigazioni: rete prima. Cache solo per catalogo pubblico.
   if (request.mode === "navigate") {
     event.respondWith(
-      fetch(request)
-        .then((response) => {
+      (async () => {
+        try {
+          const response = await fetch(request);
           if (canCacheNavigation(url.pathname) && isCacheableResponse(response)) {
-            const copy = response.clone();
-            caches.open(VERSION).then((cache) => cache.put(request, copy));
+            const cache = await caches.open(VERSION);
+            await cache.put(request, response.clone());
           }
           return response;
-        })
-        .catch(() =>
-          canCacheNavigation(url.pathname)
-            ? caches.match(request).then((cached) => cached ?? caches.match(OFFLINE_URL))
-            : caches.match(OFFLINE_URL)
-        )
+        } catch {
+          const fallback = canCacheNavigation(url.pathname)
+            ? (await caches.match(request)) ?? caches.match(OFFLINE_URL)
+            : caches.match(OFFLINE_URL);
+          return (
+            (await fallback) ??
+            new Response("Sei offline. Riprova quando la connessione torna disponibile.", {
+              status: 503,
+              headers: { "content-type": "text/plain; charset=utf-8" }
+            })
+          );
+        }
+      })()
     );
     return;
   }
@@ -91,19 +110,16 @@ self.addEventListener("fetch", (event) => {
     url.pathname === "/manifest.webmanifest" ||
     url.pathname === "/admin.webmanifest";
   if (isStatic) {
+    const fresh = fetch(request).then(async (response) => {
+      if (isCacheableResponse(response)) {
+        const cache = await caches.open(VERSION);
+        await cache.put(request, response.clone());
+      }
+      return response;
+    });
+    event.waitUntil(fresh.then(() => undefined).catch(() => undefined));
     event.respondWith(
-      caches.match(request).then((cached) => {
-        const fresh = fetch(request)
-          .then((response) => {
-            if (isCacheableResponse(response)) {
-              const copy = response.clone();
-              caches.open(VERSION).then((cache) => cache.put(request, copy));
-            }
-            return response;
-          })
-          .catch(() => cached);
-        return cached ?? fresh;
-      })
+      caches.match(request).then((cached) => cached ?? fresh)
     );
   }
 });

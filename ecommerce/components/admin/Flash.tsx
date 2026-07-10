@@ -5,12 +5,12 @@ export default function Flash({ msg, err }: { msg?: string; err?: string }) {
     <div className="mb-4 space-y-2">
       {msg && (
         <p className="rounded-xl bg-brilliant/10 px-4 py-3 text-sm font-semibold text-emerald-800">
-          {decodeURIComponent(msg)}
+          {msg}
         </p>
       )}
       {err && (
         <p className="rounded-xl bg-terracotta/10 px-4 py-3 text-sm font-semibold text-terracotta">
-          {decodeURIComponent(err)}
+          {err}
         </p>
       )}
     </div>

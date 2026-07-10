@@ -96,7 +96,14 @@ export default async function StoreProductPage({ params }: Props) {
             <div className="tile-frame flex aspect-square items-center justify-center">
               {product.image ? (
                 // eslint-disable-next-line @next/next/no-img-element
-                <img src={product.image} alt={product.name} className="max-h-[440px] object-contain" />
+                <img
+                  src={product.image}
+                  alt={product.name}
+                  loading="eager"
+                  fetchPriority="high"
+                  decoding="async"
+                  className="max-h-[440px] object-contain"
+                />
               ) : (
                 <span className="font-script text-6xl text-terracotta/40">Sessa</span>
               )}

@@ -11,6 +11,7 @@ import { requireCustomer } from "@/lib/auth/customer-session";
 import { DISCOUNT_SCOPE_LABELS, type DiscountScope } from "@/lib/domain";
 import { formatCents } from "@/lib/money";
 import { listCustomerDiscountCodes } from "@/lib/services/customer-account";
+import { formatRomeDate } from "@/lib/datetime";
 
 export const metadata = { title: "Codici sconto" };
 
@@ -119,8 +120,8 @@ export default async function AccountDiscountCodesPage() {
                       <span key={part}>{part}</span>
                     ))}
                     {code.minSubtotalCents !== null && <span>Minimo ordine {formatCents(code.minSubtotalCents)}</span>}
-                    {code.startsAt && <span>Dal {code.startsAt.toLocaleDateString("it-IT")}</span>}
-                    {code.endsAt && <span>Scade il {code.endsAt.toLocaleDateString("it-IT")}</span>}
+                    {code.startsAt && <span>Dal {formatRomeDate(code.startsAt)}</span>}
+                    {code.endsAt && <span>Scade il {formatRomeDate(code.endsAt)}</span>}
                     {remainingUses !== null && <span>Utilizzi rimasti: {remainingUses}</span>}
                     {code.firstOrderOnly && <span>Valido sul primo ordine</span>}
                     {!code.stackable && <span>Non cumulabile</span>}
@@ -131,7 +132,7 @@ export default async function AccountDiscountCodesPage() {
                       {code.redemptions.map((redemption) => (
                         <li key={redemption.id}>
                           <span>
-                            Usato {redemption.createdAt.toLocaleDateString("it-IT")}
+                            Usato {formatRomeDate(redemption.createdAt)}
                             {redemption.order?.code ? ` · ${redemption.order.code}` : ""}
                           </span>
                           <strong>-{formatCents(redemption.amountCents)}</strong>

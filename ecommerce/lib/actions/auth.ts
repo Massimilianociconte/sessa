@@ -1,24 +1,20 @@
 "use server";
 
-import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { verifyPassword } from "@/lib/auth/password";
-import { createSession, destroySession, pruneExpiredSessions } from "@/lib/auth/session";
-import { clearAttempts, isRateLimited, registerFailedAttempt } from "@/lib/auth/rate-limit";
+import { verifyPasswordOrDummy } from "@/lib/auth/password";
+import { createSession, destroySession, getSessionUser, pruneExpiredSessions } from "@/lib/auth/session";
+import {
+  blockedForAny,
+  clearAttemptKeys,
+  registerFailedAttempts
+} from "@/lib/auth/rate-limit";
 import { loginSchema } from "@/lib/validation";
 import { audit } from "@/lib/audit";
+import { getClientIp, getRequestSecurityContext, rateLimitKey } from "@/lib/auth/request-context";
+import { safeNextPath } from "@/lib/auth/redirects";
 
 export type LoginState = { error: string | null };
-
-async function clientIp(): Promise<string> {
-  const h = await headers();
-  return (
-    h.get("x-forwarded-for")?.split(",")[0]?.trim() ||
-    h.get("x-real-ip") ||
-    "local"
-  );
-}
 
 export async function loginAction(_prev: LoginState, formData: FormData): Promise<LoginState> {
   const parsed = loginSchema.safeParse({
@@ -31,8 +27,12 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
 
   // Anti-brute-force: chiave IP+email, così non si può chiudere fuori l'admin
   // legittimo da un altro IP.
-  const rateKey = `${await clientIp()}:${parsed.data.email}`;
-  const blockedMs = await isRateLimited(rateKey);
+  const ip = await getClientIp();
+  const rateKeys = [
+    rateLimitKey("admin-login-ip", ip),
+    rateLimitKey("admin-login-account", parsed.data.email)
+  ];
+  const blockedMs = await blockedForAny(rateKeys);
   if (blockedMs !== null) {
     const minutes = Math.ceil(blockedMs / 60000);
     return { error: `Troppi tentativi falliti. Riprova tra ${minutes} minut${minutes === 1 ? "o" : "i"}.` };
@@ -40,20 +40,24 @@ export async function loginAction(_prev: LoginState, formData: FormData): Promis
 
   const user = await prisma.adminUser.findUnique({ where: { email: parsed.data.email } });
   // Messaggio identico per utente inesistente e password errata: niente enumerazione account.
-  if (!user || !user.isActive || !verifyPassword(parsed.data.password, user.passwordHash)) {
-    await registerFailedAttempt(rateKey);
+  const passwordValid = verifyPasswordOrDummy(parsed.data.password, user?.passwordHash);
+  if (!user || !user.isActive || !passwordValid) {
+    await registerFailedAttempts(rateKeys);
     return { error: "Credenziali non valide." };
   }
 
-  await clearAttempts(rateKey);
+  await clearAttemptKeys(rateKeys);
   await pruneExpiredSessions();
-  await createSession(user.id);
+  const context = await getRequestSecurityContext();
+  await createSession(user.id, context.userAgent ?? undefined);
   await prisma.adminUser.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
   await audit(user.email, "auth.login", "AdminUser", user.id);
-  redirect("/admin");
+  redirect(safeNextPath(formData.get("next"), "/admin", "/admin"));
 }
 
 export async function logoutAction(): Promise<void> {
+  const user = await getSessionUser();
   await destroySession();
+  if (user) await audit(user.email, "auth.logout", "AdminUser", user.id);
   redirect("/admin/login");
 }

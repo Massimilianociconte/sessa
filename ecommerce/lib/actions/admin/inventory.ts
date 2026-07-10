@@ -2,11 +2,12 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { requireAdmin } from "@/lib/auth/session";
+import { requireAdminCapability } from "@/lib/auth/session";
 import { DomainError } from "@/lib/domain";
 import { adjustStock } from "@/lib/services/inventory";
 import { backWithError, backWithMessage } from "./helpers";
 import { invalidateMemo } from "@/lib/ttl-cache";
+import { safeNextPath } from "@/lib/auth/redirects";
 
 const PATH = "/admin/magazzino";
 
@@ -24,8 +25,8 @@ const adjustFormSchema = z.object({
 });
 
 export async function adjustStockAction(formData: FormData): Promise<void> {
-  const user = await requireAdmin();
-  const backPath = String(formData.get("back") ?? PATH);
+  const user = await requireAdminCapability("inventory:manage");
+  const backPath = safeNextPath(formData.get("back"), "/admin", PATH);
   const parsed = adjustFormSchema.safeParse({
     storeVariantId: formData.get("storeVariantId"),
     qty: formData.get("qty"),

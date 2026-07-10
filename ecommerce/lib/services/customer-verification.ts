@@ -65,10 +65,14 @@ export async function consumeVerifyEmailToken(token: string): Promise<void> {
   if (!row || row.type !== "VERIFY_EMAIL" || row.usedAt || row.expiresAt < new Date()) {
     throw new DomainError("Link di verifica non valido o scaduto.");
   }
-  await prisma.$transaction([
-    prisma.customer.update({ where: { id: row.customerId }, data: { emailVerified: true } }),
-    prisma.customerToken.update({ where: { id: row.id }, data: { usedAt: new Date() } })
-  ]);
+  await prisma.$transaction(async (tx) => {
+    const claimed = await tx.customerToken.updateMany({
+      where: { id: row.id, usedAt: null, expiresAt: { gt: new Date() } },
+      data: { usedAt: new Date() }
+    });
+    if (claimed.count !== 1) throw new DomainError("Link di verifica non valido o già utilizzato.");
+    await tx.customer.update({ where: { id: row.customerId }, data: { emailVerified: true } });
+  });
 }
 
 /**
@@ -117,11 +121,21 @@ export async function consumeChangeEmailToken(token: string): Promise<void> {
     if (clash && clash.id !== row.customerId) {
       throw new DomainError("Questa email è stata nel frattempo collegata a un altro account.");
     }
+    const claimed = await tx.customerToken.updateMany({
+      where: { id: row.id, usedAt: null, expiresAt: { gt: new Date() } },
+      data: { usedAt: new Date() }
+    });
+    if (claimed.count !== 1) throw new DomainError("Link di conferma non valido o già utilizzato.");
     await tx.customer.update({
       where: { id: row.customerId },
       data: { email, emailVerified: true }
     });
-    await tx.customerToken.update({ where: { id: row.id }, data: { usedAt: new Date() } });
+    // Il cambio dell'identificativo di accesso revoca tutte le sessioni rubate
+    // o dimenticate; il cliente effettuerà un nuovo login con la nuova email.
+    await tx.customerSession.deleteMany({ where: { customerId: row.customerId } });
+    await tx.customerToken.deleteMany({
+      where: { customerId: row.customerId, id: { not: row.id }, usedAt: null }
+    });
   });
 }
 

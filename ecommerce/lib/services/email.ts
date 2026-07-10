@@ -1,6 +1,8 @@
 import nodemailer from "nodemailer";
 import { prisma } from "@/lib/db";
 import { SITE_URL } from "@/lib/site";
+import { safeErrorMetadata } from "@/lib/safe-log";
+import { REDACTED_EMAIL_BODY, retainedEmailBody } from "@/lib/security/email-retention";
 
 /**
  * Coda email (outbox) con invio reale via SMTP quando configurato.
@@ -30,6 +32,7 @@ export type EmailDeliveryResult = {
 };
 
 let transporter: nodemailer.Transporter | null = null;
+
 function getTransport(): nodemailer.Transporter | null {
   if (!process.env.SMTP_HOST) return null;
   if (!transporter) {
@@ -153,7 +156,11 @@ async function deliver(id: string): Promise<EmailDeliveryResult> {
       // così l'outbox segnala il problema invece di nasconderlo.
       await prisma.emailMessage.update({
         where: { id },
-        data: { status: "FAILED", error: "SMTP non configurato (SMTP_HOST mancante)" }
+        data: {
+          status: "FAILED",
+          error: "SMTP non configurato",
+          body: retainedEmailBody(message.body)
+        }
       });
       return { id, status: "FAILED", error: "SMTP non configurato (SMTP_HOST mancante)" };
     } else {
@@ -161,15 +168,22 @@ async function deliver(id: string): Promise<EmailDeliveryResult> {
     }
     await prisma.emailMessage.update({
       where: { id },
-      data: { status: "SENT", sentAt: new Date() }
+      data: { status: "SENT", sentAt: new Date(), body: retainedEmailBody(message.body), error: null }
     });
     return { id, status: "SENT" };
   } catch (error) {
-    const message = error instanceof Error ? error.message : "unknown";
+    const metadata = safeErrorMetadata(error);
+    const publicError = metadata.code ? `${metadata.name} (${metadata.code})` : metadata.name;
     await prisma.emailMessage.update({
       where: { id },
-      data: { status: "FAILED", error: message }
+      data: {
+        status: "FAILED",
+        error: publicError,
+        body: process.env.NODE_ENV === "production"
+          ? REDACTED_EMAIL_BODY
+          : undefined
+      }
     }).catch(() => undefined);
-    return { id, status: "FAILED", error: message };
+    return { id, status: "FAILED", error: publicError };
   }
 }

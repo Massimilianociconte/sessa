@@ -8,7 +8,7 @@ import { finishPasskeyLoginAction, startPasskeyLoginAction } from "@/lib/actions
  * "Accedi con passkey" nella pagina di login. Usernameless: il browser
  * propone le passkey salvate per questo sito. Fallback: password + 2FA.
  */
-export default function PasskeyLoginButton() {
+export default function PasskeyLoginButton({ nextPath }: { nextPath?: string }) {
   const [supported, setSupported] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,7 +31,7 @@ export default function PasskeyLoginButton() {
         return;
       }
       const assertion = await startAuthentication({ optionsJSON: start.data });
-      const finish = await finishPasskeyLoginAction(assertion);
+      const finish = await finishPasskeyLoginAction(assertion, nextPath);
       if (!finish.ok) {
         setError(finish.error);
         return;

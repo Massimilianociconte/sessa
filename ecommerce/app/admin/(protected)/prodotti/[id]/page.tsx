@@ -11,6 +11,7 @@ import {
   updateVariantAction
 } from "@/lib/actions/admin/products";
 import { prisma } from "@/lib/db";
+import { requireAdminCapability } from "@/lib/auth/session";
 import { formatCents } from "@/lib/money";
 import { effectivePrice } from "@/lib/services/catalog";
 
@@ -27,6 +28,7 @@ export default async function EditProductPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ msg?: string; err?: string }>;
 }) {
+  await requireAdminCapability("catalog:manage");
   const [{ id }, { msg, err }] = await Promise.all([params, searchParams]);
   const [product, categories] = await Promise.all([
     prisma.product.findUnique({

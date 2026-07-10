@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { formatCents } from "@/lib/money";
 import { listCustomers } from "@/lib/services/customers";
+import { requireAdminCapability } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
@@ -9,10 +10,13 @@ export const metadata = { title: "Clienti" };
 export default async function AdminCustomersPage({
   searchParams
 }: {
-  searchParams: Promise<{ q?: string }>;
+  searchParams: Promise<{ q?: string; page?: string }>;
 }) {
-  const { q } = await searchParams;
-  const customers = await listCustomers(q);
+  await requireAdminCapability("customers:manage");
+  const { q, page } = await searchParams;
+  const currentPage = /^\d+$/.test(page ?? "") ? Math.max(1, Number(page)) : 1;
+  const result = await listCustomers(q, currentPage);
+  const customers = result.items;
 
   return (
     <>
@@ -70,6 +74,25 @@ export default async function AdminCustomersPage({
           </tbody>
         </table>
       </div>
+      {result.pageCount > 1 && (
+        <nav className="mt-4 flex items-center justify-between text-sm" aria-label="Pagine clienti">
+          <Link
+            href={`/admin/clienti?page=${Math.max(1, result.page - 1)}${q ? `&q=${encodeURIComponent(q)}` : ""}`}
+            aria-disabled={result.page <= 1}
+            className={result.page <= 1 ? "pointer-events-none text-ink/30" : "btn-ghost"}
+          >
+            ← Precedenti
+          </Link>
+          <span className="text-ink/50">Pagina {result.page} di {result.pageCount} · {result.total} clienti</span>
+          <Link
+            href={`/admin/clienti?page=${Math.min(result.pageCount, result.page + 1)}${q ? `&q=${encodeURIComponent(q)}` : ""}`}
+            aria-disabled={result.page >= result.pageCount}
+            className={result.page >= result.pageCount ? "pointer-events-none text-ink/30" : "btn-ghost"}
+          >
+            Successivi →
+          </Link>
+        </nav>
+      )}
     </>
   );
 }

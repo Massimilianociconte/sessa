@@ -6,12 +6,16 @@
  */
 
 export type PaymentInitInput = {
+  /** ID persistente incluso nei metadata provider per riconciliare webhook anticipati. */
+  attemptId: string;
   orderId?: string;
   orderCode: string;
   publicToken: string;
   totalCents: number;
   email: string;
   method?: string | null;
+  /** Chiave stabile del nostro PaymentAttempt, riusata sui retry di rete. */
+  idempotencyKey: string;
 };
 
 export type PaymentInitResult =
@@ -23,13 +27,21 @@ export type PaymentInitResult =
       instructions?: string;
       /** URL a cui redirigere per pagare (checkout esterno tipo Stripe). */
       redirectUrl?: string;
+      /** Scadenza comunicata dal provider per non riusare sessioni morte. */
+      expiresAt?: Date;
     }
-  | { ok: false; error: string };
+  | { ok: false; error: string; /** false = configurazione/input definitivo; true = rete/provider ritentabile */ retryable?: boolean };
 
 export interface PaymentProvider {
   id: string;
   label: string;
   init(input: PaymentInitInput): Promise<PaymentInitResult>;
   /** Rimborso (opzionale: il provider manuale lo gestisce fuori piattaforma). */
-  refund?(reference: string, amountCents: number): Promise<{ ok: boolean; error?: string }>;
+  refund?(
+    paymentReference: string,
+    amountCents: number,
+    idempotencyKey: string
+  ): Promise<{ ok: boolean; reference?: string; error?: string }>;
+  /** Chiude una sessione non ancora pagata quando l'ordine non e piu pagabile. */
+  cancel?(reference: string): Promise<{ ok: boolean; error?: string }>;
 }
