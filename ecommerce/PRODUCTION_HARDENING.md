@@ -53,7 +53,7 @@ test sacrificabile, copre:
 ## Requisiti operativi ancora aperti
 
 1. Portare il runtime sul transaction pooler Supabase (`DATABASE_URL`, porta 6543)
-   e riservare `DIRECT_URL` diretto/session pooler alle migrazioni. Il pool runtime
+   e usare `MIGRATION_DATABASE_URL` solo quando serve una connessione separata per le migrazioni. Il pool runtime
    deve restare prudente (`connection_limit=1`) in ambiente serverless.
 2. Allineare o mitigare la distanza tra regione Netlify Functions e regione DB;
    misurare separatamente warm latency e cold start.
@@ -82,7 +82,7 @@ test sacrificabile, copre:
 - Il provider è PostgreSQL; `prisma/migrations-postgres/0001_init.sql` è il
   bootstrap e `0002`-`0005` sono migrazioni additive/idempotenti.
 - `npm run db:bootstrap` è fail-closed su DB non vuoti. `npm run db:deploy` usa
-  `DIRECT_URL` quando disponibile e non riesegue la baseline.
+  `MIGRATION_DATABASE_URL` solo se impostata e non riesegue la baseline.
 - Il seed e rilanciabile: usa upsert su sedi, categorie, prodotti, varianti, sconti
   e dati demo; non ricrea stock o gift card gia presenti.
 - `SEED_ADMIN_PASSWORD` e `SEED_CUSTOMER_PASSWORD` sono opzionali solo in sviluppo.

@@ -17,7 +17,7 @@
     "db:studio": "prisma studio",
     "deploy": "mkdir -p .git && npx --yes netlify-cli deploy --context deploy-preview",
     "deploy:preview": "mkdir -p .git && npx --yes netlify-cli deploy --context deploy-preview",
-    "deploy:prod": "mkdir -p .git && npx --yes netlify-cli deploy --prod --context production"
+    "deploy:prod": "mkdir -p .git && npx --yes netlify-cli deploy --prod --context production --skip-functions-cache"
   },
   "engines": {
     "node": "24.x"

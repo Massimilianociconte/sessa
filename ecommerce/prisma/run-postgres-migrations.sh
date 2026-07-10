@@ -1,13 +1,13 @@
 #!/bin/sh
 set -eu
 
-if [ -n "${DIRECT_URL:-}" ]; then
-  DATABASE_URL="$DIRECT_URL"
+if [ -n "${MIGRATION_DATABASE_URL:-}" ]; then
+  DATABASE_URL="$MIGRATION_DATABASE_URL"
   export DATABASE_URL
 fi
 
 if [ -z "${DATABASE_URL:-}" ]; then
-  echo "DATABASE_URL o DIRECT_URL obbligatoria" >&2
+  echo "DATABASE_URL o MIGRATION_DATABASE_URL obbligatoria" >&2
   exit 1
 fi
 

@@ -35,18 +35,22 @@ NON aggirare con symlink `root/.netlify/functions-internal → ecommerce/...`: l
   DB, sessione, setup, Stripe e SMTP restano scansionate. In caso di falso positivo,
   identificare prima file e chiave invece di ampliare l'omit globale.
 - `npm run db:deploy` applica in ordine le migrazioni additive `0002`-`0005` a un
-  DB esistente. Usa `DIRECT_URL` quando presente e `DATABASE_URL` solo come fallback.
+  DB esistente. Usa `MIGRATION_DATABASE_URL` solo se impostata esplicitamente,
+  altrimenti usa `DATABASE_URL`.
   `npm run db:bootstrap` aggiunge `0001` ed è riservato a un DB nuovo e vuoto.
 - Prima di un deploy produzione: dump verificato, preflight invarianti, migrazione
-  esplicita sul `DIRECT_URL`, poi deploy. Le preview saltano questo passaggio.
-- Se un deploy riusa una zip di funzione sospetta: `netlify deploy --prod --skip-functions-cache`.
+  esplicita sul database scelto, poi deploy. Le preview saltano questo passaggio.
+- Se un deploy riusa una zip di funzione sospetta: `npm run deploy:prod` usa già
+  `--skip-functions-cache`.
 
 ## Database e runtime serverless
 
 - `DATABASE_URL`: transaction pooler Supabase, porta `6543`, `pgbouncer=true`,
   `connection_limit=1`, `pool_timeout=20`.
-- `DIRECT_URL`: connessione diretta o session pooler, porta `5432`, usata soltanto
-  dal migration runner.
+- `MIGRATION_DATABASE_URL`: opzionale, connessione diretta/session pooler usata
+  soltanto dal migration runner quando impostata.
+- `DIRECT_URL`: non viene usata automaticamente dagli script; tenerla solo se serve
+  a strumenti esterni.
 - Il progetto usa Node 24 (`.node-version`, `package.json`, `netlify.toml`). In
   **Site configuration → Environment variables** impostare anche
   `AWS_LAMBDA_JS_RUNTIME=nodejs24.x`: questo override non vive in `netlify.toml`.
@@ -56,7 +60,7 @@ NON aggirare con symlink `root/.netlify/functions-internal → ecommerce/...`: l
 
 ## Env di produzione da impostare o verificare
 
-`DATABASE_URL`, `DIRECT_URL`, `SESSION_SECRET`, `ADMIN_SETUP_TOKEN`,
+`DATABASE_URL`, `SESSION_SECRET`, `ADMIN_SETUP_TOKEN`,
 `NEXT_PUBLIC_SITE_URL`, `AWS_LAMBDA_JS_RUNTIME`.
 
 Per avere verifica email, reset password e avvisi sicurezza realmente inviati in produzione servono anche:

@@ -23,7 +23,7 @@ npm run dev          # http://localhost:3001
 
 Prima dell'avvio, copiare `.env.example` in `.env` e configurare un database di
 sviluppo dedicato. `DATABASE_URL` è la connessione runtime al transaction pooler;
-`DIRECT_URL` è la connessione diretta/session pooler riservata alle migrazioni.
+`MIGRATION_DATABASE_URL` è opzionale e forza una connessione diversa solo per le migrazioni.
 Non puntare i comandi locali al database di produzione.
 
 - Storefront: `http://localhost:3001`
@@ -147,8 +147,8 @@ robots e metadati assoluti).
 
 ## Passare in produzione
 
-1. Configurare `DATABASE_URL` sul transaction pooler e `DIRECT_URL` sulla
-   connessione diretta/session pooler. Su un DB esistente usare `npm run db:deploy`;
+1. Configurare `DATABASE_URL` sul pooler runtime. Se serve una connessione diversa
+   per le migrazioni, usare `MIGRATION_DATABASE_URL`. Su un DB esistente usare `npm run db:deploy`;
    `db:bootstrap` è riservato a un database nuovo e vuoto.
 2. Valorizzare `SESSION_SECRET`, `ADMIN_SETUP_TOKEN`, `NEXT_PUBLIC_SITE_URL` e le
    credenziali SMTP in Netlify.
