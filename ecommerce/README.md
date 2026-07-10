@@ -154,7 +154,8 @@ robots e metadati assoluti).
    credenziali SMTP in Netlify.
 3. Per Stripe, configurare `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` e il webhook
    `/api/webhooks/stripe`; senza chiave resta disponibile il pagamento manuale.
-4. Eseguire preview e smoke test con `npm run deploy:preview`. Pubblicare solo con
-   il comando esplicito `npm run deploy:prod`.
+4. Eseguire `npm run db:deploy` come passaggio esplicito di release, poi preview e
+   smoke test con `npm run deploy:preview`. Pubblicare solo con il comando esplicito
+   `npm run deploy:prod`.
 
 Il runbook completo è in [`docs/DEPLOY_NETLIFY.md`](docs/DEPLOY_NETLIFY.md).

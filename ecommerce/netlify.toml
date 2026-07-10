@@ -6,7 +6,7 @@
   publish = ".next"
 
 [context.production]
-  command = "npx prisma generate && npm run db:deploy && npm run build"
+  command = "npx prisma generate && npm run build"
 
 [build.environment]
   NODE_VERSION = "24"

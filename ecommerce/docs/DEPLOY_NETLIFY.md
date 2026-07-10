@@ -12,8 +12,8 @@ npm run deploy:prod    # produzione: scelta esplicita
 
 Entrambi buildano in locale tramite `netlify.toml`, quindi caricano asset,
 funzione server e middleware edge. Il contesto `deploy-preview` genera Prisma e
-Next ma **non esegue migrazioni**; solo `context.production` include
-`npm run db:deploy`. Una preview non è comunque una sandbox dati: configurare un
+Next; anche `context.production` **non esegue migrazioni**. Le migrazioni sono un
+passaggio esplicito di release con `npm run db:deploy`, prima del deploy. Una preview non è comunque una sandbox dati: configurare un
 database preview dedicato nel relativo contesto oppure limitarla a smoke test in
 sola lettura. Non usare una preview come scorciatoia per migrare produzione.
 
@@ -39,7 +39,8 @@ NON aggirare con symlink `root/.netlify/functions-internal → ecommerce/...`: l
   altrimenti usa `DATABASE_URL`.
   `npm run db:bootstrap` aggiunge `0001` ed è riservato a un DB nuovo e vuoto.
 - Prima di un deploy produzione: dump verificato, preflight invarianti, migrazione
-  esplicita sul database scelto, poi deploy. Le preview saltano questo passaggio.
+  esplicita sul database scelto (`npm run db:deploy`), poi deploy. Il build
+  Netlify non esegue DDL automaticamente: evita lock e deploy appesi.
 - Se un deploy riusa una zip di funzione sospetta: `npm run deploy:prod` usa già
   `--skip-functions-cache`.
 
