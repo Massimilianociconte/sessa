@@ -52,14 +52,32 @@ async function requireOwner(formData: FormData) {
   return user;
 }
 
-const ADMIN_ROLES = ["ADMIN", "STAFF"] as const;
+const ADMIN_ROLES = ["ADMIN", "STORE_MANAGER", "FULFILLMENT", "MARKETING"] as const;
+const LOCATION_SCOPED_ROLES = ["STORE_MANAGER", "FULFILLMENT"] as const;
+
+async function validateAdminScope(formData: FormData, role: string) {
+  const requestedIds = [...new Set(formData.getAll("locationIds").map(String).filter((id) => id.length > 0 && id.length <= 64))];
+  const roleIsScoped = LOCATION_SCOPED_ROLES.includes(role as (typeof LOCATION_SCOPED_ROLES)[number]);
+  const scopeAllLocations = roleIsScoped && formData.get("scopeAllLocations") === "on";
+  if (roleIsScoped && !scopeAllLocations && requestedIds.length === 0) {
+    backWithError(PATH, "Assegna almeno una sede oppure abilita l'accesso a tutte le sedi.");
+  }
+  if (requestedIds.length > 0) {
+    const count = await prisma.location.count({ where: { id: { in: requestedIds } } });
+    if (count !== requestedIds.length) backWithError(PATH, "Una o più sedi selezionate non sono valide.");
+  }
+  return {
+    locationIds: roleIsScoped && !scopeAllLocations ? requestedIds : [],
+    scopeAllLocations: roleIsScoped ? scopeAllLocations : true
+  };
+}
 
 export async function createAdminUserAction(formData: FormData): Promise<void> {
   const owner = await requireOwner(formData);
   const name = String(formData.get("name") ?? "").trim();
   const email = String(formData.get("email") ?? "").trim().toLowerCase();
   const password = String(formData.get("password") ?? "");
-  const role = String(formData.get("role") ?? "STAFF");
+  const role = String(formData.get("role") ?? "STORE_MANAGER");
 
   if (name.length < 2 || name.length > 120) backWithError(PATH, "Inserisci un nome valido.");
   if (email.length > 254) backWithError(PATH, "Email non valida.");
@@ -68,13 +86,21 @@ export async function createAdminUserAction(formData: FormData): Promise<void> {
     backWithError(PATH, "La password deve avere tra 12 e 128 caratteri.");
   }
   if (!ADMIN_ROLES.includes(role as (typeof ADMIN_ROLES)[number])) backWithError(PATH, "Ruolo non valido.");
+  const scope = await validateAdminScope(formData, role);
   const clash = await prisma.adminUser.findUnique({ where: { email } });
   if (clash) backWithError(PATH, "Esiste già un utente con questa email.");
 
   let created: { id: string };
   try {
     created = await prisma.adminUser.create({
-      data: { name, email, passwordHash: hashPassword(password), role },
+      data: {
+        name,
+        email,
+        passwordHash: hashPassword(password),
+        role,
+        scopeAllLocations: scope.scopeAllLocations,
+        locationScopes: { create: scope.locationIds.map((locationId) => ({ locationId })) }
+      },
       select: { id: true }
     });
   } catch (error) {
@@ -83,8 +109,45 @@ export async function createAdminUserAction(formData: FormData): Promise<void> {
     }
     throw error;
   }
-  await audit(owner.email, "admin_user.create", "AdminUser", created.id, { email, role });
+  await audit(owner.email, "admin_user.create", "AdminUser", created.id, {
+    email,
+    role,
+    scopeAllLocations: scope.scopeAllLocations,
+    locationCount: scope.locationIds.length
+  });
   backWithMessage(PATH, `Utente ${email} creato (${role}). Comunica la password in modo sicuro e falla cambiare al primo accesso.`);
+}
+
+export async function updateAdminAccessAction(formData: FormData): Promise<void> {
+  const owner = await requireOwner(formData);
+  const userId = String(formData.get("userId") ?? "");
+  const role = String(formData.get("role") ?? "");
+  if (!userId || userId.length > 64) backWithError(PATH, "Utente non valido.");
+  if (!ADMIN_ROLES.includes(role as (typeof ADMIN_ROLES)[number])) backWithError(PATH, "Ruolo non valido.");
+  const target = await prisma.adminUser.findUnique({ where: { id: userId } });
+  if (!target) backWithError(PATH, "Utente non trovato.");
+  if (target.role === "OWNER" || target.id === owner.id) {
+    backWithError(PATH, "Il perimetro del proprietario non può essere modificato da questa sezione.");
+  }
+  const scope = await validateAdminScope(formData, role);
+  await prisma.$transaction(async (tx) => {
+    await tx.adminLocation.deleteMany({ where: { adminId: userId } });
+    await tx.adminUser.update({
+      where: { id: userId },
+      data: {
+        role,
+        scopeAllLocations: scope.scopeAllLocations,
+        locationScopes: { create: scope.locationIds.map((locationId) => ({ locationId })) }
+      }
+    });
+    await tx.adminSession.deleteMany({ where: { userId } });
+  });
+  await audit(owner.email, "admin_user.access_update", "AdminUser", userId, {
+    role,
+    scopeAllLocations: scope.scopeAllLocations,
+    locationCount: scope.locationIds.length
+  });
+  backWithMessage(PATH, "Ruolo e perimetro sedi aggiornati. Le sessioni precedenti sono state revocate.");
 }
 
 export async function toggleAdminUserAction(formData: FormData): Promise<void> {

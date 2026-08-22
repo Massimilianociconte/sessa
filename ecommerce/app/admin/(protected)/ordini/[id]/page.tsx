@@ -21,6 +21,7 @@ import {
 import { formatCents } from "@/lib/money";
 import { formatRomeDateTime } from "@/lib/datetime";
 import { getOrder } from "@/lib/services/orders";
+import { adminLocationScope, requireAdminCapability } from "@/lib/auth/session";
 
 export const dynamic = "force-dynamic";
 
@@ -33,11 +34,28 @@ export default async function AdminOrderDetailPage({
   params: Promise<{ id: string }>;
   searchParams: Promise<{ msg?: string; err?: string }>;
 }) {
-  const [{ id }, { msg, err }] = await Promise.all([params, searchParams]);
-  const order = await getOrder(id);
+  const [{ id }, { msg, err }, user] = await Promise.all([
+    params,
+    searchParams,
+    requireAdminCapability("orders:manage")
+  ]);
+  const order = await getOrder(id, adminLocationScope(user));
   if (!order) notFound();
 
-  const nextStatuses = ORDER_TRANSITIONS[order.status as OrderStatus] ?? [];
+  const nextStatuses = (ORDER_TRANSITIONS[order.status as OrderStatus] ?? []).filter((status) => {
+    if (status === "READY") return order.fulfillmentType === "PICKUP";
+    if (status === "SHIPPED") return order.fulfillmentType === "DELIVERY";
+    if (status === "CANCELLED") return order.paymentStatus !== "PAID" && order.paymentStatus !== "PARTIALLY_REFUNDED";
+    if (status === "REFUNDED") return order.paymentStatus === "PAID" || order.paymentStatus === "PARTIALLY_REFUNDED";
+    if (status === "PAID") return order.paymentProvider === "manual";
+    return true;
+  });
+  const canRecordManualPayment =
+    order.paymentProvider === "manual" &&
+    order.paymentStatus !== "PAID" &&
+    order.status !== "CANCELLED" &&
+    order.status !== "REFUNDED" &&
+    order.status !== "PENDING_PAYMENT";
 
   return (
     <>
@@ -132,9 +150,30 @@ export default async function AdminOrderDetailPage({
         <div className="space-y-6">
           <section className="card p-5">
             <h2 className="mb-3 font-serif text-xl font-semibold">Azioni</h2>
-            {nextStatuses.length === 0 ? (
+            {canRecordManualPayment && (
+              <form action={transitionOrderAction} className="mb-4 space-y-2 border-b border-ink/10 pb-4">
+                <input type="hidden" name="orderId" value={order.id} />
+                <input type="hidden" name="to" value="PAID" />
+                <label className="block text-xs font-semibold uppercase tracking-[0.14em] text-ink/50">
+                  Riferimento incasso
+                </label>
+                <input
+                  name="paymentRef"
+                  maxLength={120}
+                  placeholder="Scontrino, bonifico o riferimento interno"
+                  className="input-field"
+                />
+                <button type="submit" className="btn-primary w-full">
+                  Registra pagamento
+                </button>
+                <p className="text-xs leading-5 text-ink/45">
+                  L'incasso viene registrato senza riportare indietro lo stato di preparazione.
+                </p>
+              </form>
+            )}
+            {nextStatuses.length === 0 && !canRecordManualPayment ? (
               <p className="text-sm text-ink/50">Ordine in stato finale: nessuna azione disponibile.</p>
-            ) : (
+            ) : nextStatuses.length > 0 ? (
               <div className="space-y-3">
                 {nextStatuses.map((to) => (
                   <form key={to} action={transitionOrderAction} className="space-y-2">
@@ -166,7 +205,7 @@ export default async function AdminOrderDetailPage({
                   </p>
                 )}
               </div>
-            )}
+            ) : null}
           </section>
 
           <section className="card p-5 text-sm">
@@ -203,6 +242,15 @@ export default async function AdminOrderDetailPage({
               {PAYMENT_STATUS_LABELS[order.paymentStatus as PaymentStatus] ?? order.paymentStatus}
             </p>
             {order.paymentRef && <p className="text-xs text-ink/40">Rif: {order.paymentRef}</p>}
+            {(order.paymentStatus === "PAID" || order.paymentStatus === "PARTIALLY_REFUNDED") && (
+              <form action={transitionOrderAction} className="mt-3 space-y-2">
+                <input type="hidden" name="orderId" value={order.id} />
+                <input type="hidden" name="to" value="REFUNDED" />
+                <label className="label-field">Rimborso (EUR, vuoto = totale)</label>
+                <input name="refundAmount" className="input-field" placeholder="es. 10,00" />
+                <button type="submit" className="btn-secondary w-full">Emetti rimborso</button>
+              </form>
+            )}
             {order.customerNote && (
               <>
                 <p className="mt-3 font-semibold text-ink">Nota del cliente</p>

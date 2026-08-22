@@ -9,7 +9,8 @@ import {
   createAdminUserAction,
   resetAdminUserPasswordAction,
   saveStoreSettingsAction,
-  toggleAdminUserAction
+  toggleAdminUserAction,
+  updateAdminAccessAction
 } from "@/lib/actions/admin/settings";
 import { requireAdmin } from "@/lib/auth/session";
 import { prisma } from "@/lib/db";
@@ -30,7 +31,7 @@ export default async function AdminSettingsPage({
   const currentUser = await requireAdmin();
   const isOwner = currentUser.role === "OWNER";
   const canManageSettings = hasAdminCapability(currentUser.role, "settings:manage");
-  const [settings, zones, adminUsers] = await Promise.all([
+  const [settings, zones, adminUsers, locations] = await Promise.all([
     canManageSettings
       ? getSettings([
           "store.name",
@@ -50,8 +51,20 @@ export default async function AdminSettingsPage({
     isOwner
       ? prisma.adminUser.findMany({
           orderBy: [{ role: "asc" }, { createdAt: "asc" }],
-          select: { id: true, name: true, email: true, role: true, isActive: true, lastLoginAt: true }
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            role: true,
+            isActive: true,
+            lastLoginAt: true,
+            scopeAllLocations: true,
+            locationScopes: { select: { locationId: true } }
+          }
         })
+      : Promise.resolve([]),
+    isOwner
+      ? prisma.location.findMany({ where: { isActive: true }, orderBy: { position: "asc" }, select: { id: true, name: true } })
       : Promise.resolve([])
   ]);
 
@@ -301,6 +314,45 @@ export default async function AdminSettingsPage({
                       )}
                     </div>
                     {adminUser.role !== "OWNER" && (
+                      <details className="mt-3 rounded-xl border border-ink/10 bg-cream/35 p-3">
+                        <summary className="cursor-pointer text-xs font-semibold text-ink/60">Ruolo e sedi autorizzate</summary>
+                        <form action={updateAdminAccessAction} className="mt-3 space-y-3">
+                          <input type="hidden" name="userId" value={adminUser.id} />
+                          <div className="grid gap-3 sm:grid-cols-2">
+                            <div>
+                              <label className="label-field">Ruolo</label>
+                              <select name="role" className="input-field" defaultValue={adminUser.role}>
+                                <option value="STORE_MANAGER">Responsabile sede</option>
+                                <option value="FULFILLMENT">Preparazione ordini</option>
+                                <option value="MARKETING">Marketing e catalogo</option>
+                                <option value="ADMIN">Amministratore globale</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label className="label-field">Conferma proprietario</label>
+                              <input name="ownerPassword" type="password" required maxLength={128} autoComplete="current-password" className="input-field" />
+                            </div>
+                          </div>
+                          <label className="flex items-center gap-2 text-sm font-medium">
+                            <input type="checkbox" name="scopeAllLocations" defaultChecked={adminUser.scopeAllLocations} className="accent-terracotta" />
+                            Tutte le sedi (per ruoli operativi)
+                          </label>
+                          <fieldset>
+                            <legend className="label-field">Sedi assegnate</legend>
+                            <div className="grid gap-2 sm:grid-cols-2">
+                              {locations.map((location) => (
+                                <label key={location.id} className="flex items-center gap-2 rounded-lg border border-ink/10 bg-white px-3 py-2 text-sm">
+                                  <input type="checkbox" name="locationIds" value={location.id} defaultChecked={adminUser.locationScopes.some((scope) => scope.locationId === location.id)} className="accent-terracotta" />
+                                  {location.name}
+                                </label>
+                              ))}
+                            </div>
+                          </fieldset>
+                          <button type="submit" className="btn-secondary !py-2 text-xs">Aggiorna accesso</button>
+                        </form>
+                      </details>
+                    )}
+                    {adminUser.role !== "OWNER" && (
                       <details className="mt-2">
                         <summary className="cursor-pointer text-xs font-semibold text-ink/50">
                           Reimposta password
@@ -347,12 +399,29 @@ export default async function AdminSettingsPage({
                     </div>
                     <div>
                       <label className="label-field">Ruolo</label>
-                      <select name="role" className="input-field" defaultValue="STAFF">
-                        <option value="STAFF">Staff (operativo)</option>
-                        <option value="ADMIN">Admin (completo)</option>
+                      <select name="role" className="input-field" defaultValue="STORE_MANAGER">
+                        <option value="STORE_MANAGER">Responsabile sede</option>
+                        <option value="FULFILLMENT">Preparazione ordini</option>
+                        <option value="MARKETING">Marketing e catalogo</option>
+                        <option value="ADMIN">Amministratore globale</option>
                       </select>
                     </div>
                   </div>
+                  <label className="flex items-center gap-2 text-sm font-medium">
+                    <input type="checkbox" name="scopeAllLocations" className="accent-terracotta" />
+                    Tutte le sedi (solo ruoli operativi)
+                  </label>
+                  <fieldset>
+                    <legend className="label-field">Sedi assegnate</legend>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {locations.map((location) => (
+                        <label key={location.id} className="flex items-center gap-2 rounded-lg border border-ink/10 bg-cream/40 px-3 py-2 text-sm">
+                          <input type="checkbox" name="locationIds" value={location.id} className="accent-terracotta" />
+                          {location.name}
+                        </label>
+                      ))}
+                    </div>
+                  </fieldset>
                   <div>
                     <label className="label-field">Password proprietario</label>
                     <input name="ownerPassword" type="password" required maxLength={128} autoComplete="current-password" className="input-field" />

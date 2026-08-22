@@ -6,7 +6,7 @@ import QRCode from "qrcode";
 import { prisma } from "@/lib/db";
 import { DomainError } from "@/lib/domain";
 import { verifyPassword } from "@/lib/auth/password";
-import { getSessionCustomer, rotateCustomerSessions } from "@/lib/auth/customer-session";
+import { destroyOtherCustomerSessions, getSessionCustomer } from "@/lib/auth/customer-session";
 import { clearAttempts, isRateLimited, registerFailedAttempt } from "@/lib/auth/rate-limit";
 import { getClientIp, rateLimitKey } from "@/lib/auth/request-context";
 import type { TwoFactorState } from "@/lib/actions/account/twofactor-state";
@@ -61,9 +61,8 @@ export async function confirmTotpAction(_prev: TwoFactorState, formData: FormDat
   }
   try {
     const backupCodes = await confirmTotpEnrollment(customer.id, code);
-    await rotateCustomerSessions(customer.id);
+    await destroyOtherCustomerSessions(customer.id);
     await clearAttempts(rateKey);
-    revalidatePath("/account/sicurezza");
     return { error: null, step: "enabled", backupCodes };
   } catch (error) {
     if (error instanceof DomainError) {
@@ -114,7 +113,7 @@ export async function disableTotpAction(formData: FormData): Promise<void> {
   }
   try {
     await disableTotp(customer.id, code);
-    await rotateCustomerSessions(customer.id);
+    await destroyOtherCustomerSessions(customer.id);
   } catch (error) {
     if (error instanceof DomainError) {
       await registerFailedAttempt(rateKey);

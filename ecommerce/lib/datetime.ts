@@ -103,3 +103,21 @@ export function romeDateKey(date: Date): string {
   const p = partsAt(date);
   return `${p.year}-${String(p.month).padStart(2, "0")}-${String(p.day).padStart(2, "0")}`;
 }
+
+/** Valore `datetime-local` nella wall-clock di Roma, indipendente dal TZ del runtime. */
+export function formatRomeDateTimeLocal(date: Date): string {
+  const p = partsAt(date);
+  return `${p.year}-${String(p.month).padStart(2, "0")}-${String(p.day).padStart(2, "0")}T${String(p.hour).padStart(2, "0")}:${String(p.minute).padStart(2, "0")}`;
+}
+
+/**
+ * Limiti della fascia oraria di ritiro/consegna richiesti dal checkout:
+ * minimo 1 ora da ora, default suggerito a 2 ore. La fonte del tempo vive qui
+ * (helper di dominio), non nel body del Server Component.
+ */
+export function checkoutScheduleBounds(now = new Date()): { minWhen: string; defaultWhen: string } {
+  return {
+    minWhen: formatRomeDateTimeLocal(new Date(now.getTime() + 60 * 60_000)),
+    defaultWhen: formatRomeDateTimeLocal(new Date(now.getTime() + 2 * 60 * 60_000))
+  };
+}

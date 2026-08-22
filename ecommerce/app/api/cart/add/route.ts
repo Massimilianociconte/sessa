@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import type { CartDTO } from "@/lib/cart-types";
 import { DomainError } from "@/lib/domain";
-import { addItemToCart, CART_COOKIE, getOrCreateCartForLocation } from "@/lib/services/cart";
+import { addItemToCart, CART_COOKIE, cartClampWarning, cartCookieSetOptions, getCartByToken, getOrCreateCartForLocation } from "@/lib/services/cart";
 import { loadCartDTO } from "@/lib/services/cart-dto";
 import { enforceCartRateLimit } from "@/lib/services/cart-rate-limit";
 import { getSessionCustomer } from "@/lib/auth/customer-session";
@@ -13,7 +13,8 @@ export const dynamic = "force-dynamic";
 const schema = z.object({
   locationId: z.string().min(1),
   storeVariantId: z.string().min(1),
-  qty: z.coerce.number().int().min(1).max(99).default(1)
+  qty: z.coerce.number().int().min(1).max(99).default(1),
+  confirmLocationSwitch: z.boolean().optional()
 });
 
 export async function POST(request: NextRequest) {
@@ -29,10 +30,27 @@ export async function POST(request: NextRequest) {
     setCookie = true;
   }
 
+  let added: Awaited<ReturnType<typeof addItemToCart>> | null = null;
   try {
     await enforceCartRateLimit(request.headers, token, "mutation");
+    const existing = await getCartByToken(token);
+    if (
+      existing &&
+      existing.locationId !== parsed.data.locationId &&
+      existing.items.length > 0 &&
+      !parsed.data.confirmLocationSwitch
+    ) {
+      return NextResponse.json(
+        {
+          error: `Il carrello contiene prodotti di ${existing.location.name}. Aggiungere da questa sede svuota il carrello precedente.`,
+          code: "LOCATION_SWITCH",
+          locationName: existing.location.name
+        },
+        { status: 409 }
+      );
+    }
     const cart = await getOrCreateCartForLocation(token, parsed.data.locationId);
-    await addItemToCart(cart.id, parsed.data.storeVariantId, parsed.data.qty);
+    added = await addItemToCart(cart.id, parsed.data.storeVariantId, parsed.data.qty);
   } catch (error) {
     const message = error instanceof DomainError ? error.message : "Impossibile aggiungere il prodotto.";
     return NextResponse.json(
@@ -54,15 +72,12 @@ export async function POST(request: NextRequest) {
       { status: 503, headers: { "Retry-After": "2" } }
     );
   }
-  const response = NextResponse.json(dto);
+  const response = NextResponse.json({
+    ...dto,
+    warning: added ? cartClampWarning(added) ?? undefined : undefined
+  });
   if (setCookie) {
-    response.cookies.set(CART_COOKIE, token, {
-      httpOnly: true,
-      sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
-      path: "/",
-      maxAge: 60 * 60 * 24 * 30
-    });
+    response.cookies.set(CART_COOKIE, token, cartCookieSetOptions());
   }
   return response;
 }

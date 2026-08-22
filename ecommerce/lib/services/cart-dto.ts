@@ -22,8 +22,10 @@ export async function loadCartDTO(
     giftCardBalanceCents: giftCard && giftCard.valid ? giftCard.balanceCents : 0,
     locationSlug: view.locationSlug,
     locationName: view.locationName,
+    warnings: view.integrityWarnings,
     lines: view.lines.map((l) => ({
       itemId: l.itemId,
+      storeVariantId: l.storeVariantId,
       productId: l.productId,
       productName: l.productName,
       productSlug: l.productSlug,

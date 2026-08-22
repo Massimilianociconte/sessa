@@ -23,11 +23,11 @@ function hashPassword(password: string): string {
 // --- Sedi ufficiali Sessa 1930 (dal sito e da Mercato Centrale) ---
 const locations = [
   { name: "Ottaviano", slug: "ottaviano", city: "Ottaviano (NA)", address: "Piazza Municipio, 27", province: "NA", postalCode: "80044", hours: "06:30–21:00, martedì chiuso", pickupEnabled: true, deliveryEnabled: true, position: 0 },
-  { name: "Mercato Centrale Torino", slug: "torino", city: "Torino", address: "Piazza della Repubblica, 25", province: "TO", postalCode: "10152", hours: "07:00–24:00", pickupEnabled: true, deliveryEnabled: true, position: 1 },
-  { name: "Mercato Centrale Milano", slug: "milano", city: "Milano", address: "Via Giovanni Battista Sammartini, 2", province: "MI", postalCode: "20125", hours: "07:00–24:00", pickupEnabled: true, deliveryEnabled: true, position: 2 },
-  { name: "Mercato Centrale Firenze", slug: "firenze", city: "Firenze", address: "Via dell'Ariento", province: "FI", postalCode: "50123", hours: "07:00–24:00", pickupEnabled: true, deliveryEnabled: true, position: 3 },
-  { name: "Mercato Centrale Roma", slug: "roma", city: "Roma", address: "Via Giovanni Giolitti, 36", province: "RM", postalCode: "00185", hours: "07:00–24:00", pickupEnabled: true, deliveryEnabled: true, position: 4 },
-  { name: "Merlata Bloom", slug: "merlata-bloom", city: "Milano", address: "Via Gottlieb Wilhelm Daimler, C2", province: "MI", postalCode: "20151", hours: "09:00–22:00", pickupEnabled: true, deliveryEnabled: true, position: 5 },
+  { name: "Mercato Centrale Torino", slug: "torino", city: "Torino", address: "Piazza della Repubblica, 25", province: "TO", postalCode: "10152", hours: "07:00-00:00", pickupEnabled: true, deliveryEnabled: true, position: 1 },
+  { name: "Mercato Centrale Milano", slug: "milano", city: "Milano", address: "Via Giovanni Battista Sammartini, 2", province: "MI", postalCode: "20125", hours: "07:00-00:00", pickupEnabled: true, deliveryEnabled: true, position: 2 },
+  { name: "Mercato Centrale Firenze", slug: "firenze", city: "Firenze", address: "Via dell'Ariento", province: "FI", postalCode: "50123", hours: "07:00-00:00", pickupEnabled: true, deliveryEnabled: true, position: 3 },
+  { name: "Mercato Centrale Roma", slug: "roma", city: "Roma", address: "Via Giovanni Giolitti, 36", province: "RM", postalCode: "00185", hours: "07:00-00:00", pickupEnabled: true, deliveryEnabled: true, position: 4 },
+  { name: "Merlata Bloom", slug: "merlata-bloom", city: "Milano", address: "Via Gottlieb Wilhelm Daimler, 0 C2", province: "MI", postalCode: "20151", hours: "09:00–23:00", pickupEnabled: true, deliveryEnabled: true, position: 5 },
   { name: "Stazione Roma Termini", slug: "roma-termini", city: "Roma", address: "Via Giovanni Giolitti, 40", province: "RM", postalCode: "00185", hours: "06:00–23:00", pickupEnabled: true, deliveryEnabled: false, position: 6 }
 ] as const;
 

@@ -168,6 +168,17 @@ export default function ProductFields({
         />
         In evidenza nel catalogo
       </label>
+      <section className="rounded-2xl border border-ceramic/20 bg-ceramic/5 p-4 sm:col-span-2">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div><p className="font-semibold">Google Merchant Center</p><p className="text-xs text-ink/50">Campi editoriali opzionali; in assenza vengono usati nome e descrizione del catalogo.</p></div>
+          <label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" name="merchantEnabled" defaultChecked={product?.merchantEnabled ?? true} className="accent-terracotta" />Pubblica nei feed</label>
+        </div>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <div><label className="label-field" htmlFor="merchantTitle">Titolo Merchant</label><input id="merchantTitle" name="merchantTitle" maxLength={150} defaultValue={product?.merchantTitle ?? ""} className="input-field" /></div>
+          <div><label className="label-field" htmlFor="googleProductCategory">Categoria Google</label><input id="googleProductCategory" name="googleProductCategory" defaultValue={product?.googleProductCategory ?? ""} className="input-field" placeholder="Food, Beverages & Tobacco > Food Items" /></div>
+          <div className="sm:col-span-2"><label className="label-field" htmlFor="merchantDescription">Descrizione Merchant</label><textarea id="merchantDescription" name="merchantDescription" rows={3} maxLength={5000} defaultValue={product?.merchantDescription ?? ""} className="input-field" /></div>
+        </div>
+      </section>
     </div>
   );
 }

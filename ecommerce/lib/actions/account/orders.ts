@@ -8,9 +8,10 @@ import { requireCustomer } from "@/lib/auth/customer-session";
 import { enqueueEmail } from "@/lib/services/email";
 import { transitionOrder } from "@/lib/services/orders";
 import { refundOrder } from "@/lib/services/payment-attempts";
+import { requestReturn } from "@/lib/services/returns";
 
 /** Stati da cui il CLIENTE può ancora annullare: prima che il laboratorio inizi la preparazione. */
-const CUSTOMER_CANCELLABLE = ["PENDING_PAYMENT", "PAID"];
+const CUSTOMER_CANCELLABLE = ["PENDING_PAYMENT", "CONFIRMED", "PAID"];
 
 /**
  * Annullamento self-service dell'ordine. Riusa transitionOrder: macchina a stati,
@@ -30,9 +31,10 @@ export async function cancelCustomerOrderAction(formData: FormData): Promise<voi
   }
 
   try {
-    if (order.status === "PAID" && (order.paymentProvider === "stripe" || order.paymentMethod === "gift_card")) {
+    const paymentCaptured = order.paymentStatus === "PAID" || order.paymentStatus === "PARTIALLY_REFUNDED";
+    if (paymentCaptured && (order.paymentProvider === "stripe" || order.paymentMethod === "gift_card")) {
       await refundOrder(order.id, customer.email, "Rimborso richiesto dal cliente dall'area personale.");
-    } else if (order.status === "PAID") {
+    } else if (paymentCaptured) {
       throw new DomainError("Per annullare un ordine gia pagato con metodo manuale, contatta la sede.");
     } else {
       await transitionOrder(order.id, "CANCELLED", customer.email, {
@@ -54,4 +56,21 @@ export async function cancelCustomerOrderAction(formData: FormData): Promise<voi
   revalidatePath("/account/ordini");
   revalidatePath(back);
   redirect(`${back}?msg=${encodeURIComponent("Ordine annullato. Lo stock della sede è stato ripristinato.")}`);
+}
+
+export async function requestReturnAction(formData: FormData): Promise<void> {
+  const customer = await requireCustomer();
+  const orderId = String(formData.get("orderId") ?? "");
+  const reason = String(formData.get("reason") ?? "").trim();
+  const code = String(formData.get("code") ?? "");
+  const back = `/account/ordini/${encodeURIComponent(code)}`;
+  if (!reason) redirect(`${back}?err=${encodeURIComponent("Indica il motivo del reso.")}`);
+  try {
+    await requestReturn(orderId, customer.id, reason);
+  } catch (error) {
+    if (error instanceof DomainError) redirect(`${back}?err=${encodeURIComponent(error.message)}`);
+    throw error;
+  }
+  revalidatePath(back);
+  redirect(`${back}?msg=${encodeURIComponent("Richiesta di reso inviata. Ti aggiorneremo appena la sede la valuta.")}`);
 }

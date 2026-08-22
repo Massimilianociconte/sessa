@@ -2,8 +2,8 @@ import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import {
   DomainError,
+  assertOrderTransitionAllowed,
   ORDER_STATUS_LABELS,
-  ORDER_TRANSITIONS,
   type PaymentStatus,
   STOCK_HOLDING_STATUSES,
   type OrderStatus
@@ -11,6 +11,9 @@ import {
 import { audit } from "@/lib/audit";
 import { safeErrorMetadata } from "@/lib/safe-log";
 import { maybeConvertReferral } from "@/lib/services/referral";
+import { enqueueEmail } from "@/lib/services/email";
+import { SITE_URL } from "@/lib/site";
+import { secretEquals } from "@/lib/security/secret-equals";
 import { romeDateKey, romeDayRange } from "@/lib/datetime";
 import { getStripe, isStripeConfigured } from "@/lib/payments/stripe";
 
@@ -36,12 +39,20 @@ export type OrderFilter = {
   fulfillmentOn?: Date; // giorno di ritiro/consegna richiesto
   page?: number; // 1-based
   take?: number;
+  /** null/undefined = globale; array vuoto = nessuna sede autorizzata. */
+  allowedLocationIds?: string[] | null;
 };
 
 export function buildOrderWhere(filter?: OrderFilter): Prisma.OrderWhereInput {
   const where: Prisma.OrderWhereInput = {};
   if (filter?.status) where.status = filter.status;
-  if (filter?.locationId) where.locationId = filter.locationId;
+  if (filter?.allowedLocationIds !== undefined && filter.allowedLocationIds !== null) {
+    where.locationId = filter.locationId && filter.allowedLocationIds.includes(filter.locationId)
+      ? filter.locationId
+      : { in: filter.locationId ? [] : filter.allowedLocationIds };
+  } else if (filter?.locationId) {
+    where.locationId = filter.locationId;
+  }
   if (filter?.paymentStatus) where.paymentStatus = filter.paymentStatus;
   if (filter?.paymentMethod) where.paymentMethod = filter.paymentMethod;
   if (filter?.fulfillmentType) where.fulfillmentType = filter.fulfillmentType;
@@ -126,13 +137,21 @@ export async function listOrdersForExport(filter?: OrderFilter) {
   });
 }
 
-export async function getOrder(id: string): Promise<FullOrder | null> {
-  return prisma.order.findUnique({ where: { id }, include: orderInclude });
+export async function getOrder(id: string, allowedLocationIds?: string[] | null): Promise<FullOrder | null> {
+  return prisma.order.findFirst({
+    where: {
+      id,
+      ...(allowedLocationIds !== undefined && allowedLocationIds !== null
+        ? { locationId: { in: allowedLocationIds } }
+        : {})
+    },
+    include: orderInclude
+  });
 }
 
 export async function getOrderForTracking(code: string, publicToken: string): Promise<FullOrder | null> {
   const order = await prisma.order.findUnique({ where: { code }, include: orderInclude });
-  if (!order || order.publicToken !== publicToken) return null;
+  if (!order || !secretEquals(order.publicToken, publicToken)) return null;
   return order;
 }
 
@@ -223,43 +242,42 @@ export async function transitionOrderInTx(
   const order = await tx.order.findUnique({ where: { id: orderId }, include: { items: true } });
   if (!order) throw new DomainError("Ordine non trovato.");
   const from = order.status as OrderStatus;
-  if (!ORDER_TRANSITIONS[from]?.includes(to)) {
-    throw new DomainError(
-      `Transizione non ammessa: ${ORDER_STATUS_LABELS[from]} → ${ORDER_STATUS_LABELS[to]}.`
-    );
-  }
-  if (to === "REFUNDED" && order.paymentStatus !== "PAID") {
-    throw new DomainError("Un ordine non pagato non puo essere rimborsato.");
-  }
+  assertOrderTransitionAllowed({
+    from,
+    to,
+    paymentStatus: order.paymentStatus,
+    fulfillmentType: order.fulfillmentType
+  });
 
   const now = new Date();
   const data: Prisma.OrderUncheckedUpdateManyInput = { status: to };
   if (to === "PAID") {
     data.paidAt = now;
     data.paymentStatus = "PAID";
+    data.stockReservationExpiresAt = null;
   }
   if (opts?.paymentRef) data.paymentRef = opts.paymentRef;
   if (opts?.paymentStatus) data.paymentStatus = opts.paymentStatus;
   if (to === "SHIPPED") data.shippedAt = now;
   if (to === "DELIVERED") data.deliveredAt = now;
-  if (to === "CANCELLED") data.cancelledAt = now;
-  if (to === "REFUNDED") data.paymentStatus = "REFUNDED";
+  if (to === "CANCELLED") {
+    data.cancelledAt = now;
+    data.stockReservationExpiresAt = null;
+  }
+  if (to === "REFUNDED") {
+    data.paymentStatus = "REFUNDED";
+    data.stockReservationExpiresAt = null;
+  }
 
   const claimed = await tx.order.updateMany({ where: { id: orderId, status: from }, data });
   if (claimed.count === 0) {
     throw new DomainError("Lo stato dell'ordine e cambiato durante l'operazione. Ricarica e riprova.", "ORDER_STATE_CONFLICT");
   }
 
-  if (to === "PAID") {
-    await tx.paymentAttempt.updateMany({
-      where: { orderId, status: { in: ["CREATED", "INITIALIZING", "PENDING"] } },
-      data: { status: "PAID", completedAt: now, error: null }
-    });
-  }
-
   const automaticallyRestock =
-    (to === "CANCELLED" || to === "REFUNDED") && STOCK_HOLDING_STATUSES.includes(from);
-  const shouldRestock = opts?.restock ?? automaticallyRestock;
+    ((to === "CANCELLED" || to === "REFUNDED") && STOCK_HOLDING_STATUSES.includes(from)) ||
+    (to === "CANCELLED" && from === "SHIPPED" && order.paymentStatus !== "PAID");
+  const shouldRestock = Boolean(opts?.restock ?? automaticallyRestock) && !order.stockReleasedAt;
   if (shouldRestock && order.locationId) {
     for (const item of order.items) {
       if (!item.variantId) continue;
@@ -281,6 +299,13 @@ export async function transitionOrderInTx(
         }
       });
     }
+  }
+
+  if (shouldRestock) {
+    await tx.order.updateMany({
+      where: { id: orderId, stockReleasedAt: null },
+      data: { stockReleasedAt: now }
+    });
   }
 
   if (to === "CANCELLED" || to === "REFUNDED") {
@@ -318,6 +343,9 @@ export async function transitionOrder(
     });
     if (payment?.paymentProvider === "stripe" && payment.paymentStatus !== "PAID") {
       throw new DomainError("Gli ordini Stripe diventano pagati solo tramite webhook verificato.");
+    }
+    if (payment?.paymentProvider === "manual" && payment.paymentStatus !== "PAID") {
+      throw new DomainError("Registra prima il pagamento manuale dalla sezione Pagamento dell'ordine.");
     }
   }
   if (to === "CANCELLED") {
@@ -362,6 +390,22 @@ export async function transitionOrder(
       console.error("Conversione referral post-pagamento fallita", safeErrorMetadata(error));
     });
   }
+  const notify = await prisma.order.findUnique({
+    where: { id: orderId },
+    select: { email: true, code: true, publicToken: true, locationName: true, totalCents: true }
+  });
+  if (notify && (to === "READY" || to === "SHIPPED")) {
+    await enqueueEmail({
+      toEmail: notify.email,
+      subject: to === "READY" ? `Ordine ${notify.code} pronto al ritiro — Sessa 1930` : `Ordine ${notify.code} spedito — Sessa 1930`,
+      type: to === "READY" ? "ORDER_READY" : "ORDER_SHIPPED",
+      reference: notify.code,
+      body:
+        to === "READY"
+          ? `Il tuo ordine ${notify.code} e pronto per il ritiro presso ${notify.locationName}.\nSegui lo stato: ${SITE_URL}/ordine/${notify.code}?t=${notify.publicToken}`
+          : `Il tuo ordine ${notify.code} e stato spedito.\nSegui lo stato: ${SITE_URL}/ordine/${notify.code}?t=${notify.publicToken}`
+    }).catch(() => undefined);
+  }
 }
 
 export async function setTracking(
@@ -370,16 +414,21 @@ export async function setTracking(
   code: string,
   actorEmail: string
 ): Promise<void> {
-  await prisma.order.update({ where: { id: orderId }, data: { trackingCarrier: carrier, trackingCode: code } });
-  await prisma.orderEvent.create({
-    data: { orderId, type: "TRACKING", message: `Tracking impostato: ${carrier} ${code}`, actor: actorEmail }
+  await prisma.$transaction(async (tx) => {
+    await tx.order.update({ where: { id: orderId }, data: { trackingCarrier: carrier, trackingCode: code } });
+    await tx.orderEvent.create({
+      data: { orderId, type: "TRACKING", message: `Tracking impostato: ${carrier} ${code}`, actor: actorEmail }
+    });
   });
   await audit(actorEmail, "order.tracking", "Order", orderId, { carrier, code });
 }
 
 export async function setAdminNote(orderId: string, note: string, actorEmail: string): Promise<void> {
-  await prisma.order.update({ where: { id: orderId }, data: { adminNote: note } });
-  await prisma.orderEvent.create({
-    data: { orderId, type: "NOTE", message: "Nota interna aggiornata.", actor: actorEmail }
+  await prisma.$transaction(async (tx) => {
+    await tx.order.update({ where: { id: orderId }, data: { adminNote: note } });
+    await tx.orderEvent.create({
+      data: { orderId, type: "NOTE", message: "Nota interna aggiornata.", actor: actorEmail }
+    });
   });
+  await audit(actorEmail, "order.note", "Order", orderId, { length: note.length });
 }

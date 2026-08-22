@@ -2,7 +2,8 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
-import { requireAdminCapability } from "@/lib/auth/session";
+import { assertAdminLocationAccess, requireAdminCapability } from "@/lib/auth/session";
+import { prisma } from "@/lib/db";
 import { DomainError } from "@/lib/domain";
 import { adjustStock } from "@/lib/services/inventory";
 import { backWithError, backWithMessage } from "./helpers";
@@ -37,6 +38,12 @@ export async function adjustStockAction(formData: FormData): Promise<void> {
   if (!parsed.success) backWithError(backPath, parsed.error.issues[0]?.message ?? "Dati non validi.");
   const delta = parsed.data.direction === "add" ? parsed.data.qty : -parsed.data.qty;
   try {
+    const storeVariant = await prisma.storeVariant.findUnique({
+      where: { id: parsed.data.storeVariantId },
+      select: { locationId: true }
+    });
+    if (!storeVariant) throw new DomainError("Voce di magazzino non trovata.");
+    assertAdminLocationAccess(user, storeVariant.locationId);
     await adjustStock(parsed.data.storeVariantId, delta, parsed.data.reason, user.email, parsed.data.note);
   } catch (error) {
     if (error instanceof DomainError) backWithError(backPath, error.message);

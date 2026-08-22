@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   formatRomeDateTime,
+  formatRomeDateTimeLocal,
   parseRomeDateTimeLocal,
   romeDayRange
 } from "../lib/datetime";
@@ -25,4 +26,9 @@ test("gli intervalli giorno rispettano giornate DST da 23 e 25 ore", () => {
   assert.ok(autumn);
   assert.equal(spring.end.getTime() - spring.start.getTime(), 23 * 60 * 60_000);
   assert.equal(autumn.end.getTime() - autumn.start.getTime(), 25 * 60 * 60_000);
+});
+
+test("datetime-local del checkout usa la wall-clock di Roma anche se il runtime e UTC", () => {
+  assert.equal(formatRomeDateTimeLocal(new Date("2026-07-10T13:00:00.000Z")), "2026-07-10T15:00");
+  assert.equal(formatRomeDateTimeLocal(new Date("2026-01-10T13:00:00.000Z")), "2026-01-10T14:00");
 });

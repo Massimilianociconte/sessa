@@ -1,0 +1,13 @@
+const KEY = /^[A-Za-z0-9_-]{32,80}$/;
+
+export function parseCheckoutIdempotencyKey(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return KEY.test(trimmed) ? trimmed : null;
+}
+
+export function createCheckoutIdempotencyKey(): string {
+  const bytes = new Uint8Array(24);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}

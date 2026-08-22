@@ -15,6 +15,7 @@ export const PRODUCT_STATUS_LABELS: Record<ProductStatus, string> = {
 
 export const ORDER_STATUSES = [
   "PENDING_PAYMENT",
+  "CONFIRMED",
   "PAID",
   "PROCESSING",
   "READY",
@@ -27,6 +28,7 @@ export type OrderStatus = (typeof ORDER_STATUSES)[number];
 
 export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
   PENDING_PAYMENT: "In attesa di pagamento",
+  CONFIRMED: "Confermato",
   PAID: "Pagato",
   PROCESSING: "In preparazione",
   READY: "Pronto per il ritiro",
@@ -43,22 +45,51 @@ export const ORDER_STATUS_LABELS: Record<OrderStatus, string> = {
  */
 export const ORDER_TRANSITIONS: Record<OrderStatus, OrderStatus[]> = {
   PENDING_PAYMENT: ["PAID", "CANCELLED"],
+  CONFIRMED: ["PROCESSING", "CANCELLED", "REFUNDED"],
   PAID: ["PROCESSING", "REFUNDED"],
-  PROCESSING: ["READY", "SHIPPED", "REFUNDED"],
-  READY: ["DELIVERED", "REFUNDED"],
-  SHIPPED: ["DELIVERED", "REFUNDED"],
+  PROCESSING: ["READY", "SHIPPED", "CANCELLED", "REFUNDED"],
+  READY: ["DELIVERED", "REFUNDED", "CANCELLED"],
+  SHIPPED: ["DELIVERED", "REFUNDED", "CANCELLED"],
   DELIVERED: ["REFUNDED"],
-  CANCELLED: [],
+  CANCELLED: ["REFUNDED"],
   REFUNDED: []
 };
 
 /** Stati per cui lo stock è ancora impegnato: l'annullamento da questi stati ricarica il magazzino. */
 export const STOCK_HOLDING_STATUSES: OrderStatus[] = [
   "PENDING_PAYMENT",
+  "CONFIRMED",
   "PAID",
   "PROCESSING",
-  "READY"
+  "READY",
+  "SHIPPED"
 ];
+
+export function assertOrderTransitionAllowed(input: {
+  from: OrderStatus;
+  to: OrderStatus;
+  paymentStatus: string;
+  fulfillmentType: string;
+}): void {
+  if (!ORDER_TRANSITIONS[input.from]?.includes(input.to)) {
+    throw new DomainError(
+      `Transizione non ammessa: ${ORDER_STATUS_LABELS[input.from]} → ${ORDER_STATUS_LABELS[input.to]}.`
+    );
+  }
+  const paymentCaptured = input.paymentStatus === "PAID" || input.paymentStatus === "PARTIALLY_REFUNDED";
+  if (input.to === "REFUNDED" && !paymentCaptured) {
+    throw new DomainError("Un ordine non pagato non puo essere rimborsato.");
+  }
+  if (input.to === "CANCELLED" && paymentCaptured) {
+    throw new DomainError("Un ordine pagato deve essere rimborsato, non annullato.");
+  }
+  if (input.to === "READY" && input.fulfillmentType !== "PICKUP") {
+    throw new DomainError("Solo un ordine con ritiro in sede puo diventare pronto per il ritiro.");
+  }
+  if (input.to === "SHIPPED" && input.fulfillmentType !== "DELIVERY") {
+    throw new DomainError("Solo un ordine con consegna puo essere segnato come spedito.");
+  }
+}
 
 export const FULFILLMENT_TYPES = ["PICKUP", "DELIVERY"] as const;
 export type FulfillmentType = (typeof FULFILLMENT_TYPES)[number];
@@ -78,19 +109,24 @@ export const DISCOUNT_SCOPE_LABELS: Record<DiscountScope, string> = {
   PRODUCTS: "Prodotti selezionati"
 };
 
-export const PAYMENT_STATUSES = ["PENDING", "AUTHORIZED", "PAID", "REFUNDED", "FAILED"] as const;
+export const PAYMENT_STATUSES = ["PENDING", "AUTHORIZED", "PAID", "PARTIALLY_REFUNDED", "REFUNDED", "FAILED"] as const;
 export type PaymentStatus = (typeof PAYMENT_STATUSES)[number];
 
 export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
   PENDING: "In attesa",
   AUTHORIZED: "Autorizzato",
   PAID: "Pagato",
+  PARTIALLY_REFUNDED: "Rimborso parziale",
   REFUNDED: "Rimborsato",
   FAILED: "Fallito"
 };
 
 export const PAYMENT_METHODS = ["bank_transfer", "cash_on_pickup", "card", "gift_card"] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
+
+/** Metodi che il cliente puo scegliere al checkout. La gift card e un credito, non un radio. */
+export const CHECKOUT_PAYMENT_METHODS = ["bank_transfer", "cash_on_pickup", "card"] as const;
+export type CheckoutPaymentMethod = (typeof CHECKOUT_PAYMENT_METHODS)[number];
 
 export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   bank_transfer: "Bonifico bancario",
@@ -113,7 +149,7 @@ export const STOCK_REASON_LABELS: Record<StockReason, string> = {
   INITIAL: "Carico iniziale"
 };
 
-export const ADMIN_ROLES = ["OWNER", "ADMIN", "STAFF"] as const;
+export const ADMIN_ROLES = ["OWNER", "ADMIN", "STORE_MANAGER", "FULFILLMENT", "MARKETING"] as const;
 export type AdminRole = (typeof ADMIN_ROLES)[number];
 
 export class DomainError extends Error {

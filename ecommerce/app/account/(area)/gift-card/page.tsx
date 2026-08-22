@@ -7,6 +7,7 @@ import {
   AccountPanel
 } from "@/components/account/AccountUi";
 import CopyField from "@/components/account/CopyField";
+import { applyGiftCardAction } from "@/lib/actions/cart";
 import { requireCustomer } from "@/lib/auth/customer-session";
 import { formatCents } from "@/lib/money";
 import { listCustomerGiftCards } from "@/lib/services/customer-account";
@@ -21,8 +22,12 @@ function cardStatus(card: { isActive: boolean; balanceCents: number; expiresAt: 
   return { label: "Attiva", className: "bg-brilliant/15 text-emerald-800" };
 }
 
-export default async function AccountGiftCardsPage() {
-  const customer = await requireCustomer();
+export default async function AccountGiftCardsPage({
+  searchParams
+}: {
+  searchParams: Promise<{ err?: string }>;
+}) {
+  const [{ err }, customer] = await Promise.all([searchParams, requireCustomer()]);
   const cards = await listCustomerGiftCards(customer.id);
   const activeCards = cards.filter((card) => card.isActive && card.balanceCents > 0 && (!card.expiresAt || card.expiresAt > new Date()));
   const totalBalance = activeCards.reduce((sum, card) => sum + card.balanceCents, 0);
@@ -34,8 +39,10 @@ export default async function AccountGiftCardsPage() {
         title="Gift card e crediti"
         description="Controlla saldo residuo, scadenze e movimenti dei crediti collegati al tuo account."
       >
-        <Link href="/" className="btn-primary">Usa al checkout</Link>
+        <Link href="/checkout" className="btn-primary">Vai al checkout</Link>
       </AccountPageIntro>
+
+      {err && <p className="rounded-xl bg-terracotta/10 px-4 py-3 text-sm font-semibold text-terracotta">{err}</p>}
 
       <AccountInfoGrid>
         <AccountInfoTile label="Saldo disponibile" value={formatCents(totalBalance)} description={`${activeCards.length} card attiv${activeCards.length === 1 ? "a" : "e"}`} tone="brilliant" />
@@ -69,6 +76,15 @@ export default async function AccountGiftCardsPage() {
                     <span className={`badge ${status.className}`}>{status.label}</span>
                   </div>
                   <CopyField value={card.code} />
+                  {status.label === "Attiva" && (
+                    <form action={applyGiftCardAction} className="mt-3">
+                      <input type="hidden" name="giftCardCode" value={card.code} />
+                      <input type="hidden" name="next" value="checkout" />
+                      <button type="submit" className="btn-secondary w-full text-sm">
+                        Applica al checkout
+                      </button>
+                    </form>
+                  )}
                   <div className="account-credit-meta">
                     <span>Scadenza: {card.expiresAt ? formatRomeDate(card.expiresAt) : "Nessuna"}</span>
                     <span>{card.transactions.length} moviment{card.transactions.length === 1 ? "o" : "i"}</span>

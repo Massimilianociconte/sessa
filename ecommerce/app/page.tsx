@@ -1,10 +1,33 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 import type { CSSProperties } from "react";
+import JsonLd from "@/components/seo/JsonLd";
 import Footer from "@/components/storefront/Footer";
 import Header from "@/components/storefront/Header";
+import { buildHomeJsonLd } from "@/lib/seo/sessa-local";
+import { getSessionCustomer } from "@/lib/auth/customer-session";
+import { getCustomerPreferenceSnapshot } from "@/lib/services/customer-account";
 import { listActiveLocations } from "@/lib/services/locations";
+import { SITE_URL } from "@/lib/site";
 
 export const revalidate = 30;
+
+export const metadata: Metadata = {
+  title: { absolute: "Shop online Sessa 1930 - scegli la tua sede" },
+  description:
+    "Scegli la sede Sessa 1930 e ordina online sfogliatelle, babà, box regalo e specialità napoletane dal catalogo locale.",
+  alternates: { canonical: `${SITE_URL}/` },
+  robots: { index: true, follow: true },
+  openGraph: {
+    type: "website",
+    title: "Shop online Sessa 1930 - scegli la tua sede",
+    description: "Cataloghi, disponibilità, ritiro e consegna collegati a ogni punto vendita Sessa 1930.",
+    url: `${SITE_URL}/`,
+    siteName: "Sessa 1930",
+    locale: "it_IT",
+    images: [{ url: "/brand/sessa-logo-white.webp", alt: "Sessa 1930" }]
+  }
+};
 
 const ACCENTS = [
   { accent: "#d65a1f", tile: 'url("/patterns/sessa-maiolica-orange.png")' },
@@ -13,11 +36,17 @@ const ACCENTS = [
 ];
 
 export default async function HomePage() {
-  const locations = await listActiveLocations();
+  const [locations, customer] = await Promise.all([listActiveLocations(), getSessionCustomer()]);
+  const preferred = customer ? (await getCustomerPreferenceSnapshot(customer.id)).effectiveLocation : null;
+  const preferredSlug = preferred?.slug ?? null;
+  const orderedLocations = preferredSlug
+    ? [...locations].sort((left, right) => Number(right.slug === preferredSlug) - Number(left.slug === preferredSlug))
+    : locations;
 
   return (
     <>
-      <Header />
+      <Header currentLocation={preferred ? { slug: preferred.slug, name: preferred.name } : undefined} />
+      <JsonLd data={buildHomeJsonLd(locations)} />
       <main className="shop-main mx-auto max-w-6xl px-4">
         <section className="shop-home-hero py-10 md:py-16">
           <div className="shop-home-copy">
@@ -48,8 +77,16 @@ export default async function HomePage() {
           <span className="kicker">I nostri punti vendita</span>
         </div>
 
+        {preferredSlug && (
+          <p className="mb-4 text-sm text-ink/60">
+            La tua sede preferita e in evidenza.{" "}
+            <Link href={`/sede/${preferredSlug}`} className="font-semibold text-terracotta hover:underline">
+              Apri il catalogo
+            </Link>
+          </p>
+        )}
         <div className="location-grid grid grid-cols-1 gap-6 pb-8 sm:grid-cols-2 lg:grid-cols-3">
-          {locations.map((location, i) => {
+          {orderedLocations.map((location, i) => {
             const theme = ACCENTS[i % ACCENTS.length];
             const style = { "--accent": theme.accent, "--tile": theme.tile } as CSSProperties;
             return (

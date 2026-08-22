@@ -15,7 +15,8 @@ function parseLocation(formData: FormData) {
     ...formDataToObject(formData),
     pickupEnabled: formData.get("pickupEnabled") === "on",
     deliveryEnabled: formData.get("deliveryEnabled") === "on",
-    isActive: formData.get("isActive") === "on"
+    isActive: formData.get("isActive") === "on",
+    merchantEnabled: formData.get("merchantEnabled") === "on"
   });
 }
 
@@ -40,7 +41,7 @@ export async function createLocationAction(formData: FormData): Promise<void> {
           locationId: created.id,
           variantId: variant.id,
           stockQty: 0,
-          isAvailable: true,
+          isAvailable: false,
           position: variant.position
         })),
         skipDuplicates: true
@@ -63,7 +64,27 @@ export async function updateLocationAction(formData: FormData): Promise<void> {
   if (!parsed.success) backWithError(PATH, firstZodMessage(parsed.error));
   const clash = await prisma.location.findFirst({ where: { slug: parsed.data.slug, id: { not: id } } });
   if (clash) backWithError(PATH, "Slug sede già in uso.");
-  await prisma.location.update({ where: { id }, data: parsed.data });
+  await prisma.$transaction(async (tx) => {
+    await tx.location.update({ where: { id }, data: parsed.data });
+    if (parsed.data.isActive) {
+      const variants = await tx.productVariant.findMany({
+        where: { isActive: true },
+        select: { id: true, position: true }
+      });
+      if (variants.length > 0) {
+        await tx.storeVariant.createMany({
+          data: variants.map((variant) => ({
+            locationId: id,
+            variantId: variant.id,
+            stockQty: 0,
+            isAvailable: false,
+            position: variant.position
+          })),
+          skipDuplicates: true
+        });
+      }
+    }
+  });
   await audit(user.email, "location.update", "Location", id, parsed.data);
   invalidateMemo("loc:");
   revalidatePath("/", "layout");

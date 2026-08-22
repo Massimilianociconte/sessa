@@ -29,6 +29,7 @@ declare global {
     dataLayer?: Array<Record<string, unknown>>;
     gtag?: (...args: unknown[]) => void;
     sessaAnalyticsQueue?: Array<Record<string, unknown>>;
+    sessaAnalyticsConsent?: boolean;
   }
 }
 
@@ -38,6 +39,7 @@ export function centsToAnalyticsValue(cents: number): number {
 
 export function trackEcommerceEvent(event: string, payload: EcommerceEventPayload = {}): void {
   if (typeof window === "undefined") return;
+  if (window.sessaAnalyticsConsent !== true) return;
   const normalized = { currency: "EUR", ...payload };
   const entry = { event, ecommerce: normalized, timestamp: new Date().toISOString() };
   window.sessaAnalyticsQueue = [...(window.sessaAnalyticsQueue ?? []), entry].slice(-50);

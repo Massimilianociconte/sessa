@@ -1,7 +1,12 @@
 import Link from "next/link";
+import CookiePreferencesButton from "@/components/privacy/CookiePreferencesButton";
 import { getSetting } from "@/lib/services/settings";
 
-export default async function Footer() {
+export default async function Footer({
+  location
+}: {
+  location?: { address: string; city: string; postalCode?: string; phone?: string | null; name?: string };
+}) {
   const [name, address, phone, email, vat] = await Promise.all([
     getSetting("store.name", "Sessa 1930"),
     getSetting("store.address", ""),
@@ -9,6 +14,11 @@ export default async function Footer() {
     getSetting("store.email", ""),
     getSetting("store.vat", "")
   ]);
+  const contactAddress = location
+    ? `${location.address}${location.postalCode ? `, ${location.postalCode}` : ""} ${location.city}`
+    : address;
+  const contactPhone = location?.phone || (!location ? phone : "");
+  const contactLabel = location?.name ?? "Contatti";
 
   return (
     <footer className="mt-20 border-t border-terracotta/15 bg-white/50">
@@ -20,9 +30,9 @@ export default async function Footer() {
           </p>
         </div>
         <div className="text-sm text-ink/70">
-          <p className="font-semibold uppercase tracking-wide text-ink/50">Contatti</p>
-          <p className="mt-2">{address}</p>
-          <p>{phone}</p>
+          <p className="font-semibold uppercase tracking-wide text-ink/50">{contactLabel}</p>
+          <p className="mt-2">{contactAddress}</p>
+          {contactPhone && <p>{contactPhone}</p>}
           <p>{email}</p>
         </div>
         <div className="text-sm text-ink/70">
@@ -31,6 +41,7 @@ export default async function Footer() {
             <Link href="/account" className="hover:text-terracotta">Area personale</Link>
             <Link href="/account/ordini" className="hover:text-terracotta">I miei ordini</Link>
             <Link href="/account/invita" className="hover:text-terracotta">Invita un amico</Link>
+            <CookiePreferencesButton />
           </p>
           <p className="mt-4 text-xs text-ink/40">{vat}</p>
         </div>

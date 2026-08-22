@@ -2,7 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
-import { requireAdminCapability } from "@/lib/auth/session";
+import { assertAdminLocationAccess, requireAdmin, requireAdminCapability } from "@/lib/auth/session";
+import { hasAdminCapability } from "@/lib/auth/admin-authorization";
+import type { Prisma } from "@prisma/client";
 import { audit } from "@/lib/audit";
 import { parseEuroToCents } from "@/lib/money";
 import { formDataToObject, productSchema, variantSchema } from "@/lib/validation";
@@ -15,11 +17,33 @@ function revalidateCatalog() {
   revalidatePath("/admin/prodotti");
 }
 
+async function ensureStoreVariantsForVariantInTx(
+  tx: Prisma.TransactionClient,
+  variantId: string,
+  position: number,
+  compareAtCents: number | null
+) {
+  const locations = await tx.location.findMany({ where: { isActive: true }, select: { id: true } });
+  if (locations.length === 0) return;
+  await tx.storeVariant.createMany({
+    data: locations.map((location) => ({
+      locationId: location.id,
+      variantId,
+      stockQty: 0,
+      isAvailable: false,
+      compareAtCents,
+      position
+    })),
+    skipDuplicates: true
+  });
+}
+
 export async function createProductAction(formData: FormData): Promise<void> {
   const user = await requireAdminCapability("catalog:manage");
   const parsed = productSchema.safeParse({
     ...formDataToObject(formData),
-    featured: formData.get("featured") === "on"
+    featured: formData.get("featured") === "on",
+    merchantEnabled: formData.get("merchantEnabled") === "on"
   });
   if (!parsed.success) backWithError("/admin/prodotti/nuovo", firstZodMessage(parsed.error));
   const exists = await prisma.product.findUnique({ where: { slug: parsed.data.slug } });
@@ -37,7 +61,8 @@ export async function updateProductAction(formData: FormData): Promise<void> {
   const id = requireString(formData, "id");
   const parsed = productSchema.safeParse({
     ...formDataToObject(formData),
-    featured: formData.get("featured") === "on"
+    featured: formData.get("featured") === "on",
+    merchantEnabled: formData.get("merchantEnabled") === "on"
   });
   if (!parsed.success) backWithError(`/admin/prodotti/${id}`, firstZodMessage(parsed.error));
   const clash = await prisma.product.findFirst({ where: { slug: parsed.data.slug, id: { not: id } } });
@@ -94,6 +119,8 @@ export async function createVariantAction(formData: FormData): Promise<void> {
         sku: parsed.data.sku,
         basePriceCents,
         compareAtCents,
+        gtin: parsed.data.gtin ?? null,
+        mpn: parsed.data.mpn ?? null,
         weightGrams: parsed.data.weightGrams,
         isActive: parsed.data.isActive,
         position: parsed.data.position
@@ -109,7 +136,8 @@ export async function createVariantAction(formData: FormData): Promise<void> {
           locationId: location.id,
           variantId: created.id,
           stockQty: 0,
-          isAvailable: true,
+          isAvailable: false,
+          compareAtCents,
           position: parsed.data.position
         })),
         skipDuplicates: true
@@ -119,7 +147,7 @@ export async function createVariantAction(formData: FormData): Promise<void> {
   });
   await audit(user.email, "variant.create", "ProductVariant", variant.id, parsed.data);
   revalidateCatalog();
-  backWithMessage(path, `Variante "${parsed.data.name}" creata e pubblicata su tutte le sedi (stock 0).`);
+  backWithMessage(path, `Variante "${parsed.data.name}" creata. Attivala sede per sede dall'assortimento (non e visibile finche non la rendi disponibile).`);
 }
 
 export async function updateVariantAction(formData: FormData): Promise<void> {
@@ -147,16 +175,23 @@ export async function updateVariantAction(formData: FormData): Promise<void> {
   });
   if (skuClash) backWithError(path, `SKU "${parsed.data.sku}" già in uso.`);
 
-  await prisma.productVariant.update({
-    where: { id: variantId },
-    data: {
-      name: parsed.data.name,
-      sku: parsed.data.sku,
-      basePriceCents,
-      compareAtCents,
-      weightGrams: parsed.data.weightGrams,
-      isActive: parsed.data.isActive,
-      position: parsed.data.position
+  await prisma.$transaction(async (tx) => {
+    await tx.productVariant.update({
+      where: { id: variantId },
+      data: {
+        name: parsed.data.name,
+        sku: parsed.data.sku,
+        basePriceCents,
+        compareAtCents,
+        gtin: parsed.data.gtin ?? null,
+        mpn: parsed.data.mpn ?? null,
+        weightGrams: parsed.data.weightGrams,
+        isActive: parsed.data.isActive,
+        position: parsed.data.position
+      }
+    });
+    if (parsed.data.isActive) {
+      await ensureStoreVariantsForVariantInTx(tx, variantId, parsed.data.position, compareAtCents);
     }
   });
   await audit(user.email, "variant.update", "ProductVariant", variantId, parsed.data);
@@ -184,13 +219,17 @@ export async function deleteVariantAction(formData: FormData): Promise<void> {
  * di uno StoreVariant. Lo stock si tocca solo dal magazzino (ledger).
  */
 export async function updateStoreVariantAction(formData: FormData): Promise<void> {
-  const user = await requireAdminCapability("catalog:manage");
+  const user = await requireAdmin();
+  if (!hasAdminCapability(user.role, "catalog:manage") && !hasAdminCapability(user.role, "inventory:manage")) {
+    throw new Error("Non autorizzato.");
+  }
   const storeVariantId = requireString(formData, "storeVariantId");
   const productId = requireString(formData, "productId");
   const path = `/admin/prodotti/${productId}`;
   const isAvailable = formData.get("isAvailable") === "on";
   const priceRaw = String(formData.get("price") ?? "").trim();
-  const lowStock = Number(formData.get("lowStockThreshold") ?? 5) | 0;
+  const thresholdRaw = String(formData.get("lowStockThreshold") ?? "").trim();
+  const lowStock = thresholdRaw === "" ? undefined : Math.max(0, Number(thresholdRaw) | 0);
 
   let priceCentsOverride: number | null = null;
   if (priceRaw !== "") {
@@ -201,9 +240,20 @@ export async function updateStoreVariantAction(formData: FormData): Promise<void
     }
   }
 
+  const current = await prisma.storeVariant.findUnique({
+    where: { id: storeVariantId },
+    select: { locationId: true }
+  });
+  if (!current) backWithError(path, "Assortimento non trovato.");
+  assertAdminLocationAccess(user, current.locationId);
+
   await prisma.storeVariant.update({
     where: { id: storeVariantId },
-    data: { isAvailable, priceCentsOverride, lowStockThreshold: Math.max(0, lowStock) }
+    data: {
+      isAvailable,
+      priceCentsOverride,
+      ...(lowStock === undefined ? {} : { lowStockThreshold: lowStock })
+    }
   });
   await audit(user.email, "storeVariant.update", "StoreVariant", storeVariantId, {
     isAvailable,

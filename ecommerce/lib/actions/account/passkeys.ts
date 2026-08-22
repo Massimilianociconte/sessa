@@ -29,7 +29,9 @@ import {
   finishPasskeyLogin,
   finishPasskeyRegistration
 } from "@/lib/services/customer-passkeys";
+import { verifySecondFactor } from "@/lib/services/customer-2fa";
 import { enqueueEmail } from "@/lib/services/email";
+import { createHash, randomBytes } from "node:crypto";
 
 type ActionResult<T> = { ok: true; data: T } | { ok: false; error: string };
 
@@ -40,7 +42,10 @@ function fail<T>(error: unknown, fallback: string): ActionResult<T> {
 }
 
 /** Passo 1 registrazione: opzioni WebAuthn per il cliente loggato. */
-export async function startPasskeyRegistrationAction(password: string): Promise<
+export async function startPasskeyRegistrationAction(
+  password: string,
+  totpCode?: string
+): Promise<
   ActionResult<PublicKeyCredentialCreationOptionsJSON>
 > {
   try {
@@ -51,11 +56,17 @@ export async function startPasskeyRegistrationAction(password: string): Promise<
     }
     const row = await prisma.customer.findUnique({
       where: { id: customer.id },
-      select: { passwordHash: true }
+      select: { passwordHash: true, totpEnabledAt: true }
     });
     if (!verifyPasswordOrDummy(password.slice(0, 129), row?.passwordHash)) {
       await registerFailedAttempt(rateKey);
       return { ok: false, error: "Password attuale non valida." };
+    }
+    if (row?.totpEnabledAt) {
+      if (!totpCode || !(await verifySecondFactor(customer.id, totpCode))) {
+        await registerFailedAttempt(rateKey);
+        return { ok: false, error: "Inserisci anche il codice dell'app authenticator." };
+      }
     }
     await clearAttempts(rateKey);
     const issueKey = rateLimitKey("passkey-registration-issue", await getClientIp(), customer.id);
@@ -149,7 +160,7 @@ export async function startPasskeyLoginAction(): Promise<
 export async function finishPasskeyLoginAction(
   response: AuthenticationResponseJSON,
   nextPath?: string
-): Promise<ActionResult<{ redirectTo: string }>> {
+): Promise<ActionResult<{ redirectTo: string; needsTotp?: boolean; pendingToken?: string }>> {
   const rateKey = rateLimitKey("passkey-login", await getClientIp());
   try {
     if ((await isRateLimited(rateKey)) !== null) {
@@ -158,12 +169,77 @@ export async function finishPasskeyLoginAction(
     const { customerId } = await finishPasskeyLogin(response);
     const customer = await prisma.customer.findUnique({
       where: { id: customerId },
-      select: { firstName: true, email: true }
+      select: { firstName: true, email: true, emailVerified: true, totpEnabledAt: true }
     });
+    if (!customer?.emailVerified) {
+      return { ok: false, error: "Conferma prima l'email. Usa «Password dimenticata?» se il link e scaduto." };
+    }
     await clearAttempts(rateKey);
+    if (customer.totpEnabledAt) {
+      const pending = randomBytes(32).toString("hex");
+      await prisma.customerToken.create({
+        data: {
+          tokenHash: createHash("sha256").update(pending).digest("hex"),
+          customerId,
+          type: "PASSKEY_2FA",
+          payload: nextPath ?? null,
+          expiresAt: new Date(Date.now() + 5 * 60_000)
+        }
+      });
+      return { ok: true, data: { needsTotp: true, pendingToken: pending, redirectTo: "" } };
+    }
     await pruneExpiredCustomerSessions();
     const session = await createCustomerSession(customerId);
+    await setCustomerDisplayNameCookie(customer.firstName);
+    const { syncCartCookieAfterLogin } = await import("@/lib/services/cart");
+    await syncCartCookieAfterLogin(customerId).catch(() => undefined);
+    await enqueueEmail({
+      toEmail: customer.email,
+      subject: "Nuovo accesso con passkey — Sessa 1930",
+      type: "SECURITY_LOGIN",
+      body: `Ciao ${customer.firstName},\n\nabbiamo registrato un accesso con passkey al tuo account.${session.ipAddress ? `\nIP: ${session.ipAddress}` : ""}${session.userAgent ? `\nDispositivo/browser: ${session.userAgent}` : ""}\n\nSe non sei stato tu, revoca la sessione dalla sezione Sicurezza.`
+    }).catch(() => undefined);
+    return { ok: true, data: { redirectTo: safeNextPath(nextPath, "/account", "/account") } };
+  } catch (error) {
+    await registerFailedAttempt(rateKey);
+    return fail(error, "Accesso con passkey non riuscito.");
+  }
+}
+
+export async function completePasskeySecondFactorAction(
+  pendingToken: string,
+  totpCode: string
+): Promise<ActionResult<{ redirectTo: string }>> {
+  const rateKey = rateLimitKey("passkey-login", await getClientIp());
+  try {
+    const tokenHash = createHash("sha256").update(pendingToken).digest("hex");
+    const row = await prisma.customerToken.findUnique({ where: { tokenHash } });
+    if (!row || row.type !== "PASSKEY_2FA" || row.usedAt || row.expiresAt < new Date()) {
+      return { ok: false, error: "Sessione passkey scaduta. Ripeti l'accesso." };
+    }
+    if (!(await verifySecondFactor(row.customerId, totpCode))) {
+      await registerFailedAttempt(rateKey);
+      return { ok: false, error: "Codice di verifica non valido." };
+    }
+    // Claim atomico: un solo tentativo puo consumare il token, anche con due
+    // submit concorrenti (prima era find-then-update, quindi doppio consumo
+    // teorico con due TOTP validi consecutivi).
+    const claimed = await prisma.customerToken.updateMany({
+      where: { id: row.id, usedAt: null },
+      data: { usedAt: new Date() }
+    });
+    if (claimed.count === 0) {
+      return { ok: false, error: "Sessione passkey scaduta. Ripeti l'accesso." };
+    }
+    const customer = await prisma.customer.findUnique({
+      where: { id: row.customerId },
+      select: { firstName: true, email: true }
+    });
+    await pruneExpiredCustomerSessions();
+    const session = await createCustomerSession(row.customerId);
     await setCustomerDisplayNameCookie(customer?.firstName ?? null);
+    const { syncCartCookieAfterLogin } = await import("@/lib/services/cart");
+    await syncCartCookieAfterLogin(row.customerId).catch(() => undefined);
     if (customer) {
       await enqueueEmail({
         toEmail: customer.email,
@@ -172,12 +248,9 @@ export async function finishPasskeyLoginAction(
         body: `Ciao ${customer.firstName},\n\nabbiamo registrato un accesso con passkey al tuo account.${session.ipAddress ? `\nIP: ${session.ipAddress}` : ""}${session.userAgent ? `\nDispositivo/browser: ${session.userAgent}` : ""}\n\nSe non sei stato tu, revoca la sessione dalla sezione Sicurezza.`
       }).catch(() => undefined);
     }
-    // Il redirect lo fa il client dopo l'esito: le Response WebAuthn non
-    // sopravvivono a un redirect() dentro l'action senza perdere l'errore.
-    return { ok: true, data: { redirectTo: safeNextPath(nextPath, "/account", "/account") } };
+    return { ok: true, data: { redirectTo: safeNextPath(row.payload, "/account", "/account") } };
   } catch (error) {
-    await registerFailedAttempt(rateKey);
-    return fail(error, "Accesso con passkey non riuscito.");
+    return fail(error, "Verifica in due passaggi non riuscita.");
   }
 }
 

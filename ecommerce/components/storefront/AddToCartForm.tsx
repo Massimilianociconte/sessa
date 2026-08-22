@@ -67,12 +67,33 @@ export default function AddToCartForm({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ locationId, storeVariantId: selected, qty: safeQty })
       });
-      if (!res.ok) {
-        const data = (await res.json().catch(() => null)) as { error?: string } | null;
+      let data = (await res.json().catch(() => null)) as
+        | (CartDTO & { error?: string; code?: string; warning?: string })
+        | null;
+      if (res.status === 409 && data?.code === "LOCATION_SWITCH") {
+        const accepted = window.confirm(
+          data.error ?? "Aggiungere da questa sede svuota il carrello dell'altra sede. Continuare?"
+        );
+        if (!accepted) {
+          setError("Aggiunta annullata: il carrello dell'altra sede e rimasto invariato.");
+          return;
+        }
+        const retry = await fetch("/api/cart/add", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ locationId, storeVariantId: selected, qty: safeQty, confirmLocationSwitch: true })
+        });
+        data = (await retry.json().catch(() => null)) as (CartDTO & { error?: string; warning?: string }) | null;
+        if (!retry.ok) {
+          setError(data?.error ?? "Impossibile aggiungere il prodotto.");
+          return;
+        }
+      } else if (!res.ok) {
         setError(data?.error ?? "Impossibile aggiungere il prodotto.");
         return;
       }
-      const nextCart = (await res.json().catch(() => null)) as CartDTO | null;
+      const nextCart = data;
+      if (data?.warning) setError(data.warning);
       if (!nextCart) {
         setError("Il server ha risposto in modo incompleto. Riprova: il carrello verrà verificato.");
         notifyCartChanged();

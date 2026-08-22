@@ -1,12 +1,53 @@
+import { randomBytes } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/db";
 import { DomainError } from "@/lib/domain";
 import { effectivePrice } from "@/lib/services/catalog";
 import { evaluateDiscount, type DiscountContext, type DiscountLine } from "@/lib/services/discounts";
 import { checkGiftCard, loadGiftCard } from "@/lib/services/giftcards";
-import { serializableTransaction } from "@/lib/services/transaction";
+import {
+  describeCartIntegrityWarnings,
+  describeStockClamp,
+  planCartQuantity,
+  planSetCartQuantity,
+  sanitizeCartLines
+} from "@/lib/commerce/cart-integrity";
+import {
+  buildIsolatedCartToken,
+  CONVERTED_CART_TOKEN_PREFIX,
+  isBrowserReusableCartToken,
+  MERGED_CART_TOKEN_PREFIX
+} from "@/lib/commerce/cart-session-isolation";
+import { readCommittedTransaction } from "@/lib/services/transaction";
 
 export const CART_COOKIE = "sessa_cart";
+
+export const CART_COOKIE_ATTRS = {
+  httpOnly: true,
+  sameSite: "lax" as const,
+  path: "/",
+  maxAge: 60 * 60 * 24 * 30
+};
+
+export function cartCookieSetOptions() {
+  return { ...CART_COOKIE_ATTRS, secure: process.env.NODE_ENV === "production" };
+}
+
+export type CartQtyMutation = {
+  qty: number;
+  requested: number;
+  clamped: boolean;
+  productName: string;
+};
+
+export function cartClampWarning(result: CartQtyMutation): string | null {
+  if (!result.clamped) return null;
+  return describeStockClamp({
+    productName: result.productName,
+    requested: result.requested,
+    kept: result.qty
+  });
+}
 
 const cartInclude = {
   location: true,
@@ -55,7 +96,7 @@ export async function getOrCreateCartForLocation(
   locationId: string
 ): Promise<CartWithItems> {
   await maybePruneStaleCarts();
-  return serializableTransaction(async (tx) => {
+  return readCommittedTransaction(async (tx) => {
     const location = await tx.location.findUnique({ where: { id: locationId }, select: { isActive: true } });
     if (!location?.isActive) throw new DomainError("Sede non disponibile.");
 
@@ -66,7 +107,14 @@ export async function getOrCreateCartForLocation(
       include: cartInclude
     });
     if (existing.status !== "ACTIVE") {
-      throw new DomainError("Il carrello precedente e gia stato convertito.", "CART_ALREADY_CONVERTED");
+      await tx.cart.update({
+        where: { id: existing.id },
+        data: { token: `${CONVERTED_CART_TOKEN_PREFIX}${existing.id}` }
+      });
+      return tx.cart.create({
+        data: { token, locationId },
+        include: cartInclude
+      });
     }
     if (existing.locationId === locationId) return existing;
 
@@ -83,9 +131,9 @@ export async function getOrCreateCartForLocation(
   });
 }
 
-export async function addItemToCart(cartId: string, storeVariantId: string, qty: number): Promise<void> {
+export async function addItemToCart(cartId: string, storeVariantId: string, qty: number): Promise<CartQtyMutation> {
   if (!Number.isInteger(qty) || qty <= 0 || qty > 99) throw new DomainError("Quantita non valida.");
-  await serializableTransaction(async (tx) => {
+  return readCommittedTransaction(async (tx) => {
     const cart = await tx.cart.findUnique({ where: { id: cartId } });
     if (!cart || cart.status !== "ACTIVE") throw new DomainError("Carrello non disponibile.");
 
@@ -106,36 +154,51 @@ export async function addItemToCart(cartId: string, storeVariantId: string, qty:
     const existing = await tx.cartItem.findUnique({
       where: { cartId_storeVariantId: { cartId, storeVariantId } }
     });
-    const requested = (existing?.qty ?? 0) + qty;
-    const clamped = Math.min(requested, sv.stockQty, 99);
-    if (clamped <= 0) throw new DomainError("Prodotto esaurito.");
+    const planned = planCartQuantity({
+      alreadyInCart: existing?.qty ?? 0,
+      addQty: qty,
+      stockQty: sv.stockQty
+    });
+    if (planned.qty <= 0) throw new DomainError("Prodotto esaurito.");
 
     await tx.cartItem.upsert({
       where: { cartId_storeVariantId: { cartId, storeVariantId } },
-      update: { qty: clamped },
-      create: { cartId, storeVariantId, qty: clamped }
+      update: { qty: planned.qty },
+      create: { cartId, storeVariantId, qty: planned.qty }
     });
     await tx.cart.update({ where: { id: cartId }, data: { updatedAt: new Date() } });
+    return {
+      qty: planned.qty,
+      requested: planned.requested,
+      clamped: planned.clamped,
+      productName: sv.variant.product.name
+    };
   });
 }
 
-export async function setItemQty(cartId: string, itemId: string, qty: number): Promise<void> {
+export async function setItemQty(cartId: string, itemId: string, qty: number): Promise<CartQtyMutation | null> {
   if (!Number.isInteger(qty) || qty < 0 || qty > 99) throw new DomainError("Quantita non valida.");
-  await serializableTransaction(async (tx) => {
+  return readCommittedTransaction(async (tx) => {
     const cart = await tx.cart.findUnique({ where: { id: cartId }, select: { status: true } });
     if (!cart || cart.status !== "ACTIVE") throw new DomainError("Carrello non disponibile.");
     const item = await tx.cartItem.findFirst({
       where: { id: itemId, cartId },
-      include: { storeVariant: true }
+      include: { storeVariant: { include: { variant: { include: { product: true } } } } }
     });
-    if (!item) return;
-    const clamped = Math.min(qty, item.storeVariant.stockQty, 99);
-    if (clamped <= 0) {
+    if (!item) return null;
+    const planned = planSetCartQuantity({ requestedQty: qty, stockQty: item.storeVariant.stockQty });
+    if (planned.qty <= 0) {
       await tx.cartItem.delete({ where: { id: item.id } });
     } else {
-      await tx.cartItem.update({ where: { id: item.id }, data: { qty: clamped } });
+      await tx.cartItem.update({ where: { id: item.id }, data: { qty: planned.qty } });
     }
     await tx.cart.update({ where: { id: cartId }, data: { updatedAt: new Date() } });
+    return {
+      qty: planned.qty,
+      requested: planned.requested,
+      clamped: planned.clamped,
+      productName: item.storeVariant.variant.product.name
+    };
   });
 }
 
@@ -208,6 +271,7 @@ export type CartView = {
   discountCents: number;
   discountCode: string | null;
   discountWarning: string | null;
+  integrityWarnings: string[];
 };
 
 /** Righe di sconto per il motore granulare. */
@@ -219,11 +283,31 @@ export function buildCartView(
   cart: CartWithItems,
   customerContext?: Pick<DiscountContext, "customerId" | "isFirstOrder" | "customerRedemptions">
 ): CartView {
-  const lines: CartLine[] = cart.items.map((item) => {
+  const integrity = sanitizeCartLines(
+    cart.items.map((item) => ({
+      itemId: item.id,
+      storeVariantId: item.storeVariantId,
+      qty: item.qty,
+      productName: item.storeVariant.variant.product.name,
+      live: {
+        available: item.storeVariant.isAvailable,
+        productActive: item.storeVariant.variant.product.status === "ACTIVE",
+        variantActive: item.storeVariant.variant.isActive,
+        stockQty: item.storeVariant.stockQty,
+        unitCents: effectivePrice(item.storeVariant.priceCentsOverride, item.storeVariant.variant.basePriceCents)
+      }
+    }))
+  );
+  const keptIds = new Set(integrity.kept.map((line) => line.itemId));
+  const qtyById = new Map(integrity.kept.map((line) => [line.itemId, line.qty]));
+  const lines: CartLine[] = cart.items
+    .filter((item) => keptIds.has(item.id))
+    .map((item) => {
     const sv = item.storeVariant;
     const variant = sv.variant;
     const product = variant.product;
     const unitCents = effectivePrice(sv.priceCentsOverride, variant.basePriceCents);
+    const qty = qtyById.get(item.id) ?? item.qty;
     return {
       itemId: item.id,
       storeVariantId: sv.id,
@@ -235,12 +319,13 @@ export function buildCartView(
       variantName: variant.name,
       image: product.image ?? product.images[0]?.url ?? null,
       unitCents,
-      qty: item.qty,
-      totalCents: unitCents * item.qty,
+      qty,
+      totalCents: unitCents * qty,
       maxQty: sv.stockQty,
       taxRateBps: product.taxRateBps
     };
   });
+  const integrityWarnings = describeCartIntegrityWarnings(integrity);
   const subtotalCents = lines.reduce((sum, l) => sum + l.totalCents, 0);
 
   let discountCents = 0;
@@ -268,8 +353,146 @@ export function buildCartView(
     subtotalCents,
     discountCents,
     discountCode,
-    discountWarning
+    discountWarning,
+    integrityWarnings
   };
+}
+
+export async function persistSanitizedCart(cart: CartWithItems): Promise<string[]> {
+  const integrity = sanitizeCartLines(
+    cart.items.map((item) => ({
+      itemId: item.id,
+      storeVariantId: item.storeVariantId,
+      qty: item.qty,
+      productName: item.storeVariant.variant.product.name,
+      live: {
+        available: item.storeVariant.isAvailable,
+        productActive: item.storeVariant.variant.product.status === "ACTIVE",
+        variantActive: item.storeVariant.variant.isActive,
+        stockQty: item.storeVariant.stockQty,
+        unitCents: effectivePrice(item.storeVariant.priceCentsOverride, item.storeVariant.variant.basePriceCents)
+      }
+    }))
+  );
+  const removedIds = integrity.removed.map((item) => item.itemId);
+  if (removedIds.length === 0 && integrity.clamped.length === 0) return [];
+  await prisma.$transaction(async (tx) => {
+    if (removedIds.length > 0) {
+      await tx.cartItem.deleteMany({ where: { cartId: cart.id, id: { in: removedIds } } });
+    }
+    for (const change of integrity.clamped) {
+      await tx.cartItem.update({ where: { id: change.itemId }, data: { qty: change.to } });
+    }
+    await tx.cart.update({ where: { id: cart.id }, data: { updatedAt: new Date() } });
+  });
+  return describeCartIntegrityWarnings(integrity);
+}
+
+export async function isolateCartTokenInDb(token: string): Promise<void> {
+  if (!isBrowserReusableCartToken(token)) return;
+  const cart = await prisma.cart.findFirst({
+    where: { token, status: "ACTIVE" },
+    select: { id: true }
+  });
+  if (!cart) return;
+  const entropy = randomBytes(12).toString("hex");
+  await prisma.cart.updateMany({
+    where: { id: cart.id, token, status: "ACTIVE" },
+    data: { token: buildIsolatedCartToken(cart.id, entropy) }
+  });
+}
+
+export async function isolateCurrentCartCookie(): Promise<void> {
+  const { cookies } = await import("next/headers");
+  const store = await cookies();
+  const token = store.get(CART_COOKIE)?.value ?? null;
+  if (token) await isolateCartTokenInDb(token);
+  store.delete(CART_COOKIE);
+}
+
+export async function bindCustomerCartAfterLogin(
+  customerId: string,
+  existingToken: string | null
+): Promise<string> {
+  const bound = await attachCartToCustomer(existingToken, customerId);
+  if (bound) return bound;
+  // Nessun carrello da legare: il cookie conserva il token del browser se
+  // riutilizzabile, altrimenti ne nasce uno nuovo (carrello vuoto creato al
+  // primo add). In ogni caso il valore in DB non e' mai scelto dal client
+  // per un carrello esistente.
+  return existingToken && isBrowserReusableCartToken(existingToken)
+    ? existingToken
+    : randomBytes(24).toString("hex");
+}
+
+export async function syncCartCookieAfterLogin(customerId: string): Promise<void> {
+  const { cookies } = await import("next/headers");
+  const store = await cookies();
+  const nextToken = await bindCustomerCartAfterLogin(customerId, store.get(CART_COOKIE)?.value ?? null);
+  store.set(CART_COOKIE, nextToken, cartCookieSetOptions());
+}
+
+/**
+ * Lega al cliente il carrello attivo del browser e fonde i carrelli precedenti
+ * della stessa sede. Ritorna il token effettivo da persistere nel cookie, o
+ * null se non esiste alcun carrello da legare.
+ *
+ * Anti-fixation: quando il token del browser non corrisponde a nessun carrello
+ * ma il cliente ne ha uno precedente, il carrello viene ri-etichettato con un
+ * token GENERATO DAL SERVER — mai con il valore arrivato dal client. Un
+ * attaccante che conosce/imposta il cookie della vittima non puo quindi
+ * ereditarne il carrello al login.
+ */
+export async function attachCartToCustomer(
+  browserToken: string | null,
+  customerId: string
+): Promise<string | null> {
+  return readCommittedTransaction(async (tx) => {
+    const current = browserToken
+      ? await tx.cart.findFirst({
+          where: { token: browserToken, status: "ACTIVE" },
+          include: { items: true }
+        })
+      : null;
+    if (current) {
+      await tx.cart.update({ where: { id: current.id }, data: { customerId } });
+      const others = await tx.cart.findMany({
+        where: { customerId, status: "ACTIVE", id: { not: current.id } },
+        include: { items: true }
+      });
+      for (const other of others) {
+        if (other.locationId === current.locationId) {
+          for (const item of other.items) {
+            const existing = current.items.find((row) => row.storeVariantId === item.storeVariantId);
+            if (existing) {
+              await tx.cartItem.update({
+                where: { id: existing.id },
+                data: { qty: Math.min(99, existing.qty + item.qty) }
+              });
+            } else {
+              await tx.cartItem.create({
+                data: { cartId: current.id, storeVariantId: item.storeVariantId, qty: item.qty }
+              });
+            }
+          }
+        }
+        await tx.cart.update({
+          where: { id: other.id },
+          data: { status: "CONVERTED", convertedAt: new Date(), token: `${MERGED_CART_TOKEN_PREFIX}${other.id}` }
+        });
+      }
+      return current.token;
+    }
+
+    const previous = await tx.cart.findFirst({
+      where: { customerId, status: "ACTIVE" },
+      orderBy: { updatedAt: "desc" }
+    });
+    if (!previous) return null;
+    const freshToken = randomBytes(24).toString("hex");
+    await tx.cart.update({ where: { id: previous.id }, data: { token: freshToken } });
+    return freshToken;
+  });
 }
 
 export async function buildCartViewForCustomer(

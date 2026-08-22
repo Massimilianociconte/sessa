@@ -44,6 +44,7 @@ export default function PasskeyManager({ passkeys }: { passkeys: PasskeyView[] }
   const [supported, setSupported] = useState<boolean | null>(null);
   const [name, setName] = useState("");
   const [password, setPassword] = useState("");
+  const [totp, setTotp] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -64,7 +65,7 @@ export default function PasskeyManager({ passkeys }: { passkeys: PasskeyView[] }
         setError("Inserisci la password attuale per aggiungere una passkey.");
         return;
       }
-      const start = await startPasskeyRegistrationAction(password);
+      const start = await startPasskeyRegistrationAction(password, totp || undefined);
       if (!start.ok) {
         setError(start.error);
         return;
@@ -174,6 +175,18 @@ export default function PasskeyManager({ passkeys }: { passkeys: PasskeyView[] }
               maxLength={128}
               autoComplete="current-password"
               className="input-field"
+            />
+          </div>
+          <div>
+            <label htmlFor="passkeyTotp" className="label-field">Codice 2FA se attiva</label>
+            <input
+              id="passkeyTotp"
+              value={totp}
+              onChange={(event) => setTotp(event.target.value)}
+              inputMode="numeric"
+              autoComplete="one-time-code"
+              className="input-field"
+              placeholder="000000"
             />
           </div>
           <button type="button" onClick={create} disabled={busy || supported === null} className="btn-primary sm:col-span-2">

@@ -52,7 +52,7 @@ export default async function AccountPreferencesPage({
           value={snapshot.effectiveLocation?.name ?? "Da scegliere"}
           description={
             isSavedLocation
-              ? "Scelta da te: guida catalogo e suggerimenti."
+              ? "Scelta da te: compare in evidenza in home e nell'header."
               : snapshot.effectiveLocation
                 ? "Derivata dal tuo ultimo ordine. Salvala per fissarla."
                 : "Scegli una sede per catalogo e stock locali."

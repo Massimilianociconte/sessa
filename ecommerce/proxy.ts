@@ -2,21 +2,19 @@ import { NextResponse, type NextRequest } from "next/server";
 import { CUSTOMER_SESSION_COOKIE, SESSION_COOKIE } from "@/lib/auth/constants";
 
 /**
- * Primo cancello (difesa in profondità) su edge. NON è l'unico controllo:
- * i layout rivalidano la sessione a DB e le server action richiamano
- * requireAdmin()/requireCustomer(). Qui si verifica solo la presenza del cookie.
+ * Primo cancello di difesa su edge. I layout e le server action rivalidano
+ * comunque la sessione sul database: qui si evita solo lavoro inutile quando
+ * manca del tutto il cookie.
  */
-
-// Pagine account pubbliche (nessuna sessione richiesta).
 const PUBLIC_ACCOUNT = new Set([
   "/account/login",
   "/account/registrati",
   "/account/recupera",
   "/account/reset",
-  "/account/verifica-email" // il token nel link è l'autenticazione
+  "/account/verifica-email"
 ]);
 
-export function middleware(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   const loginRedirect = (loginPath: "/admin/login" | "/account/login") => {
@@ -28,23 +26,17 @@ export function middleware(request: NextRequest) {
     return NextResponse.redirect(target);
   };
 
-  // Area gestionale
   if (pathname.startsWith("/admin")) {
-    // /admin/setup è il bootstrap del primo account: si autodisattiva a DB
-    // (redirect a login se esiste già un admin) + token env in produzione.
     if (pathname === "/admin/login" || pathname === "/admin/setup") return NextResponse.next();
-    if (!request.cookies.has(SESSION_COOKIE)) {
-      return loginRedirect("/admin/login");
-    }
-    return NextResponse.next();
+    if (!request.cookies.has(SESSION_COOKIE)) return loginRedirect("/admin/login");
+    const requestHeaders = new Headers(request.headers);
+    requestHeaders.set("x-sessa-pathname", pathname);
+    return NextResponse.next({ request: { headers: requestHeaders } });
   }
 
-  // Area cliente
   if (pathname.startsWith("/account")) {
     if (PUBLIC_ACCOUNT.has(pathname)) return NextResponse.next();
-    if (!request.cookies.has(CUSTOMER_SESSION_COOKIE)) {
-      return loginRedirect("/account/login");
-    }
+    if (!request.cookies.has(CUSTOMER_SESSION_COOKIE)) return loginRedirect("/account/login");
     return NextResponse.next();
   }
 

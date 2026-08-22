@@ -142,7 +142,7 @@ export default async function AccountDiscountCodesPage() {
                   )}
 
                   <div className="account-discount-actions">
-                    <Link href={status.tone === "active" ? "/checkout" : "/"} className="btn-secondary">
+                    <Link href={status.tone === "active" ? "/carrello" : "/"} className="btn-secondary">
                       {status.tone === "active" ? "Usa al checkout" : "Vai allo shop"}
                     </Link>
                   </div>

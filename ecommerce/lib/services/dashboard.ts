@@ -7,7 +7,7 @@ import { romeDateKey, romeDayRange } from "@/lib/datetime";
 const REVENUE_STATUSES = ["PAID", "PROCESSING", "READY", "SHIPPED", "DELIVERED"];
 
 /** Stati operativi: ordini pagati che il laboratorio deve ancora preparare/consegnare. */
-const QUEUE_STATUSES = ["PAID", "PROCESSING", "READY"];
+const QUEUE_STATUSES = ["CONFIRMED", "PAID", "PROCESSING", "READY"];
 
 export const DASHBOARD_RANGES = ["today", "7d", "30d", "month"] as const;
 export type DashboardRange = (typeof DASHBOARD_RANGES)[number];
@@ -55,13 +55,21 @@ function rangeBounds(range: DashboardRange): { from: Date; prevFrom: Date; prevT
 export type DashboardFilter = {
   locationId?: string;
   range?: DashboardRange;
+  allowedLocationIds?: string[] | null;
 };
 
 export async function getDashboardData(filter?: DashboardFilter) {
   const range: DashboardRange = filter?.range ?? "today";
-  const locationId = filter?.locationId;
+  const allowedLocationIds = filter?.allowedLocationIds;
+  const locationId = filter?.locationId && (
+    allowedLocationIds === undefined || allowedLocationIds === null || allowedLocationIds.includes(filter.locationId)
+  ) ? filter.locationId : undefined;
   const { from, prevFrom, prevTo } = rangeBounds(range);
-  const scope: Prisma.OrderWhereInput = locationId ? { locationId } : {};
+  const scope: Prisma.OrderWhereInput = locationId
+    ? { locationId }
+    : allowedLocationIds !== undefined && allowedLocationIds !== null
+      ? { locationId: { in: allowedLocationIds } }
+      : {};
 
   const [
     ordersInRange,
@@ -108,7 +116,7 @@ export async function getDashboardData(filter?: DashboardFilter) {
       take: 8,
       include: { items: { select: { qty: true } }, location: { select: { name: true } } }
     }),
-    lowStockVariants(locationId),
+    lowStockVariants(locationId, allowedLocationIds),
     prisma.orderItem.groupBy({
       by: ["productName"],
       _sum: { qty: true, totalCents: true },
@@ -123,10 +131,16 @@ export async function getDashboardData(filter?: DashboardFilter) {
       by: ["locationId", "locationName"],
       _count: { _all: true },
       _sum: { totalCents: true },
-      where: { placedAt: { gte: from }, status: { in: REVENUE_STATUSES } },
+      where: { ...scope, placedAt: { gte: from }, status: { in: REVENUE_STATUSES } },
       orderBy: { _sum: { totalCents: "desc" } }
     }),
-    prisma.location.findMany({ orderBy: { position: "asc" }, select: { id: true, name: true, isActive: true } })
+    prisma.location.findMany({
+      where: allowedLocationIds !== undefined && allowedLocationIds !== null
+        ? { id: { in: allowedLocationIds } }
+        : undefined,
+      orderBy: { position: "asc" },
+      select: { id: true, name: true, isActive: true }
+    })
   ]);
 
   const revenueCents = revenueInRange._sum.totalCents ?? 0;

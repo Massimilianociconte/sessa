@@ -1,6 +1,10 @@
 import Stripe from "stripe";
 import { SITE_URL } from "@/lib/site";
 import type { PaymentInitInput, PaymentInitResult, PaymentProvider } from "./types";
+import { stripeSessionExpiry } from "./reservation-policy";
+import { CircuitBreaker } from "@/lib/commerce/circuit-breaker";
+
+const stripeBreaker = new CircuitBreaker({ failureThreshold: 3, cooldownMs: 30_000 });
 
 /**
  * Provider Stripe. Attivo solo quando chiave API e segreto webhook sono entrambi
@@ -35,6 +39,9 @@ export const stripeProvider: PaymentProvider = {
     if (!isStripeConfigured()) {
       return { ok: false, error: "Stripe non configurato.", retryable: false };
     }
+    if (!stripeBreaker.canRequest()) {
+      return { ok: false, error: "Pagamento online temporaneamente non disponibile. Riprova tra un minuto.", retryable: true };
+    }
     try {
       const stripe = getStripe();
       const metadata = {
@@ -43,6 +50,7 @@ export const stripeProvider: PaymentProvider = {
         orderId: input.orderId ?? "",
         publicToken: input.publicToken
       };
+      const expiresAt = stripeSessionExpiry(input.reservationExpiresAt);
       const session = await stripe.checkout.sessions.create({
         mode: "payment",
         client_reference_id: input.orderCode,
@@ -63,8 +71,10 @@ export const stripeProvider: PaymentProvider = {
         success_url: `${SITE_URL}/ordine/${input.orderCode}?t=${input.publicToken}&checkout=success&session_id={CHECKOUT_SESSION_ID}`,
         cancel_url: `${SITE_URL}/ordine/${input.orderCode}?t=${input.publicToken}&payment=cancelled`,
         metadata,
-        payment_intent_data: { metadata }
+        payment_intent_data: { metadata },
+        expires_at: Math.floor(expiresAt.getTime() / 1000)
       }, { idempotencyKey: input.idempotencyKey });
+      stripeBreaker.recordSuccess();
       return {
         ok: true,
         reference: session.id,
@@ -72,10 +82,23 @@ export const stripeProvider: PaymentProvider = {
         expiresAt: new Date(session.expires_at * 1000)
       };
     } catch (error) {
+      stripeBreaker.recordFailure();
       const type = typeof error === "object" && error !== null && "type" in error
         ? String((error as { type?: unknown }).type)
         : "";
-      const retryable = ["StripeConnectionError", "StripeAPIError", "StripeRateLimitError", "StripeIdempotencyError"].includes(type);
+      // Errori di infrastruttura/configurazione (auth, permessi, rete, rate
+      // limit, idempotenza) sono RETRYABLE: l'ordine non viene annullato e il
+      // tentativo resta riutilizzabile. Solo gli errori di richiesta non
+      // recuperabili (es. importo sotto minimo, parametri invalidi —
+      // StripeInvalidRequestError) chiudono definitivamente l'inizializzazione.
+      const retryable = [
+        "StripeConnectionError",
+        "StripeAPIError",
+        "StripeRateLimitError",
+        "StripeIdempotencyError",
+        "StripeAuthenticationError",
+        "StripePermissionError"
+      ].includes(type);
       return { ok: false, error: error instanceof Error ? error.message : "Errore Stripe.", retryable };
     }
   },

@@ -112,6 +112,14 @@ export default async function EditProductPage({
                         <input name="compareAt" defaultValue={variant.compareAtCents ? euro(variant.compareAtCents) : ""} className="input-field" />
                       </div>
                       <div>
+                        <label className="label-field">GTIN / EAN (opzionale)</label>
+                        <input name="gtin" inputMode="numeric" defaultValue={variant.gtin ?? ""} className="input-field" />
+                      </div>
+                      <div>
+                        <label className="label-field">MPN (opzionale)</label>
+                        <input name="mpn" defaultValue={variant.mpn ?? ""} className="input-field" />
+                      </div>
+                      <div>
                         <label className="label-field">Posizione</label>
                         <input name="position" type="number" min={0} defaultValue={variant.position} className="input-field" />
                       </div>
@@ -133,7 +141,7 @@ export default async function EditProductPage({
                           <form
                             key={sv.id}
                             action={updateStoreVariantAction}
-                            className="grid grid-cols-[1fr_auto_auto_auto] items-center gap-2 rounded-lg border border-ink/10 bg-white px-3 py-2 text-xs"
+                            className="grid grid-cols-[1fr_auto_auto_auto_auto] items-center gap-2 rounded-lg border border-ink/10 bg-white px-3 py-2 text-xs"
                           >
                             <input type="hidden" name="storeVariantId" value={sv.id} />
                             <input type="hidden" name="productId" value={product.id} />
@@ -153,6 +161,14 @@ export default async function EditProductPage({
                               placeholder="base"
                               className="input-field !w-20 !py-1 text-xs"
                               aria-label="Prezzo sede"
+                            />
+                            <input
+                              name="lowStockThreshold"
+                              type="number"
+                              min={0}
+                              defaultValue={sv.lowStockThreshold}
+                              className="input-field !w-16 !py-1 text-xs"
+                              aria-label="Soglia scorte basse"
                             />
                             <button type="submit" className="btn-ghost !px-2 !py-1 text-xs">
                               Salva
@@ -198,6 +214,14 @@ export default async function EditProductPage({
                 <div>
                   <label className="label-field">Prezzo base (€)</label>
                   <input name="price" required className="input-field" placeholder="34,00" />
+                </div>
+                <div>
+                  <label className="label-field">GTIN / EAN (opzionale)</label>
+                  <input name="gtin" inputMode="numeric" className="input-field" />
+                </div>
+                <div>
+                  <label className="label-field">MPN (opzionale)</label>
+                  <input name="mpn" className="input-field" />
                 </div>
                 <div>
                   <label className="label-field">Posizione</label>

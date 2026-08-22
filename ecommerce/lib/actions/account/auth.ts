@@ -6,7 +6,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { DomainError } from "@/lib/domain";
 import { linkReferralOnSignup, REFERRAL_COOKIE } from "@/lib/services/referral";
-import { verifyPasswordOrDummy } from "@/lib/auth/password";
+import { verifyPasswordOrDummy, passwordNeedsRehash, hashPassword } from "@/lib/auth/password";
 import {
   createCustomerSession,
   destroyAllCustomerSessions,
@@ -35,6 +35,7 @@ import { enqueueEmail } from "@/lib/services/email";
 import { SITE_URL } from "@/lib/site";
 import { getClientIp, rateLimitKey } from "@/lib/auth/request-context";
 import { safeNextPath } from "@/lib/auth/redirects";
+import { recordOperationalError } from "@/lib/observability";
 import {
   customerLoginSchema,
   customerRegistrationRequestSchema,
@@ -92,8 +93,17 @@ export async function registerCustomerAction(_prev: AuthState, formData: FormDat
         : `Ciao ${request.firstName},\n\ncompleta la registrazione scegliendo la password dal link seguente (valido 1 ora):\n${link}\n\nLa password viene scelta solo dopo la verifica dell'email, così nessuno può reclamare il tuo storico ordini.`,
       type: "PASSWORD_RESET"
     });
+    // Risposta delivery-blind (anti-enumerazione): un fallito invio NON deve
+    // distinguersi dalla risposta per email inesistente. Il guasto viene
+    // registrato per gli operatori, che possono riprocessare la coda.
     if (delivery.status === "FAILED") {
-      return { error: "Non siamo riusciti a inviare il link. Riprova più tardi." };
+      recordOperationalError({
+        level: "WARNING",
+        source: "account-registration",
+        code: "REGISTRATION_EMAIL_DELIVERY_FAILED",
+        message: "Invio email di registrazione fallito; risposta neutra gia restituita all'utente.",
+        error: delivery.error ? new Error(delivery.error) : undefined
+      });
     }
     const dev = process.env.NODE_ENV !== "production" ? `&dev=${encodeURIComponent(link)}` : "";
     redirect(`/account/login?registration=1${dev}`);
@@ -133,6 +143,17 @@ export async function loginCustomerAction(_prev: AuthState, formData: FormData):
     };
   }
 
+  // Upgrade trasparente: hash creati con il costo precedente (N=16384) vengono
+  // ri-hashati al costo corrente dopo una verifica riuscita.
+  if (passwordNeedsRehash(customer.passwordHash)) {
+    await prisma.customer
+      .update({
+        where: { id: customer.id },
+        data: { passwordHash: hashPassword(parsed.data.password) }
+      })
+      .catch(() => undefined);
+  }
+
   // Secondo fattore: se attivo, la password da sola non basta.
   if (customer.totpEnabledAt) {
     const totpCode = String(formData.get("totp") ?? "").trim();
@@ -157,6 +178,8 @@ export async function loginCustomerAction(_prev: AuthState, formData: FormData):
   await pruneExpiredCustomerSessions();
   const session = await createCustomerSession(customer.id);
   await setCustomerDisplayNameCookie(customer.firstName);
+  const { syncCartCookieAfterLogin } = await import("@/lib/services/cart");
+  await syncCartCookieAfterLogin(customer.id).catch(() => undefined);
   await enqueueEmail({
     toEmail: customer.email,
     subject: "Nuovo accesso al tuo account Sessa 1930",
@@ -167,12 +190,16 @@ export async function loginCustomerAction(_prev: AuthState, formData: FormData):
 }
 
 export async function logoutCustomerAction(): Promise<void> {
+  const { isolateCurrentCartCookie } = await import("@/lib/services/cart");
+  await isolateCurrentCartCookie();
   await destroyCustomerSession();
   await clearCustomerDisplayNameCookie();
   redirect("/");
 }
 
 export async function logoutAllCustomerSessionsAction(): Promise<void> {
+  const { isolateCurrentCartCookie } = await import("@/lib/services/cart");
+  await isolateCurrentCartCookie();
   const customer = await getSessionCustomer();
   if (customer) await destroyAllCustomerSessions(customer.id);
   await clearCustomerDisplayNameCookie();
@@ -194,6 +221,8 @@ export async function logoutCustomerSessionAction(formData: FormData): Promise<v
   if (!sessionId) redirect("/account/sicurezza?err=Sessione%20non%20valida");
   const result = await destroyCustomerSessionById(customer.id, sessionId);
   if (result === "current") {
+    const { isolateCurrentCartCookie } = await import("@/lib/services/cart");
+    await isolateCurrentCartCookie();
     await clearCustomerDisplayNameCookie();
     redirect("/account/login?all=1");
   }
@@ -207,7 +236,7 @@ export async function logoutCustomerSessionAction(formData: FormData): Promise<v
  */
 export async function requestResetAction(formData: FormData): Promise<void> {
   const parsed = resetRequestSchema.safeParse({ email: formData.get("email") });
-  if (!parsed.success) redirect("/account/recupera?err=Email non valida");
+  if (!parsed.success) redirect(`/account/recupera?err=${encodeURIComponent("Email non valida")}`);
 
   const email = parsed.data.email.toLowerCase();
   const ip = await getClientIp();
@@ -221,12 +250,22 @@ export async function requestResetAction(formData: FormData): Promise<void> {
   const token = await createResetToken(email);
   if (token) {
     const link = `${SITE_URL}/account/reset?token=${token}`;
-    await enqueueEmail({
+    const delivery = await enqueueEmail({
       toEmail: parsed.data.email,
       subject: "Reimposta la tua password — Sessa 1930",
       body: `Per reimpostare la password apri questo link (valido 1 ora):\n${link}`,
       type: "PASSWORD_RESET"
-    }).catch(() => undefined);
+    });
+    // Delivery-blind anche qui: niente errore distintivo per l'utente.
+    if (delivery.status === "FAILED") {
+      recordOperationalError({
+        level: "WARNING",
+        source: "account-reset",
+        code: "RESET_EMAIL_DELIVERY_FAILED",
+        message: "Invio email di reset fallito; risposta neutra gia restituita all'utente.",
+        error: delivery.error ? new Error(delivery.error) : undefined
+      });
+    }
     if (process.env.NODE_ENV !== "production") {
       redirect(`/account/recupera?sent=1&dev=${encodeURIComponent(link)}`);
     }

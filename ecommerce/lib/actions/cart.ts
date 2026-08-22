@@ -13,6 +13,8 @@ import {
   attachGiftCard,
   buildCartView,
   CART_COOKIE,
+  cartClampWarning,
+  cartCookieSetOptions,
   getCartByToken,
   getOrCreateCartForLocation,
   removeItem,
@@ -29,13 +31,7 @@ async function ensureCartToken(): Promise<string> {
   const existing = store.get(CART_COOKIE)?.value;
   if (existing) return existing;
   const token = randomBytes(24).toString("hex");
-  store.set(CART_COOKIE, token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: 60 * 60 * 24 * 30
-  });
+  store.set(CART_COOKIE, token, cartCookieSetOptions());
   return token;
 }
 
@@ -62,13 +58,14 @@ export async function addToCartAction(formData: FormData): Promise<void> {
   try {
     await enforceCartRateLimit(await headers(), token, "mutation");
     const cart = await getOrCreateCartForLocation(token, parsed.data.locationId);
-    await addItemToCart(cart.id, parsed.data.storeVariantId, parsed.data.qty);
+    const mutation = await addItemToCart(cart.id, parsed.data.storeVariantId, parsed.data.qty);
+    revalidatePath("/", "layout");
+    const warning = cartClampWarning(mutation);
+    redirect(warning ? `/carrello?warn=${encodeURIComponent(warning)}` : "/carrello");
   } catch (error) {
     if (error instanceof DomainError) redirect(`/carrello?err=${encodeURIComponent(error.message)}`);
     throw error;
   }
-  revalidatePath("/", "layout");
-  redirect("/carrello");
 }
 
 const qtySchema = z.object({ itemId: z.string().min(1), qty: z.coerce.number().int().min(0).max(99) });
@@ -80,9 +77,10 @@ export async function updateCartItemAction(formData: FormData): Promise<void> {
   const cart = await getCartByToken(token);
   if (!cart) redirect("/carrello");
   const parsed = qtySchema.safeParse({ itemId: formData.get("itemId"), qty: formData.get("qty") });
-  if (parsed.success) await setItemQty(cart.id, parsed.data.itemId, parsed.data.qty);
+  const mutation = parsed.success ? await setItemQty(cart.id, parsed.data.itemId, parsed.data.qty) : null;
   revalidatePath("/", "layout");
-  redirect("/carrello");
+  const warning = mutation ? cartClampWarning(mutation) : null;
+  redirect(warning ? `/carrello?warn=${encodeURIComponent(warning)}` : "/carrello");
 }
 
 export async function removeCartItemAction(formData: FormData): Promise<void> {
@@ -144,25 +142,39 @@ export async function removeDiscountAction(): Promise<void> {
 export async function applyGiftCardAction(formData: FormData): Promise<void> {
   const token = await readCartToken();
   const code = formData.get("giftCardCode");
-  if (!token || typeof code !== "string" || code.trim() === "") redirect("/carrello");
+  const back = giftCardReturnPath(formData);
+  if (typeof code !== "string" || code.trim() === "") {
+    redirect(`${back}?err=${encodeURIComponent("Inserisci il codice della gift card.")}`);
+  }
+  if (!token) {
+    redirect(`/carrello?err=${encodeURIComponent("Aggiungi prima i prodotti al carrello, poi applica la gift card.")}`);
+  }
   await enforceCartRateLimit(await headers(), token, "giftcard");
   const cart = await getCartByToken(token);
-  if (!cart) redirect("/carrello");
+  if (!cart) {
+    redirect(`/carrello?err=${encodeURIComponent("Aggiungi prima i prodotti al carrello, poi applica la gift card.")}`);
+  }
 
   const [card, customer] = await Promise.all([loadGiftCard(code), getSessionCustomer()]);
   const check = checkGiftCard(card, customer?.id ?? null);
-  if (!check.ok) redirect(`/carrello?err=${encodeURIComponent("Gift card non valida o non disponibile.")}`);
+  if (!check.ok) redirect(`${giftCardReturnPath(formData)}?err=${encodeURIComponent("Gift card non valida o non disponibile.")}`);
   await attachGiftCard(cart.id, check.card.code);
   revalidatePath("/carrello");
-  redirect("/carrello");
+  revalidatePath("/checkout");
+  redirect(giftCardReturnPath(formData));
 }
 
-export async function removeGiftCardAction(): Promise<void> {
+export async function removeGiftCardAction(formData?: FormData): Promise<void> {
   const token = await readCartToken();
   if (token) {
     const cart = await getCartByToken(token);
     if (cart) await attachGiftCard(cart.id, null);
   }
   revalidatePath("/carrello");
-  redirect("/carrello");
+  revalidatePath("/checkout");
+  redirect(giftCardReturnPath(formData));
+}
+
+function giftCardReturnPath(formData?: FormData): "/carrello" | "/checkout" {
+  return formData?.get("next") === "checkout" ? "/checkout" : "/carrello";
 }

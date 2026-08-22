@@ -44,6 +44,19 @@ export function referralLink(referralCode: string): string {
   return `${SITE_URL}/r/${referralCode}`;
 }
 
+export async function allocateReferralCodeInTx(
+  tx: Prisma.TransactionClient,
+  firstName: string
+): Promise<string> {
+  const prefix = firstName.replace(/[^a-zA-Z]/g, "").slice(0, 6).toUpperCase() || "SESSA";
+  for (let i = 0; i < 5; i++) {
+    const code = `${prefix}-${randomBytes(3).toString("hex").toUpperCase()}`;
+    const clash = await tx.customer.findUnique({ where: { referralCode: code } });
+    if (!clash) return code;
+  }
+  return `SESSA-${randomBytes(5).toString("hex").toUpperCase()}`;
+}
+
 /** Codice sconto univoco riservato a un cliente. */
 async function issueReservedDiscountInTx(tx: Prisma.TransactionClient, input: {
   prefix: string;
@@ -148,7 +161,12 @@ export async function maybeConvertReferral(invitedCustomerId: string, orderId: s
   const config = await getReferralConfig();
   const reward = await prisma.$transaction(async (tx) => {
     const paidOrder = await tx.order.findFirst({
-      where: { id: orderId, customerId: invitedCustomerId, status: "PAID", paymentStatus: "PAID" },
+      where: {
+        id: orderId,
+        customerId: invitedCustomerId,
+        paymentStatus: "PAID",
+        status: { notIn: ["CANCELLED", "REFUNDED"] }
+      },
       select: { id: true }
     });
     if (!paidOrder) return null;

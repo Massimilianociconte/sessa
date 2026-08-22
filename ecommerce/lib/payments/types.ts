@@ -16,6 +16,8 @@ export type PaymentInitInput = {
   method?: string | null;
   /** Chiave stabile del nostro PaymentAttempt, riusata sui retry di rete. */
   idempotencyKey: string;
+  /** Termine entro cui lo stock dell'ordine resta riservato. */
+  reservationExpiresAt?: Date | null;
 };
 
 export type PaymentInitResult =

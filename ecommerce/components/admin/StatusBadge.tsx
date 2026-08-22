@@ -9,6 +9,7 @@ import {
 
 const ORDER_COLORS: Record<OrderStatus, string> = {
   PENDING_PAYMENT: "bg-majolica/30 text-yellow-900",
+  CONFIRMED: "bg-electric/10 text-electric",
   PAID: "bg-brilliant/15 text-emerald-800",
   PROCESSING: "bg-ceramic/10 text-ceramic",
   READY: "bg-majolica/40 text-yellow-900",
@@ -31,6 +32,7 @@ const PAYMENT_COLORS: Record<PaymentStatus, string> = {
   PENDING: "bg-majolica/30 text-yellow-900",
   AUTHORIZED: "bg-ceramic/10 text-ceramic",
   PAID: "bg-brilliant/15 text-emerald-800",
+  PARTIALLY_REFUNDED: "bg-majolica/30 text-yellow-900",
   REFUNDED: "bg-terracotta/15 text-terracotta",
   FAILED: "bg-ink/10 text-ink/60"
 };

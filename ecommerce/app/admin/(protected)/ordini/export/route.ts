@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getSessionUser } from "@/lib/auth/session";
+import { adminLocationScope, getSessionUser } from "@/lib/auth/session";
 import { hasAdminCapability } from "@/lib/auth/admin-authorization";
 import {
   FULFILLMENT_LABELS,
@@ -52,7 +52,8 @@ export async function GET(request: NextRequest) {
     discountCode: params.get("codice") ?? undefined,
     placedFrom: parseDay(params.get("da")),
     placedTo,
-    fulfillmentOn: parseDay(params.get("giorno"))
+    fulfillmentOn: parseDay(params.get("giorno")),
+    allowedLocationIds: adminLocationScope(user)
   };
 
   const orders = await listOrdersForExport(filter);

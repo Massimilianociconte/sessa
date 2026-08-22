@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Allura, Cormorant_Garamond, Manrope } from "next/font/google";
-import Script from "next/script";
+import AnalyticsConsent from "@/components/privacy/AnalyticsConsent";
 import PwaRegister from "@/components/PwaRegister";
 import { SITE_URL } from "@/lib/site";
 import "./globals.css";
@@ -84,20 +84,7 @@ export default function RootLayout({
     // su <html> (es. crxlauncher) prima dell'idratazione; è innocuo e va ignorato.
     <html lang="it" data-scroll-behavior="smooth" suppressHydrationWarning>
       <body className={`${serif.variable} ${sans.variable} ${script.variable} font-sans antialiased`}>
-        {GA_ID && (
-          <>
-            <Script src={`https://www.googletagmanager.com/gtag/js?id=${GA_ID}`} strategy="afterInteractive" />
-            <Script id="sessa-ga4" strategy="afterInteractive">
-              {`
-                window.dataLayer = window.dataLayer || [];
-                function gtag(){dataLayer.push(arguments);}
-                window.gtag = gtag;
-                gtag('js', new Date());
-                gtag('config', '${GA_ID}', { send_page_view: true });
-              `}
-            </Script>
-          </>
-        )}
+        <AnalyticsConsent gaId={GA_ID} />
         <PwaRegister />
         {children}
       </body>

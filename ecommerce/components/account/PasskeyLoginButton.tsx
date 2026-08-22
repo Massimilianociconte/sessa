@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { browserSupportsWebAuthn, startAuthentication } from "@simplewebauthn/browser";
-import { finishPasskeyLoginAction, startPasskeyLoginAction } from "@/lib/actions/account/passkeys";
+import { completePasskeySecondFactorAction, finishPasskeyLoginAction, startPasskeyLoginAction } from "@/lib/actions/account/passkeys";
 
 /**
  * "Accedi con passkey" nella pagina di login. Usernameless: il browser
@@ -12,6 +12,8 @@ export default function PasskeyLoginButton({ nextPath }: { nextPath?: string }) 
   const [supported, setSupported] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [pendingToken, setPendingToken] = useState<string | null>(null);
+  const [totp, setTotp] = useState("");
 
   useEffect(() => {
     // Rilevazione solo client (evita mismatch di hydration): setState qui è voluto.
@@ -36,6 +38,10 @@ export default function PasskeyLoginButton({ nextPath }: { nextPath?: string }) 
         setError(finish.error);
         return;
       }
+      if (finish.data.needsTotp && finish.data.pendingToken) {
+        setPendingToken(finish.data.pendingToken);
+        return;
+      }
       window.location.assign(finish.data.redirectTo);
     } catch (err) {
       const domError = err as Error & { name?: string };
@@ -49,11 +55,43 @@ export default function PasskeyLoginButton({ nextPath }: { nextPath?: string }) 
     }
   };
 
+  const confirmTotp = async () => {
+    if (!pendingToken) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await completePasskeySecondFactorAction(pendingToken, totp);
+      if (!result.ok) {
+        setError(result.error);
+        return;
+      }
+      window.location.assign(result.data.redirectTo);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <div className="passkey-login">
       <div className="auth-divider" role="separator" aria-label="oppure">
         <span>oppure</span>
       </div>
+      {pendingToken ? (
+        <div className="space-y-3">
+          <p className="text-sm text-ink/70">Inserisci il codice dell&apos;app authenticator per completare l&apos;accesso con passkey.</p>
+          <input
+            value={totp}
+            onChange={(event) => setTotp(event.target.value)}
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            className="input-field"
+            placeholder="000000"
+          />
+          <button type="button" onClick={() => void confirmTotp()} disabled={busy} className="btn-primary w-full">
+            {busy ? "Verifico…" : "Conferma codice"}
+          </button>
+        </div>
+      ) : (
       <button type="button" onClick={login} disabled={busy} className="btn-secondary w-full">
         <svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <circle cx="7.5" cy="15.5" r="5.5" />
@@ -62,6 +100,7 @@ export default function PasskeyLoginButton({ nextPath }: { nextPath?: string }) 
         </svg>
         {busy ? "Attendi…" : "Accedi con passkey"}
       </button>
+      )}
       {error && <p className="auth-notice mt-3" data-tone="warn" role="alert">{error}</p>}
     </div>
   );

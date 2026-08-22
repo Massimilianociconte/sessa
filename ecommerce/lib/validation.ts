@@ -5,10 +5,11 @@ import {
   DISCOUNT_TYPES,
   FULFILLMENT_TYPES,
   ORDER_STATUSES,
-  PAYMENT_METHODS,
+  CHECKOUT_PAYMENT_METHODS,
   PRODUCT_STATUSES
 } from "@/lib/domain";
 import { parseRomeDateTimeLocal, romeDayRange } from "@/lib/datetime";
+import { isValidItalianPostalCode, isValidItalianProvince, normalizeItalianPhone } from "@/lib/commerce/address-it";
 
 /** Schemi Zod: unica dogana tra FormData/input esterni e i servizi. */
 
@@ -46,9 +47,10 @@ export const checkoutSchema = z
     postalCode: optionalTrimmed(10),
     country: z.string().trim().toUpperCase().length(2).default("IT"),
     shippingRateId: optionalTrimmed(64),
-    paymentMethod: z.enum(PAYMENT_METHODS),
+    paymentMethod: z.enum(CHECKOUT_PAYMENT_METHODS),
     customerNote: optionalTrimmed(1000),
-    marketingOptIn: z.coerce.boolean().default(false)
+    marketingOptIn: z.coerce.boolean().default(false),
+    checkoutIdempotencyKey: optionalTrimmed(80)
   })
   .superRefine((data, ctx) => {
     // Data/ora richiesta: valida e non nel passato.
@@ -65,8 +67,10 @@ export const checkoutSchema = z
       if (!data.line1) ctx.addIssue({ path: ["line1"], code: "custom", message: "Indirizzo obbligatorio" });
       if (!data.city) ctx.addIssue({ path: ["city"], code: "custom", message: "Città obbligatoria" });
       if (!data.province) ctx.addIssue({ path: ["province"], code: "custom", message: "Provincia obbligatoria" });
-      if (!data.postalCode || !/^\d{5}$/.test(data.postalCode))
+      if (!data.postalCode || !isValidItalianPostalCode(data.postalCode))
         ctx.addIssue({ path: ["postalCode"], code: "custom", message: "CAP non valido (5 cifre)" });
+      if (data.province && !isValidItalianProvince(data.province))
+        ctx.addIssue({ path: ["province"], code: "custom", message: "Provincia non valida (sigla di 2 lettere)" });
       if (!data.shippingRateId)
         ctx.addIssue({ path: ["shippingRateId"], code: "custom", message: "Scegli un metodo di spedizione" });
     }
@@ -108,15 +112,39 @@ export const profileSchema = z.object({
   marketingOptIn: z.coerce.boolean().default(false)
 });
 
+export const italianAddressSchema = z.object({
+  fullName: trimmed(120),
+  line1: trimmed(160),
+  city: trimmed(80),
+  province: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .refine(isValidItalianProvince, "Provincia non valida (sigla di 2 lettere)"),
+  postalCode: z.string().trim().refine(isValidItalianPostalCode, "CAP non valido (5 cifre)"),
+  phone: z
+    .string()
+    .trim()
+    .min(1, "Telefono obbligatorio")
+    .refine((value) => normalizeItalianPhone(value) !== null, "Telefono non valido")
+});
+
 export const addressSchema = z.object({
   label: optionalTrimmed(40),
   fullName: trimmed(120),
   line1: trimmed(160),
   line2: optionalTrimmed(160),
   city: trimmed(80),
-  province: z.string().trim().min(1, "Provincia obbligatoria").max(4),
-  postalCode: z.string().trim().regex(/^\d{5}$/, "CAP non valido (5 cifre)"),
-  phone: optionalTrimmed(40),
+  province: z
+    .string()
+    .trim()
+    .toUpperCase()
+    .refine(isValidItalianProvince, "Provincia non valida (sigla di 2 lettere)"),
+  postalCode: z.string().trim().refine(isValidItalianPostalCode, "CAP non valido (5 cifre)"),
+  phone: optionalTrimmed(40).refine(
+    (value) => value === undefined || normalizeItalianPhone(value) !== null,
+    "Telefono non valido"
+  ),
   isDefault: z.coerce.boolean().default(false)
 });
 
@@ -146,7 +174,11 @@ export const productSchema = z.object({
   image: optionalTrimmed(500),
   tags: z.string().trim().max(300).default(""),
   allergens: z.string().trim().max(500).default(""),
-  ingredients: z.string().trim().max(1000).default("")
+  ingredients: z.string().trim().max(1000).default(""),
+  merchantEnabled: z.coerce.boolean().default(true),
+  merchantTitle: optionalTrimmed(150),
+  merchantDescription: optionalTrimmed(5000),
+  googleProductCategory: optionalTrimmed(300)
 });
 
 export const variantSchema = z.object({
@@ -158,6 +190,8 @@ export const variantSchema = z.object({
     .regex(/^[A-Z0-9-]{2,40}$/, "SKU non valido (maiuscole, numeri, trattini)"),
   price: z.string().trim().min(1, "Prezzo base obbligatorio"),
   compareAt: optionalTrimmed(20),
+  gtin: optionalTrimmed(14).refine((value) => value === undefined || /^\d{8,14}$/.test(value), "GTIN non valido"),
+  mpn: optionalTrimmed(70),
   weightGrams: z.coerce.number().int().min(0).optional(),
   isActive: z.coerce.boolean().default(true),
   position: z.coerce.number().int().min(0).default(0)
@@ -219,7 +253,31 @@ export const locationSchema = z.object({
   pickupEnabled: z.coerce.boolean().default(true),
   deliveryEnabled: z.coerce.boolean().default(true),
   isActive: z.coerce.boolean().default(true),
-  position: z.coerce.number().int().min(0).default(0)
+  position: z.coerce.number().int().min(0).default(0),
+  merchantStoreCode: optionalTrimmed(64).refine(
+    (value) => value === undefined || /^[A-Za-z0-9]+$/.test(value),
+    "Codice negozio Merchant non valido"
+  ),
+  merchantEnabled: z.coerce.boolean().default(false),
+  merchantPickupSla: z.enum(["same day", "next day", "2-day", "3-day", "4-day", "5-day", "6-day", "multi-week"]).default("same day"),
+  latitude: z.preprocess(
+    (value) => (value === "" || value === null || value === undefined ? undefined : value),
+    z.coerce.number().min(-90).max(90).optional()
+  ),
+  longitude: z.preprocess(
+    (value) => (value === "" || value === null || value === undefined ? undefined : value),
+    z.coerce.number().min(-180).max(180).optional()
+  ),
+  googleMapsUrl: optionalTrimmed(500),
+  gbpUrl: optionalTrimmed(500)
+}).superRefine((data, ctx) => {
+  if (data.isActive && !data.pickupEnabled && !data.deliveryEnabled) {
+    ctx.addIssue({
+      path: ["pickupEnabled"],
+      code: "custom",
+      message: "Una sede attiva deve offrire almeno ritiro o consegna."
+    });
+  }
 });
 
 export const storeVariantSchema = z.object({
@@ -258,7 +316,7 @@ export const adminUserSchema = z.object({
   email: z.string().trim().toLowerCase().email("Email non valida"),
   name: trimmed(120),
   password: passwordInput,
-  role: z.enum(ADMIN_ROLES).default("STAFF")
+  role: z.enum(ADMIN_ROLES).default("STORE_MANAGER")
 });
 
 export const storeSettingsSchema = z.object({

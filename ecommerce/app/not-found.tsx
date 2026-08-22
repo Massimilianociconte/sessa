@@ -1,6 +1,12 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 import Footer from "@/components/storefront/Footer";
 import Header from "@/components/storefront/Header";
+
+export const metadata: Metadata = {
+  title: { absolute: "Ti sei perso? - Sessa 1930" },
+  robots: { index: false, follow: false, noarchive: true }
+};
 
 export default function NotFound() {
   return (

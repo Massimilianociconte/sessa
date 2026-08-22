@@ -25,8 +25,16 @@ export const dynamic = "force-dynamic";
 
 export const metadata = { title: "Il tuo ordine", robots: { index: false, follow: false } };
 
-const STEPS_DELIVERY: OrderStatus[] = ["PENDING_PAYMENT", "PAID", "PROCESSING", "SHIPPED", "DELIVERED"];
-const STEPS_PICKUP: OrderStatus[] = ["PENDING_PAYMENT", "PAID", "PROCESSING", "READY", "DELIVERED"];
+function orderSteps(isPickup: boolean, isPayOnPickup: boolean): OrderStatus[] {
+  if (isPayOnPickup) {
+    return isPickup
+      ? ["CONFIRMED", "PROCESSING", "READY", "DELIVERED"]
+      : ["CONFIRMED", "PROCESSING", "SHIPPED", "DELIVERED"];
+  }
+  return isPickup
+    ? ["PENDING_PAYMENT", "PAID", "PROCESSING", "READY", "DELIVERED"]
+    : ["PENDING_PAYMENT", "PAID", "PROCESSING", "SHIPPED", "DELIVERED"];
+}
 
 export default async function OrderTrackingPage({
   params,
@@ -41,7 +49,7 @@ export default async function OrderTrackingPage({
   if (!order) notFound();
 
   const isPickup = order.fulfillmentType === "PICKUP";
-  const steps = isPickup ? STEPS_PICKUP : STEPS_DELIVERY;
+  const steps = orderSteps(isPickup, order.paymentMethod === "cash_on_pickup");
   const isCancelled = order.status === "CANCELLED" || order.status === "REFUNDED";
   const currentStep = steps.indexOf(order.status as OrderStatus);
   const amountDueCents = Math.max(0, order.totalCents - order.giftCardCents);
@@ -89,6 +97,11 @@ export default async function OrderTrackingPage({
     <>
       <Header />
       <CartRefreshBeacon />
+      <div className="mx-auto max-w-6xl px-4 pt-6">
+        <a href={`/ordine/${order.code}/ricevuta?t=${order.publicToken}`} className="text-sm font-semibold text-terracotta hover:underline">
+          Apri ricevuta stampabile
+        </a>
+      </div>
       {order.paymentStatus === "PAID" && (
         <AnalyticsBeacon
           event="purchase"

@@ -5,7 +5,8 @@ const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 
 /**
  * Connessione runtime PostgreSQL. DATABASE_URL deve puntare al pooler runtime;
- * DIRECT_URL e riservata alle migration e non viene mai usata dalle lambda.
+ * MIGRATION_DATABASE_URL e riservata ai comandi di release e non viene mai
+ * usata dalle lambda.
  */
 const rawDatabaseUrl = process.env.DATABASE_URL ?? process.env.NETLIFY_DATABASE_URL;
 
@@ -41,6 +42,36 @@ function withConnectionLimit(url: string | undefined): string | undefined {
 }
 
 const databaseUrl = withConnectionLimit(rawDatabaseUrl);
+
+/**
+ * Guardia anti-disastro: in sviluppo il .env locale non deve MAI puntare al
+ * database di produzione (rischio di scrivere dati demo/cancellazioni test
+ * direttamente in prod). Il check e' un warning forte, non un blocco: alcuni
+ * comandi amministrativi possono volersi collegare consapevolmente; per far
+ * tacere l'avviso in modo esplicito esiste SESSA_ALLOW_PROD_DB_FROM_DEV=1.
+ */
+function warnIfDevTargetsProduction(url: string | undefined): void {
+  if (!url || process.env.NODE_ENV === "production") return;
+  if (process.env.SESSA_ALLOW_PROD_DB_FROM_DEV === "1") return;
+  try {
+    const host = new URL(url).hostname;
+    if (host.endsWith("pooler.supabase.com") || host.endsWith("supabase.co")) {
+      console.warn(
+        "\n" +
+          "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n" +
+          "!! ATTENZIONE: sviluppo collegato a un database Supabase remoto. !!\n" +
+          "!! Se e' il DB di PRODUZIONE, ogni comando locale (dev, seed,  !!\n" +
+          "!! test) scrive sui dati reali. Imposta un DATABASE_URL locale  !!\n" +
+          "!! oppure SESSA_ALLOW_PROD_DB_FROM_DEV=1 se e' intenzionale.    !!\n" +
+          "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+      );
+    }
+  } catch {
+    // URL non parsabile: la connessione fallira' da sola con errore chiaro.
+  }
+}
+
+warnIfDevTargetsProduction(databaseUrl);
 
 export const prisma =
   globalForPrisma.prisma ?? new PrismaClient(databaseUrl ? { datasourceUrl: databaseUrl } : undefined);

@@ -53,7 +53,9 @@ import { attachGiftCard } from "@/lib/services/cart";
 import { issueGiftCard } from "@/lib/services/giftcards";
 import { linkReferralOnSignup } from "@/lib/services/referral";
 import { isStripeConfigured } from "@/lib/payments";
-import { refundOrder } from "@/lib/services/payment-attempts";
+import { recordManualPayment, refundOrder } from "@/lib/services/payment-attempts";
+import { processEmailQueue } from "@/lib/services/email";
+import { encryptSensitiveValue } from "@/lib/security/secret-box";
 
 function assertSafeTestDatabase(): void {
   if (process.env.NODE_ENV !== "test" || process.env.ALLOW_DESTRUCTIVE_TESTS !== "1") {
@@ -273,7 +275,7 @@ async function main() {
 
   // ---- 4. Macchina a stati + rimborso coerente e restock ----
   console.log("4. Transizioni ritiro + rimborso");
-  await transitionOrder(order!.id, "PAID", "test@admin");
+  await recordManualPayment(order!.id, "test@admin", `verify:${order!.code}`);
   await transitionOrder(order!.id, "PROCESSING", "test@admin");
   await transitionOrder(order!.id, "READY", "test@admin");
   check("PENDING → PAID → PROCESSING → READY ok", (await prisma.order.findUnique({ where: { id: order!.id } }))!.status === "READY");
@@ -397,7 +399,10 @@ async function main() {
   const placedG = await placeOrder(freshG!, { ...BASE, email: gcEmail });
   const orderG = await prisma.order.findUnique({ where: { code: placedG.code } });
   check("gift card applicata (min saldo)", orderG!.giftCardCents === 1000);
-  check("ordine parziale resta da pagare", orderG!.status === "PENDING_PAYMENT");
+  check(
+    "ordine parziale cash resta da pagare ma viene confermato",
+    orderG!.status === "CONFIRMED" && orderG!.paymentStatus === "PENDING"
+  );
   const gcAfter = await prisma.giftCard.findUnique({ where: { id: gc.id } });
   check("saldo gift card azzerato", gcAfter!.balanceCents === 0);
   check("movimento REDEEM registrato", (await prisma.giftCardTransaction.count({ where: { giftCardId: gc.id, reason: "REDEEM" } })) === 1);
@@ -447,7 +452,7 @@ async function main() {
     { authenticatedCustomerId: refBId }
   );
   const orderR = await prisma.order.findUnique({ where: { code: placedR.code }, select: { id: true } });
-  await transitionOrder(orderR!.id, "PAID", "test@admin");
+  await recordManualPayment(orderR!.id, "test@admin", `verify:${placedR.code}`);
   const refConv = await prisma.referral.findUnique({ where: { id: referral!.id } });
   check("referral convertito REDEEMED", refConv?.status === "REDEEMED");
   check("ricompensa referrer emessa", (await prisma.discountCode.count({ where: { customerId: refAId } })) === 1);
@@ -593,6 +598,27 @@ async function main() {
   await prisma.referral.deleteMany({ where: { OR: [{ referrerId: totpId }, { invitedCustomerId: totpId }] } });
   await prisma.discountCode.deleteMany({ where: { customerId: totpId } });
   await prisma.customer.deleteMany({ where: { id: totpId } });
+
+  // ---- 13. Outbox email: claim concorrente di un batch ----
+  console.log("13. Outbox email concorrente");
+  const batchRecipients = ["queue-batch-1@example.invalid", "queue-batch-2@example.invalid", "queue-batch-3@example.invalid"];
+  await prisma.emailMessage.createMany({
+    data: batchRecipients.map((toEmail, index) => ({
+      toEmail,
+      subject: `Test coda ${index + 1}`,
+      body: encryptSensitiveValue("Contenuto di test senza dati reali."),
+      type: "SECURITY_LOGIN",
+      status: "QUEUED",
+      nextAttemptAt: new Date(0)
+    }))
+  });
+  const batchResult = await processEmailQueue({ limit: 3 });
+  const deliveredBatch = await prisma.emailMessage.count({
+    where: { toEmail: { in: batchRecipients }, status: "SENT", lockToken: null }
+  });
+  check("tre email vengono reclamate nello stesso lease batch", batchResult.claimed === 3);
+  check("il batch termina senza collisioni del lock token", batchResult.sent === 3 && deliveredBatch === 3);
+  await prisma.emailMessage.deleteMany({ where: { toEmail: { in: batchRecipients } } });
 
   // Pulizia sezione 11
   const entOrders = await prisma.order.findMany({ where: { customerId: entId }, select: { id: true } });

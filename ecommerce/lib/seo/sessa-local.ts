@@ -14,12 +14,22 @@ type LocationLike = {
   hours?: string | null;
   pickupEnabled: boolean;
   deliveryEnabled: boolean;
+  latitude?: number | null;
+  longitude?: number | null;
+  googleMapsUrl?: string | null;
+  gbpUrl?: string | null;
   updatedAt?: Date;
 };
 
 type LocalFaq = {
   question: string;
   answer: string;
+};
+
+type CategoryLike = {
+  name: string;
+  slug: string;
+  description?: string | null;
 };
 
 type OpeningHoursSpecification = {
@@ -48,6 +58,15 @@ type OfficialLocationProfile = {
 
 const ALL_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const OTTAVIANO_OPEN_DAYS = ["Monday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+export function normalizeOpeningHoursText(value: string): string {
+  return value.replaceAll("–", "-").replaceAll("24:00", "00:00").trim();
+}
+
+export function hoursMatchForStructuredData(operationalHours: string, profileHours?: string): boolean {
+  if (!profileHours) return false;
+  return normalizeOpeningHoursText(operationalHours) === normalizeOpeningHoursText(profileHours);
+}
 
 function openingHoursSpec(dayOfWeek: string[], opens: string, closes: string): OpeningHoursSpecification[] {
   return [{ "@type": "OpeningHoursSpecification", dayOfWeek, opens, closes }];
@@ -128,7 +147,7 @@ const OFFICIAL_LOCATION_PROFILES: Record<string, OfficialLocationProfile> = {
     openingHoursSchema: ["Mo-Su 07:00-00:00"],
     openingHoursSpecification: openingHoursSpec(ALL_DAYS, "07:00", "00:00"),
     geoArea: "Roma Termini e Mercato Centrale Roma",
-    keywordCity: "Roma Termini",
+    keywordCity: "Mercato Centrale Roma",
     localIntent: "sfogliatelle napoletane Sessa a Roma Termini",
     signatureProducts: ["sfogliatelle", "babà", "pastiera", "cornetti", "ciambelle", "panzerotti"],
     sourceNote: "Pagina Mercato Centrale Roma dedicata alla sfogliatella napoletana di Sabato Sessa.",
@@ -193,9 +212,13 @@ export function getStoreSeo(location: LocationLike) {
   const profile = profileFor(location);
   const name = profile.publicName ?? `Sessa 1930 ${location.name}`;
   const cityName = profile.cityName;
-  const address = profile.address ?? location.address;
-  const postalCode = profile.postalCode ?? location.postalCode;
-  const hours = profile.hours ?? location.hours ?? "";
+  // Il gestionale e la fonte operativa: i profili editoriali arricchiscono i
+  // contenuti, ma non devono rendere obsoleti indirizzo, CAP o orari aggiornati.
+  const address = location.address.trim() || profile.address || "";
+  const postalCode = location.postalCode.trim() || profile.postalCode || "";
+  const province = location.province.trim() || profile.province || "";
+  const hours = location.hours?.trim() || profile.hours || "";
+  const profileHoursStillCurrent = hoursMatchForStructuredData(hours, profile.hours);
   const canonicalUrl = `${SITE_URL}/sede/${location.slug}`;
   const title = `${name} - Shop online ${cityName}`;
   const description =
@@ -211,7 +234,7 @@ export function getStoreSeo(location: LocationLike) {
   const faq: LocalFaq[] = [
     {
       question: `Dove si trova ${name}?`,
-      answer: `${name} si trova in ${address}${postalCode ? `, ${postalCode}` : ""} ${cityName}${profile.province ? ` (${profile.province})` : ""}.`
+      answer: `${name} si trova in ${address}${postalCode ? `, ${postalCode}` : ""} ${cityName}${province ? ` (${province})` : ""}.`
     },
     {
       question: `Cosa posso ordinare online da ${name}?`,
@@ -230,7 +253,10 @@ export function getStoreSeo(location: LocationLike) {
     cityName,
     address,
     postalCode,
+    province,
     hours,
+    openingHoursSchema: profileHoursStillCurrent ? profile.openingHoursSchema : undefined,
+    openingHoursSpecification: profileHoursStillCurrent ? profile.openingHoursSpecification : undefined,
     canonicalUrl,
     title,
     description,
@@ -252,7 +278,7 @@ export function getStoreSeo(location: LocationLike) {
 export function buildStoreMetadata(location: LocationLike): Metadata {
   const seo = getStoreSeo(location);
   return {
-    title: seo.title,
+    title: { absolute: seo.title },
     description: seo.description,
     keywords: seo.keywords,
     alternates: { canonical: seo.canonicalUrl },
@@ -271,6 +297,38 @@ export function buildStoreMetadata(location: LocationLike): Metadata {
       title: seo.title,
       description: seo.description
     }
+  };
+}
+
+export function buildStoreCategoryMetadata(location: LocationLike, category: CategoryLike): Metadata {
+  const seo = getStoreSeo(location);
+  const canonicalUrl = `${seo.canonicalUrl}/categorie/${category.slug}`;
+  const title = `${category.name} a ${seo.keywordCity} - ${seo.name}`;
+  const description =
+    `${category.name} disponibili nello shop locale ${seo.name}. ` +
+    `${category.description ?? "Specialita artigianali Sessa 1930"} con stock collegato alla sede, ` +
+    `ritiro${location.deliveryEnabled ? " e consegna" : ""}.`;
+  return {
+    title: { absolute: title },
+    description,
+    alternates: { canonical: canonicalUrl },
+    robots: { index: true, follow: true },
+    keywords: [
+      `${category.name} ${seo.keywordCity}`,
+      `${category.name} Sessa 1930`,
+      `pasticceria ${seo.keywordCity}`,
+      `dolci napoletani ${seo.keywordCity}`
+    ],
+    openGraph: {
+      type: "website",
+      title,
+      description,
+      url: canonicalUrl,
+      siteName: "Sessa 1930",
+      locale: "it_IT",
+      images: [{ url: "/brand/sessa-logo-white.webp", alt: `${category.name} - Sessa 1930` }]
+    },
+    twitter: { card: "summary_large_image", title, description }
   };
 }
 
@@ -297,13 +355,29 @@ export function buildStoreJsonLd(location: LocationLike, products: StoreProductV
     },
     openingHours: seo.openingHoursSchema ?? (seo.hours || undefined),
     openingHoursSpecification: seo.openingHoursSpecification,
-    areaServed: seo.geoArea,
+    areaServed: {
+      "@type": "AdministrativeArea",
+      name: seo.geoArea
+    },
+    geo:
+      location.latitude != null && location.longitude != null
+        ? {
+            "@type": "GeoCoordinates",
+            latitude: location.latitude,
+            longitude: location.longitude
+          }
+        : undefined,
+    hasMap: location.googleMapsUrl || undefined,
     parentOrganization: {
       "@type": "Organization",
       name: "Sessa 1930",
       url: "https://sessa1930.com/"
     },
-    sameAs: [seo.sourceUrl, "https://sessa1930.com/"]
+    sameAs: [location.gbpUrl, "https://sessa1930.com/"].filter(Boolean),
+    subjectOf:
+      seo.sourceUrl !== "https://sessa1930.com/"
+        ? { "@type": "WebPage", url: seo.sourceUrl, name: seo.sourceNote }
+        : undefined
   };
 
   const webpage = {
@@ -335,6 +409,102 @@ export function buildStoreJsonLd(location: LocationLike, products: StoreProductV
   return [localBusiness, webpage, itemList, breadcrumb, faq];
 }
 
+export function buildStoreCategoryJsonLd(
+  location: LocationLike,
+  category: CategoryLike,
+  products: StoreProductView[]
+) {
+  const seo = getStoreSeo(location);
+  const canonicalUrl = `${seo.canonicalUrl}/categorie/${category.slug}`;
+  const base = buildStoreJsonLd(location, products);
+  const collectionPage = {
+    "@context": "https://schema.org",
+    "@type": "CollectionPage",
+    "@id": `${canonicalUrl}#webpage`,
+    url: canonicalUrl,
+    name: `${category.name} a ${seo.keywordCity} - ${seo.name}`,
+    description:
+      category.description ?? `${category.name} disponibili nel catalogo ecommerce della sede ${seo.name}.`,
+    isPartOf: { "@type": "WebSite", "@id": `${SITE_URL}/#website`, name: "Sessa 1930 Shop", url: SITE_URL },
+    about: { "@id": `${seo.canonicalUrl}#localbusiness` },
+    mainEntity: { "@id": `${canonicalUrl}#products` }
+  };
+  const itemList = {
+    "@context": "https://schema.org",
+    "@type": "ItemList",
+    "@id": `${canonicalUrl}#products`,
+    name: `${category.name} - ${seo.name}`,
+    numberOfItems: products.length,
+    itemListElement: products.map((product, index) => ({
+      "@type": "ListItem",
+      position: index + 1,
+      name: product.name,
+      url: `${seo.canonicalUrl}/prodotti/${product.slug}`
+    }))
+  };
+  const breadcrumb = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "Shop Sessa 1930", item: `${SITE_URL}/` },
+      { "@type": "ListItem", position: 2, name: seo.name, item: seo.canonicalUrl },
+      { "@type": "ListItem", position: 3, name: category.name, item: canonicalUrl }
+    ]
+  };
+  return [base[0], collectionPage, itemList, breadcrumb];
+}
+
+export function buildHomeJsonLd(locations: LocationLike[]) {
+  const organizationId = `${SITE_URL}/#organization`;
+  const websiteId = `${SITE_URL}/#website`;
+  return [
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "@id": organizationId,
+      name: "Sessa 1930",
+      url: "https://sessa1930.com/",
+      logo: `${SITE_URL}/brand/sessa-logo-white.webp`,
+      description: BRAND_DESCRIPTION,
+      sameAs: ["https://sessa1930.com/"],
+      subOrganization: locations.map((location) => ({
+        "@type": "Bakery",
+        "@id": `${SITE_URL}/sede/${location.slug}#localbusiness`,
+        name: getStoreSeo(location).name,
+        url: `${SITE_URL}/sede/${location.slug}`
+      }))
+    },
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "@id": websiteId,
+      name: "Sessa 1930 Shop",
+      url: `${SITE_URL}/`,
+      inLanguage: "it-IT",
+      publisher: { "@id": organizationId }
+    },
+    {
+      "@context": "https://schema.org",
+      "@type": "CollectionPage",
+      "@id": `${SITE_URL}/#webpage`,
+      name: "Shop online Sessa 1930 - scegli la sede",
+      url: `${SITE_URL}/`,
+      description: "Scegli il punto vendita Sessa 1930 e ordina dal catalogo locale con disponibilita per sede.",
+      isPartOf: { "@id": websiteId },
+      about: { "@id": organizationId },
+      mainEntity: {
+        "@type": "ItemList",
+        itemListElement: locations.map((location, index) => ({
+          "@type": "ListItem",
+          position: index + 1,
+          name: getStoreSeo(location).name,
+          url: `${SITE_URL}/sede/${location.slug}`
+        }))
+      }
+    }
+  ];
+}
+
 export function buildStoreBreadcrumbJsonLd(location: LocationLike, label?: string, url?: string) {
   const seo = getStoreSeo(location);
   return {
@@ -350,46 +520,98 @@ export function buildStoreBreadcrumbJsonLd(location: LocationLike, label?: strin
 export function buildProductBreadcrumbJsonLd(location: LocationLike, product: StoreProductView) {
   const seo = getStoreSeo(location);
   const productUrl = `${seo.canonicalUrl}/prodotti/${product.slug}`;
+  const crumbs: Array<{ "@type": "ListItem"; position: number; name: string; item: string }> = [
+    { "@type": "ListItem", position: 1, name: "Shop Sessa 1930", item: `${SITE_URL}/` },
+    { "@type": "ListItem", position: 2, name: seo.name, item: seo.canonicalUrl }
+  ];
+  if (product.category) {
+    crumbs.push({
+      "@type": "ListItem",
+      position: crumbs.length + 1,
+      name: product.category.name,
+      item: `${seo.canonicalUrl}/categorie/${product.category.slug}`
+    });
+  }
+  crumbs.push({
+    "@type": "ListItem",
+    position: crumbs.length + 1,
+    name: product.name,
+    item: productUrl
+  });
   return {
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
-    itemListElement: [
-      { "@type": "ListItem", position: 1, name: "Shop Sessa 1930", item: `${SITE_URL}/` },
-      { "@type": "ListItem", position: 2, name: seo.name, item: seo.canonicalUrl },
-      { "@type": "ListItem", position: 3, name: product.name, item: productUrl }
-    ]
+    itemListElement: crumbs
   };
 }
 
 export function buildProductJsonLd(location: LocationLike, product: StoreProductView) {
   const seo = getStoreSeo(location);
   const productUrl = `${seo.canonicalUrl}/prodotti/${product.slug}`;
-  const available = product.inStock ? "https://schema.org/InStock" : "https://schema.org/OutOfStock";
-  const offer =
-    product.priceMin > 0
+  const image = product.image ? new URL(product.image, SITE_URL).toString() : undefined;
+  const seller = { "@id": `${seo.canonicalUrl}#localbusiness` };
+  const variants = product.variants.map((variant) => ({
+    "@type": "Product",
+    "@id": `${productUrl}#${encodeURIComponent(variant.sku)}`,
+    name: `${product.name} - ${variant.name}`,
+    sku: variant.sku,
+    image: image ? [image] : undefined,
+    description: product.shortDescription ?? product.description,
+    brand: { "@type": "Brand", name: "Sessa 1930" },
+    category: product.category?.name,
+    isVariantOf: { "@id": `${productUrl}#product` },
+    offers: {
+      "@type": "Offer",
+      url: productUrl,
+      priceCurrency: "EUR",
+      price: (variant.priceCents / 100).toFixed(2),
+      availability: variant.stockQty > 0 ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
+      itemCondition: "https://schema.org/NewCondition",
+      seller,
+      availableAtOrFrom: seller
+    }
+  }));
+
+  const productEntity =
+    variants.length > 1
       ? {
-          "@type": "Offer",
-          url: productUrl,
-          priceCurrency: "EUR",
-          price: (product.priceMin / 100).toFixed(2),
-          availability: available,
-          availableAtOrFrom: { "@id": `${seo.canonicalUrl}#localbusiness` }
+          "@context": "https://schema.org",
+          "@type": "ProductGroup",
+          "@id": `${productUrl}#product`,
+          productGroupID: product.id,
+          name: product.name,
+          image: image ? [image] : undefined,
+          description: product.shortDescription ?? product.description,
+          brand: { "@type": "Brand", name: "Sessa 1930" },
+          category: product.category?.name,
+          variesBy: "https://schema.org/name",
+          hasVariant: variants,
+          offers:
+            product.priceMin > 0
+              ? {
+                  "@type": "AggregateOffer",
+                  priceCurrency: "EUR",
+                  lowPrice: (product.priceMin / 100).toFixed(2),
+                  highPrice: (product.priceMax / 100).toFixed(2),
+                  offerCount: variants.length
+                }
+              : undefined
         }
-      : undefined;
+      : {
+          "@context": "https://schema.org",
+          "@type": "Product",
+          "@id": `${productUrl}#product`,
+          name: product.name,
+          sku: product.variants[0]?.sku,
+          image: image ? [image] : undefined,
+          description: product.shortDescription ?? product.description,
+          brand: { "@type": "Brand", name: "Sessa 1930" },
+          category: product.category?.name,
+          offers: variants[0]?.offers
+        };
 
   return [
-    {
-      "@context": "https://schema.org",
-      "@type": "Product",
-      "@id": `${productUrl}#product`,
-      name: product.name,
-      image: product.image ? [`${SITE_URL}${product.image}`] : undefined,
-      description: product.shortDescription ?? product.description,
-      sku: product.variants[0]?.sku,
-      brand: { "@type": "Brand", name: "Sessa 1930" },
-      category: product.category?.name,
-      offers: offer
-    },
+    productEntity,
     buildProductBreadcrumbJsonLd(location, product)
   ];
 }
@@ -403,7 +625,7 @@ export function buildProductMetadata(location: LocationLike, product: StoreProdu
     `${product.name} disponibile nello shop ${seo.name}. ` +
     `${product.shortDescription ?? "Pasticceria artigianale Sessa 1930"} Ritiro${location.deliveryEnabled ? " o consegna" : ""} dalla sede.`;
   return {
-    title,
+    title: { absolute: title },
     description,
     alternates: { canonical: productUrl },
     robots: { index: true, follow: true },
@@ -420,7 +642,7 @@ export function buildProductMetadata(location: LocationLike, product: StoreProdu
       url: productUrl,
       siteName: "Sessa 1930",
       locale: "it_IT",
-      images: product.image ? [{ url: product.image, alt: product.name }] : undefined
+      images: product.image ? [{ url: new URL(product.image, SITE_URL).toString(), alt: product.name }] : undefined
     },
     twitter: {
       card: "summary_large_image",

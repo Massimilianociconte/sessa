@@ -1,10 +1,3 @@
-import {
-  createCipheriv,
-  createDecipheriv,
-  createHash,
-  createHmac,
-  randomBytes
-} from "node:crypto";
 import { prisma } from "@/lib/db";
 import { DomainError } from "@/lib/domain";
 import {
@@ -14,44 +7,17 @@ import {
   verifyTotpCode
 } from "@/lib/auth/totp";
 import { enqueueEmail } from "@/lib/services/email";
-import { getAuthSecret } from "@/lib/auth/secret";
-
-const BACKUP_CODES_COUNT = 10;
-
-function hashBackupCode(code: string): string {
-  return createHmac("sha256", getAuthSecret())
-    .update(code.toUpperCase().replace(/\s+/g, ""))
-    .digest("hex");
-}
-
-function legacyBackupCodeHash(code: string): string {
-  return createHash("sha256").update(code.toUpperCase().replace(/\s+/g, "")).digest("hex");
-}
-
-function totpEncryptionKey(): Buffer {
-  return createHash("sha256").update(getAuthSecret()).digest();
-}
-
-function encryptTotpSecret(secret: string): string {
-  const iv = randomBytes(12);
-  const cipher = createCipheriv("aes-256-gcm", totpEncryptionKey(), iv);
-  const encrypted = Buffer.concat([cipher.update(secret, "utf8"), cipher.final()]);
-  return `enc:v1:${iv.toString("base64url")}:${cipher.getAuthTag().toString("base64url")}:${encrypted.toString("base64url")}`;
-}
+import { BACKUP_CODES_COUNT, hashBackupCode, legacyBackupCodeHash } from "@/lib/auth/two-factor-credentials";
+import {
+  decryptSensitiveValue,
+  encryptSensitiveValue,
+  isEncryptedSensitiveValue,
+  refreshEncryptedValue
+} from "@/lib/security/secret-box";
 
 function decryptTotpSecret(stored: string): string {
-  if (!stored.startsWith("enc:v1:")) return stored; // compatibilità con secret pre-hardening
-  const [, version, ivValue, tagValue, ciphertextValue] = stored.split(":");
-  if (version !== "v1" || !ivValue || !tagValue || !ciphertextValue) {
-    throw new DomainError("Configurazione 2FA non valida: riattivala dalla sezione Sicurezza.");
-  }
   try {
-    const decipher = createDecipheriv("aes-256-gcm", totpEncryptionKey(), Buffer.from(ivValue, "base64url"));
-    decipher.setAuthTag(Buffer.from(tagValue, "base64url"));
-    return Buffer.concat([
-      decipher.update(Buffer.from(ciphertextValue, "base64url")),
-      decipher.final()
-    ]).toString("utf8");
+    return decryptSensitiveValue(stored);
   } catch {
     throw new DomainError("Configurazione 2FA non valida: riattivala dalla sezione Sicurezza.");
   }
@@ -72,7 +38,7 @@ export async function startTotpEnrollment(customerId: string): Promise<{ secret:
   const secret = generateTotpSecret();
   await prisma.customer.update({
     where: { id: customerId },
-    data: { totpSecret: encryptTotpSecret(secret), totpLastStep: null }
+    data: { totpSecret: encryptSensitiveValue(secret), totpLastStep: null }
   });
   return { secret, uri: otpauthUri(customer.email, secret) };
 }
@@ -101,9 +67,9 @@ export async function confirmTotpEnrollment(customerId: string, code: string): P
       data: {
         totpEnabledAt: new Date(),
         totpLastStep: step,
-        totpSecret: storedSecret.startsWith("enc:v1:")
+        totpSecret: isEncryptedSensitiveValue(storedSecret)
           ? storedSecret
-          : encryptTotpSecret(plainSecret)
+          : encryptSensitiveValue(plainSecret)
       }
     });
     if (enabled.count !== 1) throw new DomainError("La verifica in due passaggi è già stata configurata.");
@@ -188,6 +154,8 @@ export async function verifySecondFactor(customerId: string, code: string): Prom
   const step = verifyTotpCode(secret, code);
   if (step !== null) {
     // Anti-replay: lo stesso step non può essere riusato (accetta solo step più avanti).
+    // Upgrade opportunistico: i secret in busta legacy v1 (o plaintext storici)
+    // vengono ri-cifrati al formato corrente ad ogni verifica riuscita.
     const updated = await prisma.customer.updateMany({
       where: {
         id: customerId,
@@ -195,24 +163,40 @@ export async function verifySecondFactor(customerId: string, code: string): Prom
       },
       data: {
         totpLastStep: step,
-        totpSecret: customer.totpSecret.startsWith("enc:v1:")
-          ? customer.totpSecret
-          : encryptTotpSecret(secret)
+        totpSecret: isEncryptedSensitiveValue(customer.totpSecret)
+          ? refreshEncryptedValue(customer.totpSecret)
+          : encryptSensitiveValue(secret)
       }
     });
     return updated.count === 1;
   }
 
   // Codice di recupero: consumo atomico (usedAt null → valorizzato).
-  const consumed = await prisma.customerBackupCode.updateMany({
+  // I codici creati prima dell'hardening HMAC (hash SHA-256 semplice) restano
+  // validi ma vengono ri-hashati al formato corrente appena usati.
+  const matched = await prisma.customerBackupCode.findFirst({
     where: {
       customerId,
       codeHash: { in: [hashBackupCode(code), legacyBackupCodeHash(code)] },
       usedAt: null
     },
+    select: { id: true, codeHash: true }
+  });
+  if (!matched) return false;
+  const consumed = await prisma.customerBackupCode.updateMany({
+    where: { id: matched.id, usedAt: null },
     data: { usedAt: new Date() }
   });
-  return consumed.count === 1;
+  if (consumed.count !== 1) return false;
+  if (matched.codeHash === legacyBackupCodeHash(code)) {
+    await prisma.customerBackupCode
+      .update({
+        where: { id: matched.id },
+        data: { codeHash: hashBackupCode(code) }
+      })
+      .catch(() => undefined);
+  }
+  return true;
 }
 
 /** Stato 2FA per la pagina Sicurezza. */

@@ -14,17 +14,42 @@ const inFlight = new Map<string, Promise<unknown>>();
 
 const MAX_ENTRIES = 500;
 
+/**
+ * Evizione LRU-ish: elimina le voci scadute e poi, se serve, le meno
+ * recentmente usate (l'ordine di inserimento di Map viene rinfrescato dai get).
+ * Un flush totale ("store.clear()") creerebbe un thundering herd di query DB
+ * sull'istanza appena il catalogo supera la capienza.
+ */
+function evictIfNeeded(): void {
+  if (store.size < MAX_ENTRIES) return;
+  const now = Date.now();
+  for (const [key, entry] of store) {
+    if (entry.expiresAt <= now) store.delete(key);
+    if (store.size < MAX_ENTRIES) return;
+  }
+  while (store.size >= MAX_ENTRIES) {
+    const oldest = store.keys().next().value;
+    if (oldest === undefined) break;
+    store.delete(oldest);
+  }
+}
+
 export async function memoTtl<T>(key: string, ttlMs: number, load: () => Promise<T>): Promise<T> {
   const now = Date.now();
   const hit = store.get(key);
-  if (hit && hit.expiresAt > now) return hit.value as T;
+  if (hit && hit.expiresAt > now) {
+    // Rinfresca l'ordine di inserimento: approssima LRU senza strutture extra.
+    store.delete(key);
+    store.set(key, hit);
+    return hit.value as T;
+  }
 
   const pending = inFlight.get(key);
   if (pending) return pending as Promise<T>;
 
   const promise = load()
     .then((value) => {
-      if (store.size >= MAX_ENTRIES) store.clear();
+      evictIfNeeded();
       store.set(key, { value, expiresAt: Date.now() + ttlMs });
       return value;
     })

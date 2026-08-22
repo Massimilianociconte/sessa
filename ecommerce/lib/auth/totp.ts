@@ -86,8 +86,7 @@ export function verifyTotpCode(secretBase32: string, code: string, now = Date.no
 }
 
 /** URI otpauth per QR code (issuer + account, formato standard). */
-export function otpauthUri(accountEmail: string, secretBase32: string): string {
-  const issuer = "Sessa 1930";
+export function otpauthUri(accountEmail: string, secretBase32: string, issuer = "Sessa 1930"): string {
   const label = `${encodeURIComponent(issuer)}:${encodeURIComponent(accountEmail)}`;
   const params = new URLSearchParams({
     secret: secretBase32,
@@ -102,7 +101,16 @@ export function otpauthUri(accountEmail: string, secretBase32: string): string {
 /** Codice di recupero leggibile: XXXX-XXXX su alfabeto non ambiguo. */
 export function generateBackupCode(): string {
   const alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"; // niente I/L/O/0/1
-  const pick = () => alphabet[randomBytes(1)[0]! % alphabet.length];
+  // Campionamento a rigetto: niente bias da modulo (31 non divide 256, il
+  // semplice `% length` favoriva le prime lettere di circa il 3%).
+  const limit = Math.floor(256 / alphabet.length) * alphabet.length;
+  const pick = () => {
+    let byte: number;
+    do {
+      byte = randomBytes(1)[0]!;
+    } while (byte >= limit);
+    return alphabet[byte % alphabet.length]!;
+  };
   const block = () => Array.from({ length: 4 }, pick).join("");
   return `${block()}-${block()}`;
 }

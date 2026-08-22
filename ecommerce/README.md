@@ -58,15 +58,16 @@ app/
   admin/
     login/                accesso gestionale
     (protected)/          dashboard, ordini, prodotti, categorie,
-                          magazzino, sconti, clienti, impostazioni
+                          magazzino, sconti, clienti, sicurezza,
+                          osservabilita, Merchant Center, impostazioni
 lib/
   domain.ts               enum, label IT, macchina a stati ordini
   money.ts                aritmetica in centesimi (mai float)
   validation.ts           schemi Zod (unica dogana degli input)
   db.ts / audit.ts        Prisma singleton, audit log
   auth/                   scrypt, sessioni (token hashato a DB)
-  services/               logica di dominio (catalogo, carrello,
-                          checkout, ordini, magazzino, sconti, spedizioni)
+  services/               logica di dominio (catalogo, carrello, checkout,
+                          ordini, magazzino, outbox email, scadenza stock)
   payments/               provider manuale + Stripe Checkout e rimborsi
   actions/                server actions (storefront + admin)
 prisma/
@@ -84,7 +85,8 @@ public/
 StockMovement · Cart · CartItem · Customer · PasswordResetToken · CustomerSession ·
 Address · Order · OrderCounter · OrderItem · OrderEvent · DiscountCode ·
 DiscountRedemption · GiftCard · GiftCardTransaction · Referral · ShippingZone ·
-ShippingRate · EmailMessage · AdminUser · AdminSession · AuditLog · Setting`
+ShippingRate · EmailMessage · AdminUser · AdminSession · AdminLocation ·
+AdminBackupCode · OperationalEvent · AuditLog · Setting`
 
 Principi:
 - **Prezzi in centesimi** (`Int`), IVA inclusa (scorporo informativo su `Order.taxCents`).
@@ -112,7 +114,11 @@ Principi:
 | **Password admin** | Hash **scrypt** con sale per-utente; mai in chiaro. Al cambio password **tutte** le sessioni vengono invalidate (rotazione), resta attiva solo quella corrente. |
 | **Brute-force login** | Throttle IP+email: dopo 8 tentativi falliti in 15 min, blocco di 15 min (non blocca l'admin legittimo da un altro IP). |
 | **Sessioni** | Token 32 byte in cookie `httpOnly`+`sameSite=lax` (+`secure` in prod); nel DB solo l'**hash SHA-256**. Scadenza 7 giorni, pruning automatico. |
-| **Accesso gestionale** | Tripla barriera: middleware edge, layout protetto (rivalida a DB), e `requireAdmin()` in **ogni** server action di scrittura. |
+| **2FA gestionale** | TOTP cifrato a riposo, anti-replay, 10 recovery code monouso, revoca delle altre sessioni; obbligatorio in produzione salvo override d'emergenza. |
+| **Ruoli per sede** | RBAC server-side e perimetro sedi su dashboard, ordini, inventario ed export; i cambi accesso revocano le sessioni del collaboratore. |
+| **Email asincrone** | Outbox cifrata, deduplica, lease `SKIP LOCKED`, retry con backoff e dead-letter; il checkout non dipende dalla latenza SMTP. |
+| **Scadenza stock** | Worker idempotente: verifica Stripe server-side e rilascia atomicamente stock e benefici solo per ordini scaduti non pagati. |
+| **Accesso gestionale** | Tripla barriera: proxy edge, layout protetto (rivalida a DB), e `requireAdmin()` in **ogni** server action di scrittura. |
 | **IVA corretta** | `taxCents` scorporata dall'importo **scontato** (non dal lordo pieno): niente IVA sovrastimata quando c'è un codice sconto. |
 | **Pagine private fuori dall'indice** | `robots.txt` + `noindex` su carrello/checkout/ordine/admin; solo catalogo e prodotti indicizzabili. |
 | **Tracking ordine pubblico** | Richiede `code` + `publicToken` (16 byte); il solo codice non basta. |
@@ -140,6 +146,7 @@ Principi:
 - `metadataBase` + OpenGraph impostati; **JSON-LD `Product`** (prezzo/disponibilità)
   sulla pagina prodotto per i rich results.
 - Gestionale installabile come **PWA** (manifest, service worker network-first, offline).
+- Feed protetti Google Merchant con prodotto e inventario locale per SKU/sede.
 - Pagine di errore/404 brandizzate (`app/error.tsx`, `app/not-found.tsx`).
 
 Configurare `NEXT_PUBLIC_SITE_URL` in `.env` con il dominio reale (usato da sitemap,

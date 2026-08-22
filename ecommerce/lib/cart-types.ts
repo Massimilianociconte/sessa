@@ -2,6 +2,7 @@
 
 export type CartLineDTO = {
   itemId: string;
+  storeVariantId: string;
   productId: string;
   productName: string;
   productSlug: string;
@@ -24,6 +25,7 @@ export type CartDTO = {
   locationSlug: string | null;
   locationName: string | null;
   lines: CartLineDTO[];
+  warnings: string[];
 };
 
 export const EMPTY_CART: CartDTO = {
@@ -36,5 +38,6 @@ export const EMPTY_CART: CartDTO = {
   giftCardBalanceCents: 0,
   locationSlug: null,
   locationName: null,
-  lines: []
+  lines: [],
+  warnings: []
 };

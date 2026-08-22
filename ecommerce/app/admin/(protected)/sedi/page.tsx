@@ -24,6 +24,13 @@ type LocationDefaults = {
   deliveryEnabled: boolean;
   isActive: boolean;
   position: number;
+  merchantStoreCode: string | null;
+  merchantEnabled: boolean;
+  merchantPickupSla: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  googleMapsUrl?: string | null;
+  gbpUrl?: string | null;
 };
 
 function LocationFields({ d }: { d?: LocationDefaults }) {
@@ -59,7 +66,23 @@ function LocationFields({ d }: { d?: LocationDefaults }) {
       </div>
       <div>
         <label className="label-field">Orari</label>
-        <input name="hours" defaultValue={d?.hours ?? ""} className="input-field" placeholder="07:00–24:00" />
+        <input name="hours" defaultValue={d?.hours ?? ""} className="input-field" placeholder="07:00-00:00" />
+      </div>
+      <div>
+        <label className="label-field">Latitudine</label>
+        <input name="latitude" type="number" step="any" defaultValue={d?.latitude ?? ""} className="input-field" />
+      </div>
+      <div>
+        <label className="label-field">Longitudine</label>
+        <input name="longitude" type="number" step="any" defaultValue={d?.longitude ?? ""} className="input-field" />
+      </div>
+      <div>
+        <label className="label-field">URL Google Maps</label>
+        <input name="googleMapsUrl" defaultValue={d?.googleMapsUrl ?? ""} className="input-field" />
+      </div>
+      <div>
+        <label className="label-field">URL Google Business</label>
+        <input name="gbpUrl" defaultValue={d?.gbpUrl ?? ""} className="input-field" />
       </div>
       <div>
         <label className="label-field">Posizione</label>
@@ -79,6 +102,16 @@ function LocationFields({ d }: { d?: LocationDefaults }) {
           Sede attiva
         </label>
       </div>
+      <section className="rounded-2xl border border-ceramic/20 bg-ceramic/5 p-4 sm:col-span-2">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div><p className="font-semibold">Inventario locale Google</p><p className="text-xs text-ink/50">Attiva solo dopo aver copiato il codice esatto dal Google Business Profile.</p></div>
+          <label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" name="merchantEnabled" defaultChecked={d?.merchantEnabled ?? false} className="accent-terracotta" />Sede nei feed locali</label>
+        </div>
+        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+          <div><label className="label-field">Store code</label><input name="merchantStoreCode" maxLength={64} defaultValue={d?.merchantStoreCode ?? ""} className="input-field" placeholder="Codice Business Profile" /></div>
+          <div><label className="label-field">Tempo ritiro</label><select name="merchantPickupSla" defaultValue={d?.merchantPickupSla ?? "same day"} className="input-field"><option value="same day">In giornata</option><option value="next day">Giorno successivo</option><option value="2-day">Entro 2 giorni</option><option value="3-day">Entro 3 giorni</option><option value="4-day">Entro 4 giorni</option><option value="5-day">Entro 5 giorni</option><option value="6-day">Entro 6 giorni</option><option value="multi-week">Da concordare</option></select></div>
+        </div>
+      </section>
     </div>
   );
 }
@@ -100,7 +133,7 @@ export default async function AdminLocationsPage({
       <h1 className="font-serif text-3xl font-semibold">Sedi / Punti vendita</h1>
       <p className="mt-1 text-sm text-ink/50">
         Ogni sede ha il proprio assortimento, prezzi e stock. Creando una sede il catalogo attivo
-        viene pubblicato automaticamente (stock 0, da rifornire in magazzino).
+        viene predisposto automaticamente (nascosto e stock 0: attivalo sede per sede).
       </p>
       <div className="mt-4">
         <Flash msg={msg} err={err} />

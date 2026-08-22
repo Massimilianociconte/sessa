@@ -4,6 +4,7 @@ import { useActionState, useEffect, useMemo, useRef, useState } from "react";
 import { centsToAnalyticsValue, trackEcommerceEvent, type AnalyticsItem } from "@/lib/analytics";
 import { placeOrderAction, type CheckoutState } from "@/lib/actions/checkout";
 import { formatCents } from "@/lib/money";
+import { createCheckoutIdempotencyKey } from "@/lib/commerce/checkout-idempotency";
 
 const initialCheckoutState: CheckoutState = { error: null, fieldErrors: {} };
 
@@ -107,6 +108,7 @@ export default function CheckoutForm({
   preferredFulfillment
 }: Props) {
   const [state, formAction, pending] = useActionState(placeOrderAction, initialCheckoutState);
+  const [checkoutKey] = useState(() => createCheckoutIdempotencyKey());
   const [fulfillment, setFulfillment] = useState<"PICKUP" | "DELIVERY">(() => {
     // La preferenza del cliente vince, se la sede la supporta.
     if (preferredFulfillment === "PICKUP" && location.pickupEnabled) return "PICKUP";
@@ -195,6 +197,7 @@ export default function CheckoutForm({
 
   return (
     <form action={formAction} onSubmit={trackSubmit} className="grid gap-10 pb-28 lg:grid-cols-[1fr_360px] lg:pb-0">
+      <input type="hidden" name="checkoutIdempotencyKey" value={checkoutKey} />
       <div className="space-y-8">
         <section className="grid gap-3 sm:grid-cols-3" aria-label="Garanzie checkout">
           <div className="checkout-trust-card">
@@ -336,6 +339,16 @@ export default function CheckoutForm({
 
         <section className="checkout-section card space-y-2 p-6">
           <h2 className="font-serif text-2xl font-semibold">Pagamento</h2>
+          {amountDue === 0 && giftCardApplied > 0 && (
+            <>
+              <input type="hidden" name="paymentMethod" value={paymentMethod} />
+              <p className="rounded-xl bg-brilliant/10 px-4 py-3 text-sm font-semibold text-emerald-800">
+                La gift card copre l&apos;intero ordine. Non serve un altro metodo di pagamento.
+              </p>
+            </>
+          )}
+          {!(amountDue === 0 && giftCardApplied > 0) && (
+          <>
           {stripeEnabled && (
             <div className="rounded-xl border border-majolica/50 bg-majolica/15 px-4 py-3 text-sm text-ink/70">
               Stripe Checkout puo mostrare automaticamente carta, Link, Apple Pay e Google Pay quando sono abilitati e disponibili sul dispositivo.
@@ -384,6 +397,8 @@ export default function CheckoutForm({
                 <span className="block text-xs text-ink/50">Pagamento sicuro tramite Stripe Checkout.</span>
               </span>
             </label>
+          )}
+          </>
           )}
         </section>
 

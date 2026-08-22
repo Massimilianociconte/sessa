@@ -7,7 +7,7 @@ import { formatCents } from "@/lib/money";
 import { effectivePrice } from "@/lib/services/catalog";
 import { listInventory, listRecentMovements } from "@/lib/services/inventory";
 import { formatRomeDateTime } from "@/lib/datetime";
-import { requireAdminCapability } from "@/lib/auth/session";
+import { adminLocationScope, requireAdminCapability } from "@/lib/auth/session";
 import { hasAdminCapability } from "@/lib/auth/admin-authorization";
 
 export const dynamic = "force-dynamic";
@@ -24,12 +24,16 @@ export default async function AdminInventoryPage({
     requireAdminCapability("inventory:manage")
   ]);
   const canExport = hasAdminCapability(user.role, "exports:download");
-  const locations = await prisma.location.findMany({ orderBy: { position: "asc" } });
+  const allowedLocationIds = adminLocationScope(user);
+  const locations = await prisma.location.findMany({
+    where: allowedLocationIds === null ? undefined : { id: { in: allowedLocationIds } },
+    orderBy: { position: "asc" }
+  });
   const locationId = locations.find((l) => l.id === sede)?.id;
   const lowOnly = soglia === "1";
   const [variants, movements] = await Promise.all([
-    listInventory({ locationId, query: q, lowOnly }),
-    listRecentMovements(40, locationId)
+    listInventory({ locationId, query: q, lowOnly, allowedLocationIds }),
+    listRecentMovements(40, locationId, allowedLocationIds)
   ]);
   const backParams = new URLSearchParams();
   if (locationId) backParams.set("sede", locationId);

@@ -6,20 +6,14 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { requireCustomer } from "@/lib/auth/customer-session";
-import { addItemToCart, CART_COOKIE, getOrCreateCartForLocation } from "@/lib/services/cart";
+import { addItemToCart, CART_COOKIE, cartCookieSetOptions, getOrCreateCartForLocation } from "@/lib/services/cart";
 
 async function ensureCartToken(): Promise<string> {
   const store = await cookies();
   const existing = store.get(CART_COOKIE)?.value;
   if (existing) return existing;
   const token = randomBytes(24).toString("hex");
-  store.set(CART_COOKIE, token, {
-    httpOnly: true,
-    sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    maxAge: 60 * 60 * 24 * 30
-  });
+  store.set(CART_COOKIE, token, cartCookieSetOptions());
   return token;
 }
 

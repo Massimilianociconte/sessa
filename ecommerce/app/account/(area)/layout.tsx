@@ -7,6 +7,7 @@ import { logoutCustomerAction } from "@/lib/actions/account/auth";
 import { getSessionCustomer } from "@/lib/auth/customer-session";
 
 export const dynamic = "force-dynamic";
+export const metadata = { robots: { index: false, follow: false, noarchive: true } };
 
 export default async function AccountLayout({ children }: { children: React.ReactNode }) {
   const customer = await getSessionCustomer();

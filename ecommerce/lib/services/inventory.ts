@@ -36,6 +36,7 @@ export type InventoryFilter = {
   locationId?: string;
   query?: string; // nome prodotto, nome variante o SKU
   lowOnly?: boolean; // solo varianti sotto soglia
+  allowedLocationIds?: string[] | null;
 };
 
 export async function listInventory(filter?: InventoryFilter | string) {
@@ -43,7 +44,16 @@ export async function listInventory(filter?: InventoryFilter | string) {
   const f: InventoryFilter = typeof filter === "string" ? { locationId: filter } : (filter ?? {});
   const rows = await prisma.storeVariant.findMany({
     where: {
-      ...(f.locationId ? { locationId: f.locationId } : {}),
+      ...(f.allowedLocationIds !== undefined && f.allowedLocationIds !== null
+        ? {
+            locationId:
+              f.locationId && f.allowedLocationIds.includes(f.locationId)
+                ? f.locationId
+                : { in: f.locationId ? [] : f.allowedLocationIds }
+          }
+        : f.locationId
+          ? { locationId: f.locationId }
+          : {}),
       ...(f.query
         ? {
             variant: {
@@ -66,9 +76,22 @@ export async function listInventory(filter?: InventoryFilter | string) {
   return f.lowOnly ? rows.filter((sv) => sv.stockQty <= sv.lowStockThreshold) : rows;
 }
 
-export async function listRecentMovements(take = 50, locationId?: string) {
+export async function listRecentMovements(take = 50, locationId?: string, allowedLocationIds?: string[] | null) {
   return prisma.stockMovement.findMany({
-    where: locationId ? { storeVariant: { locationId } } : undefined,
+    where: {
+      storeVariant: {
+        ...(allowedLocationIds !== undefined && allowedLocationIds !== null
+          ? {
+              locationId:
+                locationId && allowedLocationIds.includes(locationId)
+                  ? locationId
+                  : { in: locationId ? [] : allowedLocationIds }
+            }
+          : locationId
+            ? { locationId }
+            : {})
+      }
+    },
     include: {
       storeVariant: {
         include: {
@@ -82,13 +105,22 @@ export async function listRecentMovements(take = 50, locationId?: string) {
   });
 }
 
-export async function lowStockVariants(locationId?: string) {
+export async function lowStockVariants(locationId?: string, allowedLocationIds?: string[] | null) {
   // SQLite/Prisma non confrontano due colonne in where: filtro applicativo.
   const variants = await prisma.storeVariant.findMany({
     where: {
       isAvailable: true,
       variant: { isActive: true, product: { status: "ACTIVE" } },
-      ...(locationId ? { locationId } : {})
+      ...(allowedLocationIds !== undefined && allowedLocationIds !== null
+        ? {
+            locationId:
+              locationId && allowedLocationIds.includes(locationId)
+                ? locationId
+                : { in: locationId ? [] : allowedLocationIds }
+          }
+        : locationId
+          ? { locationId }
+          : {})
     },
     include: {
       location: { select: { name: true } },

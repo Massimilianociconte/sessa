@@ -10,6 +10,8 @@ import {
   removeGiftCardAction,
   updateCartItemAction
 } from "@/lib/actions/cart";
+import CartRefreshBeacon from "@/components/storefront/CartRefreshBeacon";
+import { getSessionCustomer } from "@/lib/auth/customer-session";
 import { formatCents } from "@/lib/money";
 import { getCartGiftCard } from "@/lib/services/cart";
 import { getCurrentCartView } from "@/lib/services/cart-session";
@@ -21,15 +23,16 @@ export const metadata = { title: "Carrello", robots: { index: false, follow: fal
 export default async function CartPage({
   searchParams
 }: {
-  searchParams: Promise<{ err?: string }>;
+  searchParams: Promise<{ err?: string; warn?: string }>;
 }) {
-  const [{ err }, view] = await Promise.all([searchParams, getCurrentCartView()]);
+  const [{ err, warn }, view, customer] = await Promise.all([searchParams, getCurrentCartView(), getSessionCustomer()]);
   const isEmpty = !view || view.lines.length === 0;
-  const giftCard = view ? await getCartGiftCard(view.cart) : null;
+  const giftCard = view ? await getCartGiftCard(view.cart, customer?.id) : null;
 
   return (
     <>
       <Header />
+      <CartRefreshBeacon />
       <main className="mx-auto max-w-5xl px-4 py-8 sm:py-10">
         <h1 className="font-serif text-4xl font-semibold">Il tuo carrello</h1>
         {view && (
@@ -46,6 +49,16 @@ export default async function CartPage({
             {err}
           </p>
         )}
+        {warn && (
+          <p className="mt-4 rounded-xl bg-majolica/20 px-4 py-3 text-sm font-semibold text-ink/80">
+            {warn}
+          </p>
+        )}
+        {view?.integrityWarnings?.map((warning) => (
+          <p key={warning} className="mt-3 rounded-xl bg-majolica/20 px-4 py-3 text-sm text-ink/70">
+            {warning}
+          </p>
+        ))}
 
         {isEmpty ? (
           <div className="mt-12 text-center">
@@ -176,10 +189,27 @@ export default async function CartPage({
                   <span>−{formatCents(view.discountCents)}</span>
                 </div>
               )}
+              {giftCard?.valid && giftCard.balanceCents > 0 && (
+                <div className="flex justify-between text-ceramic">
+                  <span>Gift card {giftCard.code}</span>
+                  <span>
+                    −{formatCents(Math.min(giftCard.balanceCents, Math.max(0, view.subtotalCents - view.discountCents)))}
+                  </span>
+                </div>
+              )}
               <p className="text-xs text-ink/40">Spedizione calcolata al checkout (gratis per il ritiro).</p>
               <div className="flex justify-between border-t border-ink/10 pt-3 text-base font-bold">
-                <span>Totale parziale</span>
-                <span>{formatCents(view.subtotalCents - view.discountCents)}</span>
+                <span>{giftCard?.valid ? "Da pagare (anteprima)" : "Totale parziale"}</span>
+                <span>
+                  {formatCents(
+                    Math.max(
+                      0,
+                      view.subtotalCents -
+                        view.discountCents -
+                        (giftCard?.valid ? Math.min(giftCard.balanceCents, view.subtotalCents - view.discountCents) : 0)
+                    )
+                  )}
+                </span>
               </div>
               <Link href="/checkout" className="btn-primary mt-4 w-full">
                 Procedi al checkout

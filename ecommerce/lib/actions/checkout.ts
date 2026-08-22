@@ -9,6 +9,8 @@ import { CART_COOKIE, getCartByToken } from "@/lib/services/cart";
 import { placeOrder } from "@/lib/services/checkout";
 import { checkoutSchema, formDataToObject } from "@/lib/validation";
 import { enforceCartRateLimit } from "@/lib/services/cart-rate-limit";
+import { recordOperationalError } from "@/lib/observability";
+import { safeErrorMetadata } from "@/lib/safe-log";
 
 export type CheckoutState = {
   error: string | null;
@@ -56,7 +58,14 @@ export async function placeOrderAction(
     paymentInitError = placed.paymentInitError;
   } catch (error) {
     if (error instanceof DomainError) return { error: error.message, fieldErrors: {} };
-    console.error("Errore checkout:", error);
+    recordOperationalError({
+      level: "ERROR",
+      source: "checkout-action",
+      code: "CHECKOUT_UNEXPECTED_ERROR",
+      message: "Errore inatteso durante il checkout.",
+      error,
+      metadata: safeErrorMetadata(error)
+    });
     return { error: "Si è verificato un errore imprevisto. Riprova tra qualche istante.", fieldErrors: {} };
   }
 

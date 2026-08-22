@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
-import { CART_COOKIE, getCartByToken, setItemQty } from "@/lib/services/cart";
+import { CART_COOKIE, cartClampWarning, getCartByToken, setItemQty } from "@/lib/services/cart";
 import { loadCartDTO } from "@/lib/services/cart-dto";
 import { DomainError } from "@/lib/domain";
 import { enforceCartRateLimit } from "@/lib/services/cart-rate-limit";
@@ -22,9 +22,12 @@ export async function POST(request: NextRequest) {
   try {
     await enforceCartRateLimit(request.headers, token, "mutation");
     const cart = await getCartByToken(token);
-    if (cart) await setItemQty(cart.id, parsed.data.itemId, parsed.data.qty);
+    const mutation = cart ? await setItemQty(cart.id, parsed.data.itemId, parsed.data.qty) : null;
     const customer = await getSessionCustomer();
-    return NextResponse.json(await loadCartDTO(token, customer?.id));
+    return NextResponse.json({
+      ...(await loadCartDTO(token, customer?.id)),
+      warning: mutation ? cartClampWarning(mutation) ?? undefined : undefined
+    });
   } catch (error) {
     if (error instanceof DomainError) {
       return NextResponse.json(

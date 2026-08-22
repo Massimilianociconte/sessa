@@ -8,7 +8,7 @@ export default function robots(): MetadataRoute.Robots {
         userAgent: "*",
         allow: "/",
         // Pagine private/transazionali fuori dall'indice.
-        disallow: ["/admin", "/checkout", "/carrello", "/ordine/"]
+        disallow: ["/admin", "/account", "/api/", "/feeds/", "/checkout", "/carrello", "/ordine/", "/r/"]
       }
     ],
     sitemap: `${SITE_URL}/sitemap.xml`

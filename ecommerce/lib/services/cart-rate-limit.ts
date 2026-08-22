@@ -1,6 +1,7 @@
 import { createHmac } from "node:crypto";
 import { prisma } from "@/lib/db";
 import { DomainError } from "@/lib/domain";
+import { getAuthSecret } from "@/lib/auth/secret";
 
 type Limit = { max: number; windowMs: number; blockMs: number };
 
@@ -12,8 +13,9 @@ const LIMITS: Record<"mutation" | "discount" | "giftcard" | "checkout", Limit> =
 };
 
 function digest(value: string): string {
-  const key = process.env.SESSION_SECRET ?? "sessa-rate-limit-development-only";
-  return createHmac("sha256", key).update(value).digest("hex").slice(0, 32);
+  // Stessa derivazione del resto dell'app (fail-closed senza SESSION_SECRET
+  // valido in produzione): niente costante di fallback silenziosa.
+  return createHmac("sha256", getAuthSecret()).update(value).digest("hex").slice(0, 32);
 }
 
 function requestIp(headers: Headers): string {
@@ -48,6 +50,15 @@ async function consume(key: string, limit: Limit): Promise<number | null> {
     create: { key, count: 1, firstAt: now },
     update: { count: { increment: 1 } }
   });
+  // Prune opportunistico: una voce nuova per IP/token nasce solo alla prima
+  // richiesta della finestra, il momento giusto per spazzare le voci vecchie
+  // (la tabella cresce con gli IP dei visitatori e non ha altro percorso di
+  // pulizia — il prune di lib/auth/rate-limit copre solo le sue chiavi).
+  if (entry.count === 1) {
+    await prisma.rateLimitEntry
+      .deleteMany({ where: { updatedAt: { lt: new Date(now.getTime() - 48 * 60 * 60_000) } } })
+      .catch(() => undefined);
+  }
   if (entry.count <= limit.max) return null;
   const blockedUntil = new Date(now.getTime() + limit.blockMs);
   await prisma.rateLimitEntry.update({ where: { key }, data: { blockedUntil } });

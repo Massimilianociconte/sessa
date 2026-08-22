@@ -1,30 +1,41 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { headers } from "next/headers";
 import AdminPwaInstall from "@/components/admin/AdminPwaInstall";
 import { logoutAction } from "@/lib/actions/auth";
-import { getSessionUser } from "@/lib/auth/session";
+import { getSessionUser, isAdminTwoFactorRequired } from "@/lib/auth/session";
 import { hasAdminCapability, type AdminCapability } from "@/lib/auth/admin-authorization";
 
 export const dynamic = "force-dynamic";
 
 const NAV: Array<{ href: string; label: string; capability?: AdminCapability }> = [
   { href: "/admin", label: "Dashboard" },
-  { href: "/admin/ordini", label: "Ordini" },
+  { href: "/admin/ordini", label: "Ordini", capability: "orders:manage" },
   { href: "/admin/prodotti", label: "Prodotti", capability: "catalog:manage" },
   { href: "/admin/categorie", label: "Categorie", capability: "catalog:manage" },
   { href: "/admin/sedi", label: "Sedi", capability: "catalog:manage" },
-  { href: "/admin/magazzino", label: "Magazzino" },
+  { href: "/admin/magazzino", label: "Magazzino", capability: "inventory:manage" },
   { href: "/admin/sconti", label: "Sconti", capability: "promotions:manage" },
   { href: "/admin/gift-card", label: "Gift card", capability: "promotions:manage" },
   { href: "/admin/referral", label: "Referral", capability: "customers:manage" },
   { href: "/admin/clienti", label: "Clienti", capability: "customers:manage" },
+  { href: "/admin/osservabilita", label: "Operazioni", capability: "operations:view" },
+  { href: "/admin/merchant-center", label: "Merchant", capability: "merchant:manage" },
+  { href: "/admin/sicurezza", label: "Sicurezza" },
   { href: "/admin/impostazioni", label: "Profilo e impostazioni" }
 ];
 
 export default async function ProtectedAdminLayout({ children }: { children: React.ReactNode }) {
-  const user = await getSessionUser();
+  const [user, requestHeaders] = await Promise.all([getSessionUser(), headers()]);
   if (!user) redirect("/admin/login");
-  const nav = NAV.filter((item) => !item.capability || hasAdminCapability(user.role, item.capability));
+  const pathname = requestHeaders.get("x-sessa-pathname") ?? "/admin";
+  const requiresTwoFactorEnrollment = isAdminTwoFactorRequired() && !user.twoFactorEnabled;
+  if (requiresTwoFactorEnrollment && pathname !== "/admin/sicurezza") {
+    redirect("/admin/sicurezza?required=1");
+  }
+  const nav = requiresTwoFactorEnrollment
+    ? NAV.filter((item) => item.href === "/admin/sicurezza")
+    : NAV.filter((item) => !item.capability || hasAdminCapability(user.role, item.capability));
 
   return (
     <div className="flex min-h-screen bg-cream">

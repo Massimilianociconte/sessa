@@ -1,11 +1,14 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import CheckoutForm, { type CheckoutRate, type SavedAddress } from "@/components/storefront/CheckoutForm";
+import CartRefreshBeacon from "@/components/storefront/CartRefreshBeacon";
 import Footer from "@/components/storefront/Footer";
 import Header from "@/components/storefront/Header";
 import { getSessionCustomer } from "@/lib/auth/customer-session";
+import { checkoutScheduleBounds } from "@/lib/datetime";
 import { formatCents } from "@/lib/money";
 import { isStripeConfigured } from "@/lib/payments";
+import { applyGiftCardAction, removeGiftCardAction } from "@/lib/actions/cart";
 import { getCartGiftCard } from "@/lib/services/cart";
 import { getCurrentCartView } from "@/lib/services/cart-session";
 import { getEffectiveFulfillmentPreference, listAddresses } from "@/lib/services/customer-account";
@@ -15,16 +18,12 @@ export const dynamic = "force-dynamic";
 
 export const metadata = { title: "Checkout", robots: { index: false, follow: false } };
 
-function pad(n: number): string {
-  return String(n).padStart(2, "0");
-}
-
-function toLocalInput(d: Date): string {
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-export default async function CheckoutPage() {
-  const view = await getCurrentCartView();
+export default async function CheckoutPage({
+  searchParams
+}: {
+  searchParams: Promise<{ err?: string }>;
+}) {
+  const [{ err }, view] = await Promise.all([searchParams, getCurrentCartView()]);
   if (!view || view.lines.length === 0) redirect("/carrello");
 
   const location = view.cart.location;
@@ -43,13 +42,12 @@ export default async function CheckoutPage() {
     : [[] as SavedAddress[], null];
   const cartGiftCard = await getCartGiftCard(view.cart, customer?.id);
   const giftCard = cartGiftCard && cartGiftCard.valid ? { code: cartGiftCard.code, balanceCents: cartGiftCard.balanceCents } : null;
-  const now = new Date().getTime();
-  const minWhen = toLocalInput(new Date(now + 60 * 60 * 1000));
-  const defaultWhen = toLocalInput(new Date(now + 2 * 60 * 60 * 1000));
+  const { minWhen, defaultWhen } = checkoutScheduleBounds();
 
   return (
     <>
       <Header />
+      <CartRefreshBeacon />
       <main className="mx-auto max-w-6xl px-4 py-8 sm:py-10">
         <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
@@ -75,6 +73,37 @@ export default async function CheckoutPage() {
             ))}
           </ul>
         </div>
+
+        {view.integrityWarnings.map((warning) => (
+          <p key={warning} className="mb-4 rounded-xl bg-majolica/20 px-4 py-3 text-sm font-semibold text-ink/80">
+            {warning}
+          </p>
+        ))}
+        {err && (
+          <p className="mb-6 rounded-xl bg-terracotta/10 px-4 py-3 text-sm font-semibold text-terracotta">{err}</p>
+        )}
+
+        <section className="card mb-6 space-y-3 p-5">
+          <h2 className="font-serif text-xl font-semibold">Gift card</h2>
+          <p className="text-sm text-ink/60">
+            Il credito si stacca dal totale. Se copre tutto, non serve un altro pagamento. Se copre in parte, scegli carta, bonifico o pagamento al ritiro per il resto.
+          </p>
+          {giftCard ? (
+            <form action={removeGiftCardAction} className="flex flex-wrap items-center justify-between gap-3">
+              <input type="hidden" name="next" value="checkout" />
+              <p className="text-sm font-semibold text-ceramic">
+                {giftCard.code} · saldo {formatCents(giftCard.balanceCents)}
+              </p>
+              <button type="submit" className="btn-ghost text-sm">Rimuovi</button>
+            </form>
+          ) : (
+            <form action={applyGiftCardAction} className="flex flex-col gap-3 sm:flex-row">
+              <input type="hidden" name="next" value="checkout" />
+              <input name="giftCardCode" className="input-field" placeholder="GIFT-XXXX" autoComplete="off" />
+              <button type="submit" className="btn-secondary shrink-0">Applica credito</button>
+            </form>
+          )}
+        </section>
 
         <CheckoutForm
           subtotalCents={view.subtotalCents}

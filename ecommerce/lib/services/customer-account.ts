@@ -3,6 +3,7 @@ import { prisma } from "@/lib/db";
 import { DomainError } from "@/lib/domain";
 import { hashPassword } from "@/lib/auth/password";
 import { enqueueEmail } from "@/lib/services/email";
+import { serializableTransaction } from "@/lib/services/transaction";
 
 const RESET_TTL_MS = 60 * 60 * 1000; // 1 ora
 
@@ -355,7 +356,7 @@ export async function createAddress(
     isDefault: boolean;
   }
 ): Promise<void> {
-  await prisma.$transaction(async (tx) => {
+  await serializableTransaction(async (tx) => {
     const count = await tx.address.count({ where: { customerId } });
     const makeDefault = data.isDefault || count === 0;
     if (makeDefault) {
@@ -380,24 +381,52 @@ export async function updateAddress(
     isDefault: boolean;
   }
 ): Promise<void> {
-  const owned = await prisma.address.findFirst({ where: { id: addressId, customerId } });
-  if (!owned) throw new DomainError("Indirizzo non trovato.");
-  await prisma.$transaction(async (tx) => {
+  await serializableTransaction(async (tx) => {
+    const owned = await tx.address.findFirst({ where: { id: addressId, customerId } });
+    if (!owned) throw new DomainError("Indirizzo non trovato.");
     if (data.isDefault) {
       await tx.address.updateMany({ where: { customerId }, data: { isDefault: false } });
+      await tx.address.update({ where: { id: addressId }, data: { ...data, isDefault: true } });
+      return;
+    }
+    if (owned.isDefault) {
+      const replacement = await tx.address.findFirst({
+        where: { customerId, id: { not: addressId } },
+        orderBy: { createdAt: "desc" }
+      });
+      await tx.address.update({
+        where: { id: addressId },
+        data: { ...data, isDefault: replacement ? false : true }
+      });
+      if (replacement) {
+        await tx.address.update({ where: { id: replacement.id }, data: { isDefault: true } });
+      }
+      return;
     }
     await tx.address.update({ where: { id: addressId }, data });
   });
 }
 
 export async function deleteAddress(customerId: string, addressId: string): Promise<void> {
-  await prisma.address.deleteMany({ where: { id: addressId, customerId } });
+  await serializableTransaction(async (tx) => {
+    const owned = await tx.address.findFirst({ where: { id: addressId, customerId } });
+    if (!owned) return;
+    await tx.address.delete({ where: { id: addressId } });
+    if (!owned.isDefault) return;
+    const replacement = await tx.address.findFirst({
+      where: { customerId },
+      orderBy: { createdAt: "desc" }
+    });
+    if (replacement) {
+      await tx.address.update({ where: { id: replacement.id }, data: { isDefault: true } });
+    }
+  });
 }
 
 export async function setDefaultAddress(customerId: string, addressId: string): Promise<void> {
-  const owned = await prisma.address.findFirst({ where: { id: addressId, customerId } });
-  if (!owned) return;
-  await prisma.$transaction(async (tx) => {
+  await serializableTransaction(async (tx) => {
+    const owned = await tx.address.findFirst({ where: { id: addressId, customerId } });
+    if (!owned) return;
     await tx.address.updateMany({ where: { customerId }, data: { isDefault: false } });
     await tx.address.update({ where: { id: addressId }, data: { isDefault: true } });
   });

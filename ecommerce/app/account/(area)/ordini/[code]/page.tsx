@@ -2,7 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { AccountInfoGrid, AccountInfoTile, AccountPageIntro, AccountPanel } from "@/components/account/AccountUi";
 import { OrderStatusBadge, PaymentStatusBadge } from "@/components/admin/StatusBadge";
-import { cancelCustomerOrderAction } from "@/lib/actions/account/orders";
+import { cancelCustomerOrderAction, requestReturnAction } from "@/lib/actions/account/orders";
 import { reorderAction } from "@/lib/actions/account/reorder";
 import {
   FULFILLMENT_LABELS,
@@ -48,7 +48,7 @@ export default async function AccountOrderDetailPage({
   if (!order) notFound();
 
   const isPickup = order.fulfillmentType === "PICKUP";
-  const cancellable = order.status === "PENDING_PAYMENT" || order.status === "PAID";
+  const cancellable = ["PENDING_PAYMENT", "CONFIRMED", "PAID"].includes(order.status);
   const steps = completedSteps(order.status, order.paymentStatus);
   const shippingAddress = [order.shipLine1, order.shipLine2, `${order.shipPostalCode} ${order.shipCity}`.trim(), order.shipProvince]
     .filter(Boolean)
@@ -209,6 +209,15 @@ export default async function AccountOrderDetailPage({
           Puoi annullare finché la sede non inizia la preparazione. Lo stock viene ripristinato subito
           {order.paymentStatus === "PAID" ? " e il pagamento verrà rimborsato dalla sede" : ""}.
         </p>
+      )}
+      {order.status === "DELIVERED" && (
+        <form action={requestReturnAction} className="space-y-3 rounded-2xl border border-ink/10 p-4">
+          <input type="hidden" name="orderId" value={order.id} />
+          <input type="hidden" name="code" value={order.code} />
+          <label htmlFor="returnReason" className="label-field">Richiedi un reso (14 giorni)</label>
+          <textarea id="returnReason" name="reason" required maxLength={500} className="input-field" rows={3} />
+          <button type="submit" className="btn-secondary">Invia richiesta di reso</button>
+        </form>
       )}
     </div>
   );

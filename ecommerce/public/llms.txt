@@ -1,0 +1,38 @@
+# Sessa 1930
+
+> Pasticceria artigianale napoletana nata a Ottaviano nel 1930. Questo e lo shop ecommerce ufficiale, con catalogo, stock e ritiro/consegna per sede.
+
+Sito corporate: https://sessa1930.com/
+Shop: usa il dominio pubblico configurato (sitemap in /sitemap.xml).
+
+## Come ordinare
+
+1. Scegli la sede in /
+2. Apri il catalogo /sede/{slug}
+3. Aggiungi i prodotti al carrello di quella sede
+4. Completa il checkout con ritiro o consegna
+5. Puoi applicare una gift card come credito: detrae parzialmente o totalmente il totale
+
+Pagine account, carrello, checkout e admin non sono pubbliche.
+
+## Sedi
+
+- /sede/ottaviano — Sessa 1930 Ottaviano, Piazza Municipio 27, 80044 Ottaviano (NA). Orari 06:30-21:00, martedi chiuso. Ritiro e consegna.
+- /sede/torino — Mercato Centrale Torino, Piazza della Repubblica 25, 10152 Torino. Orari 07:00-00:00. Ritiro e consegna.
+- /sede/milano — Mercato Centrale Milano, Via G. B. Sammartini 2, 20125 Milano. Orari 07:00-00:00. Ritiro e consegna.
+- /sede/firenze — Mercato Centrale Firenze, Via dell'Ariento, 50123 Firenze. Orari 07:00-00:00. Ritiro e consegna.
+- /sede/roma — Mercato Centrale Roma, Via Giovanni Giolitti 36, 00185 Roma. Orari 07:00-00:00. Ritiro e consegna.
+- /sede/merlata-bloom — Merlata Bloom Milano, Via Gottlieb Wilhelm Daimler 0 C2, 20151 Milano. Orari 09:00-23:00. Ritiro e consegna.
+- /sede/roma-termini — Stazione Roma Termini, Via Giovanni Giolitti 40, 00185 Roma. Orari 06:00-23:00. Solo ritiro.
+
+## Categorie
+
+Colazioni, Sfogliatelle, Box Regalo, Pasticceria Tradizionale. Ogni combinazione sede+categoria ha una landing /sede/{slug}/categorie/{categorySlug}.
+
+## Prodotti
+
+Le schede prodotto sono locali: /sede/{slug}/prodotti/{productSlug}. Prezzo, stock e disponibilita dipendono dalla sede.
+
+## Contatti
+
+Usa i dati della sede scelta. Le recensioni pubbliche sono sui profili Google Business delle sedi.

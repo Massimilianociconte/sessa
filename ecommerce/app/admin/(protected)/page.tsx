@@ -9,6 +9,7 @@ import {
   type DashboardRange,
   getDashboardData
 } from "@/lib/services/dashboard";
+import { adminLocationScope, requireAdminCapability } from "@/lib/auth/session";
 
 export const metadata = { title: "Dashboard" };
 
@@ -39,11 +40,15 @@ export default async function AdminDashboardPage({
 }: {
   searchParams: Promise<{ sede?: string; periodo?: string; denied?: string }>;
 }) {
-  const sp = await searchParams;
+  const [sp, user] = await Promise.all([searchParams, requireAdminCapability("dashboard:view")]);
   const range = DASHBOARD_RANGES.includes(sp.periodo as DashboardRange)
     ? (sp.periodo as DashboardRange)
     : "today";
-  const data = await getDashboardData({ locationId: sp.sede || undefined, range });
+  const data = await getDashboardData({
+    locationId: sp.sede || undefined,
+    range,
+    allowedLocationIds: adminLocationScope(user)
+  });
   const activeLocation = data.locations.find((l) => l.id === data.locationId);
 
   return (

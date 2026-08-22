@@ -7,6 +7,7 @@ import AnalyticsBeacon from "@/components/storefront/AnalyticsBeacon";
 import Footer from "@/components/storefront/Footer";
 import Header from "@/components/storefront/Header";
 import ProductCard from "@/components/storefront/ProductCard";
+import { prisma } from "@/lib/db";
 import { formatCents } from "@/lib/money";
 import { buildProductJsonLd, buildProductMetadata, getStoreSeo } from "@/lib/seo/sessa-local";
 import { CATALOG_OCCASIONS, getStoreProduct, listStoreProducts, matchesOccasion } from "@/lib/services/catalog";
@@ -15,6 +16,30 @@ import { getActiveLocationBySlug } from "@/lib/services/locations";
 export const revalidate = 30;
 
 type Props = { params: Promise<{ slug: string; productSlug: string }> };
+
+export async function generateStaticParams() {
+  try {
+    const rows = await prisma.storeVariant.findMany({
+      where: {
+        isAvailable: true,
+        location: { isActive: true },
+        variant: { isActive: true, product: { status: "ACTIVE" } }
+      },
+      select: {
+        location: { select: { slug: true } },
+        variant: { select: { product: { select: { slug: true } } } }
+      }
+    });
+    const unique = new Map<string, { slug: string; productSlug: string }>();
+    for (const row of rows) {
+      const value = { slug: row.location.slug, productSlug: row.variant.product.slug };
+      unique.set(`${value.slug}:${value.productSlug}`, value);
+    }
+    return [...unique.values()];
+  } catch {
+    return [];
+  }
+}
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug, productSlug } = await params;
@@ -82,7 +107,7 @@ export default async function StoreProductPage({ params }: Props) {
           {product.category && (
             <>
               {" / "}
-              <Link href={`/sede/${slug}?categoria=${product.category.slug}`} className="hover:text-terracotta">
+              <Link href={`/sede/${slug}/categorie/${product.category.slug}`} className="hover:text-terracotta">
                 {product.category.name}
               </Link>
             </>
@@ -117,9 +142,21 @@ export default async function StoreProductPage({ params }: Props) {
               </p>
             )}
             <h1 className="mt-1 font-serif text-4xl font-semibold">{product.name}</h1>
+            {product.gallery.length > 1 && (
+              <div className="mt-4 grid grid-cols-4 gap-2">
+                {product.gallery.slice(0, 8).map((url) => (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img key={url} src={url} alt={product.name} className="h-16 w-full rounded-lg object-contain bg-cream" />
+                ))}
+              </div>
+            )}
             <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
               <span className="font-serif text-2xl font-semibold">{priceLabel}</span>
-              <span className="badge bg-majolica/25 text-ink/70">Disponibile presso {location.name}</span>
+              {available.length > 0 ? (
+                <span className="badge bg-majolica/25 text-ink/70">Disponibile presso {location.name}</span>
+              ) : (
+                <span className="badge bg-ink/10 text-ink/50">Esaurito a {location.name}</span>
+              )}
               {occasionLabels.map((occasion) => (
                 <Link
                   key={occasion.slug}
@@ -134,6 +171,28 @@ export default async function StoreProductPage({ params }: Props) {
             <p className="mt-3 text-sm leading-6 text-ink/55">
               Pagina prodotto locale per {seo.keywordCity}: disponibilità, varianti e stock sono collegati alla sede {seo.name}.
             </p>
+            <dl className="mt-4 grid gap-2 rounded-2xl border border-ink/10 bg-white px-4 py-3 text-sm">
+              <div>
+                <dt className="font-semibold text-ink">Ritiro</dt>
+                <dd className="text-ink/60">
+                  {seo.address}, {seo.postalCode} {seo.cityName}
+                  {location.phone ? ` · ${location.phone}` : ""}
+                </dd>
+              </div>
+              {seo.hours && (
+                <div>
+                  <dt className="font-semibold text-ink">Orari sede</dt>
+                  <dd className="text-ink/60">{seo.hours}</dd>
+                </div>
+              )}
+              <div>
+                <dt className="font-semibold text-ink">Servizi</dt>
+                <dd className="text-ink/60">
+                  {location.pickupEnabled ? "Ritiro in sede" : "Ritiro non disponibile"}
+                  {location.deliveryEnabled ? " e consegna." : "."}
+                </dd>
+              </div>
+            </dl>
 
             {(product.ingredients || product.allergens) && (
               <div className="mt-4 space-y-1 rounded-xl bg-cream px-4 py-3 text-sm">
@@ -230,7 +289,15 @@ export default async function StoreProductPage({ params }: Props) {
           </section>
         )}
       </main>
-      <Footer />
+      <Footer
+        location={{
+          name: seo.name,
+          address: seo.address,
+          city: seo.cityName,
+          postalCode: seo.postalCode,
+          phone: location.phone
+        }}
+      />
     </>
   );
 }

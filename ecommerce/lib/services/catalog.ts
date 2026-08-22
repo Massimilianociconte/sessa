@@ -1,6 +1,9 @@
 import { cache } from "react";
 import { prisma } from "@/lib/db";
 import { memoTtl } from "@/lib/ttl-cache";
+import { matchesOccasion } from "@/lib/catalog-discovery";
+
+export { CATALOG_OCCASIONS, matchesOccasion } from "@/lib/catalog-discovery";
 
 /**
  * Catalogo store-aware: prezzo e stock provengono da StoreVariant (per sede).
@@ -36,6 +39,7 @@ export type StoreProductView = {
   description: string;
   shortDescription: string | null;
   image: string | null;
+  gallery: string[];
   tags: string;
   featured: boolean;
   taxRateBps: number;
@@ -48,13 +52,14 @@ export type StoreProductView = {
   inStock: boolean;
 };
 
-type RawProduct = {
+export type RawProduct = {
   id: string;
   name: string;
   slug: string;
   description: string;
   shortDescription: string | null;
   image: string | null;
+  images?: Array<{ url: string }>;
   tags: string;
   featured: boolean;
   taxRateBps: number;
@@ -66,6 +71,7 @@ type RawProduct = {
     name: string;
     sku: string;
     basePriceCents: number;
+    compareAtCents: number | null;
     position: number;
     storeVariants: Array<{
       id: string;
@@ -77,7 +83,8 @@ type RawProduct = {
   }>;
 };
 
-function toView(product: RawProduct): StoreProductView {
+/** Mapping gestionale → vetrina. Le liste pubbliche filtrano prima per ACTIVE. */
+export function toStoreProductView(product: RawProduct): StoreProductView {
   const variants: StoreVariantView[] = product.variants
     .map((v) => {
       const sv = v.storeVariants[0];
@@ -88,7 +95,7 @@ function toView(product: RawProduct): StoreProductView {
         name: v.name,
         sku: v.sku,
         priceCents: effectivePrice(sv.priceCentsOverride, v.basePriceCents),
-        compareAtCents: sv.compareAtCents,
+        compareAtCents: sv.compareAtCents ?? v.compareAtCents,
         stockQty: sv.stockQty,
         lowStockThreshold: sv.lowStockThreshold
       } satisfies StoreVariantView;
@@ -103,6 +110,9 @@ function toView(product: RawProduct): StoreProductView {
     description: product.description,
     shortDescription: product.shortDescription,
     image: product.image,
+    gallery: [product.image, ...(product.images ?? []).map((image) => image.url)].filter(
+      (url, index, all): url is string => Boolean(url) && all.indexOf(url) === index
+    ),
     tags: product.tags,
     featured: product.featured,
     taxRateBps: product.taxRateBps,
@@ -146,16 +156,17 @@ export async function listStoreProducts(
               { name: { contains: query, mode: "insensitive" } },
               { shortDescription: { contains: query, mode: "insensitive" } },
               { description: { contains: query, mode: "insensitive" } },
-              { tags: { contains: query, mode: "insensitive" } }
+              { tags: { contains: query, mode: "insensitive" } },
+              { variants: { some: { sku: { contains: query, mode: "insensitive" } } } }
             ]
           }
         : {}),
       variants: { some: { isActive: true, storeVariants: { some: { locationId, isAvailable: true } } } }
     },
-    include: storeProductInclude(locationId),
+    include: { ...storeProductInclude(locationId), images: { orderBy: { position: "asc" } } },
     orderBy: [{ featured: "desc" }, { position: "asc" }]
   }));
-  const products = (rows as RawProduct[]).map(toView);
+  const products = (rows as RawProduct[]).map(toStoreProductView);
   return normalized.occasion ? products.filter((product) => matchesOccasion(product, normalized.occasion)) : products;
 }
 
@@ -169,9 +180,9 @@ export const getStoreProduct = cache(async function getStoreProduct(
       status: "ACTIVE",
       variants: { some: { isActive: true, storeVariants: { some: { locationId, isAvailable: true } } } }
     },
-    include: storeProductInclude(locationId)
+    include: { ...storeProductInclude(locationId), images: { orderBy: { position: "asc" } } }
   });
-  return row ? toView(row as RawProduct) : null;
+  return row ? toStoreProductView(row as RawProduct) : null;
 });
 
 /** Categorie che hanno almeno un prodotto acquistabile nella sede. */
@@ -190,47 +201,4 @@ export async function listStoreCategories(locationId: string) {
       orderBy: { position: "asc" }
     })
   );
-}
-
-export const CATALOG_OCCASIONS = [
-  {
-    slug: "regalo",
-    label: "Da regalare",
-    description: "Lievitati, box e confezioni con una presenza importante."
-  },
-  {
-    slug: "colazione",
-    label: "Perfetti per colazione",
-    description: "Dolci da condividere al mattino o con il caffe."
-  },
-  {
-    slug: "festa",
-    label: "Per una festa",
-    description: "Scelte scenografiche per tavole, compleanni e ricorrenze."
-  },
-  {
-    slug: "classici",
-    label: "Classici Sessa",
-    description: "Specialita napoletane e pasticceria tradizionale."
-  }
-] as const;
-
-export function matchesOccasion(product: StoreProductView, occasion?: string): boolean {
-  if (!occasion) return true;
-  const haystack = [
-    product.name,
-    product.shortDescription ?? "",
-    product.description,
-    product.tags,
-    product.category?.slug ?? "",
-    product.category?.name ?? ""
-  ]
-    .join(" ")
-    .toLowerCase();
-
-  if (occasion === "regalo") return /regalo|box|lievitati|panettone|colomba/.test(haystack);
-  if (occasion === "colazione") return /colazioni|sfogliatelle|graffe|cornetti|bab/.test(haystack);
-  if (occasion === "festa") return /box|torta|caprese|delizia|lievitati|festa|pasticceria/.test(haystack);
-  if (occasion === "classici") return /classici|sfogliatelle|bab|caprese|tradizionale|napoletan/.test(haystack);
-  return true;
 }

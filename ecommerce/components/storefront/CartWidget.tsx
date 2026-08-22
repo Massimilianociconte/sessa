@@ -214,12 +214,13 @@ export default function CartWidget({
         body: JSON.stringify(body)
       });
       if (res.ok) {
-        const nextCart = (await res.json()) as CartDTO;
+        const nextCart = (await res.json()) as CartDTO & { warning?: string };
         saveLatestCartSnapshot(nextCart);
         cartRef.current = nextCart;
         setCart(nextCart);
         notifyCartChanged(nextCart);
-        setStatusMessage(successMessage);
+        setStatusMessage(nextCart.warning ?? successMessage);
+        if (nextCart.warning) setError(nextCart.warning);
       } else {
         const data = (await res.json().catch(() => null)) as { error?: string } | null;
         setError(data?.error ?? "Non riesco ad aggiornare il carrello.");
@@ -381,6 +382,14 @@ export default function CartWidget({
               {error}
             </p>
           )}
+          {data.warnings?.map((warning) => (
+            <p
+              key={warning}
+              className="mb-4 rounded-2xl border border-majolica/40 bg-majolica/15 px-4 py-3 text-sm font-semibold text-ink/80"
+            >
+              {warning}
+            </p>
+          ))}
 
           {isLoadingInitial ? (
             <div className="space-y-3">

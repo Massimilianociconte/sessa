@@ -3,7 +3,8 @@ import type { PaymentInitInput, PaymentInitResult, PaymentProvider } from "./typ
 
 /**
  * Provider "manual": bonifico bancario o pagamento al ritiro.
- * L'ordine nasce PENDING_PAYMENT e viene marcato pagato dal gestionale.
+ * Il bonifico resta PENDING_PAYMENT; il pagamento al ritiro nasce CONFIRMED,
+ * cosi la preparazione non viene bloccata da un incasso che avverra in sede.
  */
 export const manualProvider: PaymentProvider = {
   id: "manual",
@@ -18,14 +19,14 @@ export const manualProvider: PaymentProvider = {
       return {
         ok: true,
         reference: `manual:${input.orderCode}`,
-        instructions: `${instructions}\nCausale: ${input.orderCode}`
+        instructions: `${instructions}\nCausale: ${input.orderCode}`,
+        expiresAt: input.reservationExpiresAt ?? undefined
       };
     }
     return {
       ok: true,
       reference: `manual:${input.orderCode}`,
-      instructions:
-        "Pagherai al ritiro in sede (Piazza Municipio 27, Ottaviano). Porta con te il codice ordine."
+      instructions: "Pagherai presso la sede selezionata. Porta con te il codice ordine."
     };
   }
 };

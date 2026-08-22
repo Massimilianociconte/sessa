@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { getSessionUser } from "@/lib/auth/session";
+import { adminLocationScope, getSessionUser } from "@/lib/auth/session";
 import { hasAdminCapability } from "@/lib/auth/admin-authorization";
 import { formatCents } from "@/lib/money";
 import { effectivePrice } from "@/lib/services/catalog";
@@ -21,7 +21,8 @@ export async function GET(request: NextRequest) {
   const rows = await listInventory({
     locationId: params.get("sede") || undefined,
     query: params.get("q") || undefined,
-    lowOnly: params.get("soglia") === "1"
+    lowOnly: params.get("soglia") === "1",
+    allowedLocationIds: adminLocationScope(user)
   });
 
   const header = ["Sede", "Prodotto", "Variante", "SKU", "Stato prodotto", "Prezzo", "Stock", "Soglia", "Disponibile"];

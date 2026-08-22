@@ -18,7 +18,7 @@ import { prisma } from "@/lib/db";
 import { formatCents } from "@/lib/money";
 import { listOrders, orderFilterStats, type OrderFilter } from "@/lib/services/orders";
 import { formatRomeDateTime, romeDayRange } from "@/lib/datetime";
-import { requireAdminCapability } from "@/lib/auth/session";
+import { adminLocationScope, requireAdminCapability } from "@/lib/auth/session";
 import { hasAdminCapability } from "@/lib/auth/admin-authorization";
 
 export const dynamic = "force-dynamic";
@@ -50,7 +50,11 @@ export default async function AdminOrdersPage({
 }) {
   const [sp, user] = await Promise.all([searchParams, requireAdminCapability("orders:manage")]);
   const canExport = hasAdminCapability(user.role, "exports:download");
-  const locations = await prisma.location.findMany({ orderBy: { position: "asc" } });
+  const allowedLocationIds = adminLocationScope(user);
+  const locations = await prisma.location.findMany({
+    where: allowedLocationIds === null ? undefined : { id: { in: allowedLocationIds } },
+    orderBy: { position: "asc" }
+  });
 
   const status = ORDER_STATUSES.includes(sp.stato as OrderStatus) ? (sp.stato as OrderStatus) : undefined;
   const paymentStatus = PAYMENT_STATUSES.includes(sp.pagamento as PaymentStatus) ? sp.pagamento : undefined;
@@ -72,7 +76,8 @@ export default async function AdminOrdersPage({
     placedFrom,
     placedTo,
     fulfillmentOn: parseDay(sp.giorno),
-    page
+    page,
+    allowedLocationIds
   };
   const [{ orders, total, pageCount }, stats] = await Promise.all([
     listOrders(filter),

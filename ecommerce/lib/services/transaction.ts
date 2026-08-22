@@ -35,3 +35,20 @@ export async function serializableTransaction<T>(
   }
   throw lastError;
 }
+
+/**
+ * Transazione ReadCommitted per le mutazioni di carrello: toccano un solo
+ * carrello e usano gia scritture condizionali/upsert, quindi non hanno bisogno
+ * dell'isolamento SERIALIZABLE — che sul percorso piu caldo generava abort SSI
+ * (P2034) e retry. La sicurezza anti-oversell resta garantita dal decremento
+ * condizionale di stock dentro placeOrder (SERIALIZABLE).
+ */
+export function readCommittedTransaction<T>(
+  operation: (tx: Prisma.TransactionClient) => Promise<T>
+): Promise<T> {
+  return prisma.$transaction(operation, {
+    isolationLevel: "ReadCommitted",
+    maxWait: 5_000,
+    timeout: 15_000
+  });
+}
