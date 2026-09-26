@@ -1,8 +1,8 @@
 name: E-commerce CI
 
 on:
+  # Ogni branch: l'e-commerce vive su un branch dedicato, non su main.
   push:
-    branches: ["main"]
     paths: ["ecommerce/**", ".github/workflows/ecommerce-ci.yml"]
   pull_request:
     paths: ["ecommerce/**", ".github/workflows/ecommerce-ci.yml"]
