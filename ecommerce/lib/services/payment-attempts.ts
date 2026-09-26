@@ -9,12 +9,14 @@ import {
   planRefund,
   REFUNDABLE_PAYMENT_ATTEMPT_STATUSES
 } from "@/lib/commerce/refund-math";
-import { enqueueEmail } from "@/lib/services/email";
+import { enqueueEmailInTx } from "@/lib/services/email";
 import { getPaymentProvider } from "@/lib/payments";
 import { getStripe, isStripeConfigured } from "@/lib/payments/stripe";
-import { maybeConvertReferral } from "@/lib/services/referral";
 import { transitionOrderInTx } from "@/lib/services/orders";
 import { prismaErrorCode, serializableTransaction } from "@/lib/services/transaction";
+import { refundMessage } from "@/lib/services/order-messages";
+import { getCheckoutPolicy } from "@/lib/services/commerce-settings";
+import { recordOperationalEvent } from "@/lib/observability";
 
 const ACTIVE_ATTEMPT_STATUSES = ["CREATED", "INITIALIZING", "PENDING"];
 const INITIALIZATION_LEASE_MS = 60_000;
@@ -28,6 +30,9 @@ export type PaymentLaunch = {
 };
 
 type InitializationState = { order: Order; attempt: PaymentAttempt | null; ownsLease: boolean };
+
+/** Messaggi per il cliente: mai il testo tecnico del provider (resta nel tentativo). */
+const USER_PAYMENT_ERROR = "Il pagamento online non è disponibile in questo momento. Riprova tra qualche minuto dalla pagina dell'ordine.";
 
 function launchFromPersistedAttempt(attempt: PaymentAttempt): PaymentLaunch | null {
   if (attempt.status === "PENDING") {
@@ -78,6 +83,7 @@ async function waitForInitialization(attemptId: string): Promise<PaymentLaunch> 
 }
 
 async function acquireInitializationLease(orderId: string): Promise<InitializationState> {
+  const { maxCardAttempts: maxAttempts } = await getCheckoutPolicy();
   for (let raceRetry = 0; raceRetry < 3; raceRetry += 1) {
     try {
       return await serializableTransaction(async (tx) => {
@@ -90,7 +96,7 @@ async function acquireInitializationLease(orderId: string): Promise<Initializati
         const isConfirmedManualPayment =
           order.status === "CONFIRMED" && order.paymentProvider === "manual" && order.paymentMethod === "cash_on_pickup";
         if (order.status !== "PENDING_PAYMENT" && !isConfirmedManualPayment) {
-          throw new DomainError("Questo ordine non puo avviare un nuovo pagamento.");
+          throw new DomainError("Questo ordine non può avviare un nuovo pagamento.");
         }
 
         const now = new Date();
@@ -107,6 +113,17 @@ async function acquireInitializationLease(orderId: string): Promise<Initializati
         }
 
         if (!active) {
+          // Ogni tentativo carta prolunga la prenotazione dello stock: tetto
+          // ai tentativi per ordine contro il blocco artificiale dell'inventario.
+          if (order.paymentProvider === "stripe") {
+            const attempts = await tx.paymentAttempt.count({ where: { orderId } });
+            if (attempts >= maxAttempts) {
+              throw new DomainError(
+                "Hai raggiunto il numero massimo di tentativi di pagamento per questo ordine. Contatta la sede indicando il codice ordine.",
+                "PAYMENT_ATTEMPTS_EXHAUSTED"
+              );
+            }
+          }
           const attempt = await tx.paymentAttempt.create({
             data: {
               orderId,
@@ -142,10 +159,10 @@ async function acquireInitializationLease(orderId: string): Promise<Initializati
       if (prismaErrorCode(error) !== "P2002" || raceRetry === 2) throw error;
     }
   }
-  throw new DomainError("Pagamento gia in inizializzazione.");
+  throw new DomainError("Pagamento già in inizializzazione.");
 }
 
-/** Un solo lease CAS puo parlare al provider; tutti gli altri leggono il risultato persistito. */
+/** Un solo lease CAS può parlare al provider; tutti gli altri leggono il risultato persistito. */
 export async function initializeOrderPayment(orderId: string): Promise<PaymentLaunch> {
   const reusable = await prisma.paymentAttempt.findFirst({
     where: { orderId, provider: "stripe", status: { in: ACTIVE_ATTEMPT_STATUSES } },
@@ -202,39 +219,40 @@ export async function initializeOrderPayment(orderId: string): Promise<PaymentLa
       idempotencyKey: state.attempt.idempotencyKey,
       reservationExpiresAt: state.order.stockReservationExpiresAt
     });
-  } catch (error) {
+  } catch {
     await prisma.paymentAttempt.updateMany({
       where: { id: state.attempt.id, status: "INITIALIZING" },
       data: { status: "CREATED", error: "Provider temporaneamente non raggiungibile." }
     });
-    return {
-      attemptId: state.attempt.id,
-      instructions: null,
-      redirectUrl: null,
-      error: error instanceof Error ? error.message : "Provider temporaneamente non raggiungibile."
-    };
+    return { attemptId: state.attempt.id, instructions: null, redirectUrl: null, error: USER_PAYMENT_ERROR };
   }
 
   if (!init.ok) {
     if (init.retryable) {
       await prisma.paymentAttempt.updateMany({
         where: { id: state.attempt.id, status: "INITIALIZING" },
-        data: { status: "CREATED", error: init.error }
+        data: { status: "CREATED", error: init.error.slice(0, 500) }
       });
-      return { attemptId: state.attempt.id, instructions: null, redirectUrl: null, error: init.error };
+      return { attemptId: state.attempt.id, instructions: null, redirectUrl: null, error: USER_PAYMENT_ERROR };
     }
     await prisma.$transaction(async (tx) => {
       const failed = await tx.paymentAttempt.updateMany({
         where: { id: state.attempt!.id, status: "INITIALIZING" },
-        data: { status: "FAILED", error: init.error, completedAt: new Date() }
+        data: { status: "FAILED", error: init.error.slice(0, 500), completedAt: new Date() }
       });
       if (failed.count === 0) return;
       await transitionOrderInTx(tx, state.order.id, "CANCELLED", "system", {
         paymentStatus: "FAILED",
-        note: `Inizializzazione pagamento fallita (${provider.label}): ${init.error}`
+        cancelReason: "PAYMENT_FAILED",
+        note: `Inizializzazione pagamento fallita (${provider.label}).`
       });
     });
-    return { attemptId: state.attempt.id, instructions: null, redirectUrl: null, error: init.error };
+    return {
+      attemptId: state.attempt.id,
+      instructions: null,
+      redirectUrl: null,
+      error: "Il pagamento non può essere avviato per questo ordine, che è stato annullato. Nessun importo è stato addebitato."
+    };
   }
 
   let persisted = false;
@@ -267,7 +285,7 @@ export async function initializeOrderPayment(orderId: string): Promise<PaymentLa
       if (linked.count === 0) {
         await tx.paymentAttempt.update({
           where: { id: state.attempt!.id },
-          data: { status: "REVIEW", error: "Ordine non piu pagabile durante il collegamento." }
+          data: { status: "REVIEW", error: "Ordine non più pagabile durante il collegamento." }
         });
         return false;
       }
@@ -285,7 +303,7 @@ export async function initializeOrderPayment(orderId: string): Promise<PaymentLa
     if (prismaErrorCode(error) !== "P2002") throw error;
     await prisma.paymentAttempt.updateMany({
       where: { id: state.attempt.id, status: "INITIALIZING" },
-      data: { status: "REVIEW", error: "Riferimento provider gia associato: riconciliazione richiesta." }
+      data: { status: "REVIEW", error: "Riferimento provider già associato: riconciliazione richiesta." }
     });
   }
 
@@ -293,8 +311,8 @@ export async function initializeOrderPayment(orderId: string): Promise<PaymentLa
   if (persisted && stored?.status === "PENDING" && stored.providerRef === init.reference) {
     return launchFromPersistedAttempt(stored)!;
   }
-  // Un webhook puo aver chiuso l'attempt mentre la risposta del provider era in
-  // volo. In quel caso non si tenta di scadere una sessione gia pagata.
+  // Un webhook può aver chiuso l'attempt mentre la risposta del provider era in
+  // volo. In quel caso non si tenta di scadere una sessione già pagata.
   if (
     stored?.status !== "PAID" &&
     stored?.status !== "REFUNDED" &&
@@ -360,11 +378,9 @@ async function isPersistedWebhook(eventId: string): Promise<boolean> {
 /**
  * Associa un pagamento Stripe solo al PaymentAttempt che ha creato la sessione.
  * Il fallback sull'ID firmato nei metadata chiude la race webhook-before-attach:
- * la sessione puo risultare pagata prima che providerRef sia stato persistito.
+ * la sessione può risultare pagata prima che providerRef sia stato persistito.
  */
 export async function reconcileStripeSuccess(input: StripeSuccessInput): Promise<StripeReconcileResult> {
-  let convertedCustomerId: string | null = null;
-  let convertedOrderId: string | null = null;
   let result: StripeReconcileResult;
   try {
     result = await prisma.$transaction(async (tx): Promise<StripeReconcileResult> => {
@@ -417,12 +433,20 @@ export async function reconcileStripeSuccess(input: StripeSuccessInput): Promise
         (input.metadataAttemptId !== undefined && input.metadataAttemptId !== attempt.id) ||
         (attempt.providerRef !== null && attempt.providerRef !== input.providerRef);
       if (mismatch) {
+        // Un PaymentIntent già legato a un altro tentativo violerebbe l'unique
+        // e farebbe fallire il webhook a ogni retry: si registra solo se libero.
+        const paymentRefOwner = input.providerPaymentRef
+          ? await tx.paymentAttempt.findUnique({
+              where: { providerPaymentRef: input.providerPaymentRef },
+              select: { id: true }
+            })
+          : null;
         await tx.paymentAttempt.updateMany({
           where: { id: attempt.id, status: { not: "PAID" } },
           data: {
             status: "REVIEW",
             providerRef: attempt.providerRef ?? input.providerRef,
-            providerPaymentRef: input.providerPaymentRef,
+            ...(paymentRefOwner && paymentRefOwner.id !== attempt.id ? {} : { providerPaymentRef: input.providerPaymentRef }),
             error: "Webhook Stripe con importo, valuta o ordine non coerente.",
             completedAt: new Date()
           }
@@ -460,8 +484,6 @@ export async function reconcileStripeSuccess(input: StripeSuccessInput): Promise
             }
           });
         }
-        convertedCustomerId = attempt.order.customerId;
-        convertedOrderId = attempt.orderId;
         await finishWebhookInTx(tx, webhook.id, {
           status: "PROCESSED",
           orderId: attempt.orderId,
@@ -511,15 +533,13 @@ export async function reconcileStripeSuccess(input: StripeSuccessInput): Promise
           error: null
         }
       });
-      const transition = await transitionOrderInTx(tx, attempt.orderId, "PAID", "stripe", {
+      await transitionOrderInTx(tx, attempt.orderId, "PAID", "stripe", {
         paymentRef: input.providerRef,
         note: "Pagamento Stripe confermato"
       });
-      convertedCustomerId = transition.customerId;
-      convertedOrderId = transition.orderId;
       await tx.paymentAttempt.updateMany({
         where: { orderId: attempt.orderId, id: { not: attempt.id }, status: { in: ACTIVE_ATTEMPT_STATUSES } },
-        data: { status: "FAILED", error: "Superato da un pagamento gia acquisito.", completedAt: new Date() }
+        data: { status: "FAILED", error: "Superato da un pagamento già acquisito.", completedAt: new Date() }
       });
       await tx.orderEvent.create({
         data: {
@@ -542,16 +562,10 @@ export async function reconcileStripeSuccess(input: StripeSuccessInput): Promise
     }
     throw error;
   }
-
-  if ((result === "PAID" || result === "DUPLICATE") && convertedCustomerId && convertedOrderId) {
-    await maybeConvertReferral(convertedCustomerId, convertedOrderId).catch((error) =>
-      console.error("Conversione referral post-pagamento fallita:", error)
-    );
-  }
   return result;
 }
 
-/** Fallimento/expiry agisce solo sul tentativo esatto; un vecchio webhook non puo annullare un retry nuovo. */
+/** Fallimento/expiry agisce solo sul tentativo esatto; un vecchio webhook non può annullare un retry nuovo. */
 export async function reconcileStripeFailure(
   providerRef: string,
   status: "FAILED" | "EXPIRED",
@@ -577,7 +591,7 @@ export async function reconcileStripeFailure(
           status: "IGNORED",
           orderId: attempt?.orderId,
           paymentAttemptId: attempt?.id,
-          error: "Tentativo assente o gia concluso."
+          error: "Tentativo assente o già concluso."
         });
         return "IGNORED";
       }
@@ -590,7 +604,7 @@ export async function reconcileStripeFailure(
           status: "IGNORED",
           orderId: attempt.orderId,
           paymentAttemptId: attempt.id,
-          error: "Il tentativo non era piu attivo."
+          error: "Il tentativo non era più attivo."
         });
         return "IGNORED";
       }
@@ -605,6 +619,7 @@ export async function reconcileStripeFailure(
         if (otherActive === 0) {
           await transitionOrderInTx(tx, attempt.orderId, "CANCELLED", "stripe", {
             paymentStatus: "FAILED",
+            cancelReason: status === "EXPIRED" ? "RESERVATION_EXPIRED" : "PAYMENT_FAILED",
             note: reason
           });
         } else {
@@ -631,13 +646,12 @@ export async function reconcileStripeFailure(
 }
 
 /** Registra l'incasso manuale sul solo tentativo selezionato, senza alterare
- * lo stato di evasione di un ordine gia confermato o in preparazione. */
+ * lo stato di evasione di un ordine già confermato o in preparazione. */
 export async function recordManualPayment(
   orderId: string,
   actorEmail: string,
   paymentReference?: string
 ): Promise<void> {
-  let convertedCustomerId: string | null = null;
   try {
     await serializableTransaction(async (tx) => {
       const order = await tx.order.findUnique({ where: { id: orderId } });
@@ -645,12 +659,9 @@ export async function recordManualPayment(
       if (order.paymentProvider !== "manual") {
         throw new DomainError("Il pagamento di questo ordine viene confermato dal provider online.");
       }
-      if (order.paymentStatus === "PAID") {
-        convertedCustomerId = order.customerId;
-        return;
-      }
+      if (order.paymentStatus === "PAID") return;
       if (order.status === "CANCELLED" || order.status === "REFUNDED") {
-        throw new DomainError("Non e possibile registrare un pagamento su un ordine chiuso.");
+        throw new DomainError("Non è possibile registrare un pagamento su un ordine chiuso.");
       }
 
       const now = new Date();
@@ -691,11 +702,10 @@ export async function recordManualPayment(
       }
 
       if (order.status === "PENDING_PAYMENT") {
-        const transition = await transitionOrderInTx(tx, orderId, "PAID", actorEmail, {
+        await transitionOrderInTx(tx, orderId, "PAID", actorEmail, {
           paymentRef: receiptRef,
           note: "Pagamento manuale verificato"
         });
-        convertedCustomerId = transition.customerId;
       } else {
         const paid = await tx.order.updateMany({
           where: { id: orderId, paymentStatus: { not: "PAID" } },
@@ -710,7 +720,6 @@ export async function recordManualPayment(
             actor: actorEmail
           }
         });
-        convertedCustomerId = order.customerId;
       }
 
       await tx.paymentAttempt.updateMany({
@@ -720,7 +729,7 @@ export async function recordManualPayment(
     });
   } catch (error) {
     if (prismaErrorCode(error) === "P2002") {
-      throw new DomainError("Riferimento pagamento gia associato a un altro incasso.");
+      throw new DomainError("Riferimento pagamento già associato a un altro incasso.");
     }
     throw error;
   }
@@ -728,9 +737,81 @@ export async function recordManualPayment(
   await audit(actorEmail, "order.payment.manual", "Order", orderId, {
     paymentReference: paymentReference?.trim() || null
   });
-  if (convertedCustomerId) {
-    await maybeConvertReferral(convertedCustomerId, orderId).catch(() => undefined);
+}
+
+/**
+ * Applica localmente un rimborso fino a `targetRefundedCents` (cumulativo, sul
+ * solo importo incassato). Idempotente: se il rimborso e già registrato (da
+ * webhook o da un'altra richiesta) non fa nulla. Deve girare nella stessa
+ * transazione che registra l'evento provider o la richiesta admin.
+ */
+async function applyRefundInTx(
+  tx: Prisma.TransactionClient,
+  orderId: string,
+  input: { targetRefundedCents: number; actor: string; note: string; refundReference: string | null; automatic: boolean }
+): Promise<{ applied: boolean; amountCents: number; fully: boolean }> {
+  const order = await tx.order.findUnique({
+    where: { id: orderId },
+    include: {
+      items: true,
+      location: true,
+      paymentAttempts: { where: { status: { in: [...REFUNDABLE_PAYMENT_ATTEMPT_STATUSES] } }, orderBy: { completedAt: "desc" } }
+    }
+  });
+  if (!order) throw new DomainError("Ordine non trovato.");
+  const cashCaptured = Math.max(0, order.totalCents - order.giftCardCents);
+  const target = Math.max(0, Math.min(input.targetRefundedCents, cashCaptured));
+  const fully = target >= cashCaptured;
+  const alreadyApplied = target <= order.refundedCents && (!fully || order.status === "REFUNDED");
+  if (alreadyApplied) return { applied: false, amountCents: 0, fully: order.status === "REFUNDED" };
+  const amountCents = Math.max(0, target - order.refundedCents);
+
+  if (fully) {
+    if (order.status !== "REFUNDED") {
+      await transitionOrderInTx(tx, order.id, "REFUNDED", input.actor, {
+        note: `${input.note}${input.refundReference ? ` (ref ${input.refundReference})` : ""}`,
+        notifyCustomer: false
+      });
+    }
+    const paidAttempt = pickRefundablePaymentAttempt(order.paymentAttempts);
+    if (paidAttempt) {
+      await tx.paymentAttempt.updateMany({
+        where: { id: paidAttempt.id, status: { in: [...REFUNDABLE_PAYMENT_ATTEMPT_STATUSES] } },
+        data: { status: "REFUNDED", completedAt: new Date() }
+      });
+    }
+  } else {
+    await tx.order.update({ where: { id: order.id }, data: { paymentStatus: "PARTIALLY_REFUNDED" } });
+    await tx.orderEvent.create({
+      data: {
+        orderId: order.id,
+        type: "PAYMENT",
+        message: `Rimborso parziale di ${(amountCents / 100).toFixed(2)} EUR${input.refundReference ? ` (ref ${input.refundReference})` : ""}.`,
+        actor: input.actor
+      }
+    });
   }
+  await tx.order.update({ where: { id: order.id }, data: { refundedCents: Math.max(order.refundedCents, target) } });
+
+  const message = refundMessage(
+    { ...order, location: order.location ? { ...order.location } : null },
+    {
+      amountCents,
+      fully,
+      automatic: input.automatic,
+      giftCardRestoredCents: fully ? order.giftCardCents : 0
+    }
+  );
+  await enqueueEmailInTx(tx, {
+    toEmail: order.email,
+    subject: message.subject,
+    body: message.body,
+    cta: message.cta,
+    type: "REFUND_CONFIRMATION",
+    reference: order.code,
+    dedupeKey: `REFUND_CONFIRMATION:${order.code}:${target}:${fully ? "full" : "partial"}`
+  });
+  return { applied: true, amountCents, fully };
 }
 
 export async function reconcileStripeExternalReversal(input: {
@@ -741,8 +822,12 @@ export async function reconcileStripeExternalReversal(input: {
   amountCents: number | null;
 }): Promise<"UPDATED" | "IGNORED" | "REVIEW"> {
   if (!input.providerPaymentRef) return "IGNORED";
+  let result: "UPDATED" | "IGNORED" | "REVIEW";
+  let disputeOrderId: string | null = null;
   try {
-    return await prisma.$transaction(async (tx) => {
+    // Evento webhook e aggiornamento dell'ordine nella STESSA transazione: se la
+    // riconciliazione fallisce, anche l'evento torna indietro e Stripe ritenta.
+    result = await prisma.$transaction(async (tx) => {
       const webhook = await tx.paymentWebhookEvent.create({
         data: {
           provider: "stripe",
@@ -778,48 +863,35 @@ export async function reconcileStripeExternalReversal(input: {
           paymentAttemptId: attempt.id,
           error: "Dispute aperta."
         });
+        disputeOrderId = attempt.orderId;
         return "REVIEW";
       }
-      const fullRefund =
-        input.amountCents != null &&
-        input.amountRefundedCents != null &&
-        input.amountRefundedCents >= input.amountCents;
-      if (!fullRefund) {
-        await tx.orderEvent.create({
-          data: {
-            orderId: attempt.orderId,
-            type: "PAYMENT",
-            message: "Rimborso Stripe parziale ricevuto: verifica manuale.",
-            actor: "stripe"
-          }
-        });
+      const capturedPaid = ["PAID", "PARTIALLY_REFUNDED", "REFUNDED"].includes(attempt.order.paymentStatus);
+      if (!capturedPaid || input.amountRefundedCents == null) {
         await finishWebhookInTx(tx, webhook.id, {
-          status: "REVIEW",
+          status: "IGNORED",
           orderId: attempt.orderId,
           paymentAttemptId: attempt.id,
-          error: "Rimborso parziale."
+          error: "Ordine non pagato o importo rimborsato assente."
         });
-        return "REVIEW";
+        return "IGNORED";
       }
+      // amount_refunded e cumulativo sul charge: rimborsi fatti da gestionale
+      // (già registrati) diventano no-op, quelli fatti dalla dashboard Stripe
+      // vengono registrati qui, parziali compresi.
+      await applyRefundInTx(tx, attempt.orderId, {
+        targetRefundedCents: input.amountRefundedCents,
+        actor: "stripe",
+        note: "Rimborso registrato da Stripe",
+        refundReference: null,
+        automatic: true
+      });
       await finishWebhookInTx(tx, webhook.id, {
         status: "PROCESSED",
         orderId: attempt.orderId,
         paymentAttemptId: attempt.id
       });
       return "UPDATED";
-    }).then(async (result) => {
-      if (result === "UPDATED" && input.eventType === "charge.refunded") {
-        const attempt = await prisma.paymentAttempt.findFirst({
-          where: { providerPaymentRef: input.providerPaymentRef, provider: "stripe" },
-          select: { orderId: true, order: { select: { status: true, paymentStatus: true } } }
-        });
-        if (attempt && attempt.order.paymentStatus === "PAID" && attempt.order.status !== "REFUNDED") {
-          await refundOrder(attempt.orderId, "stripe", "Rimborso Stripe ricevuto dal provider", {
-            alreadyRefundedOnProvider: true
-          });
-        }
-      }
-      return result;
     });
   } catch (error) {
     if (prismaErrorCode(error) === "P2002" && (await isPersistedWebhook(input.eventId))) {
@@ -827,9 +899,25 @@ export async function reconcileStripeExternalReversal(input: {
     }
     throw error;
   }
+  if (disputeOrderId) {
+    await recordOperationalEvent({
+      level: "CRITICAL",
+      source: "stripe-webhook",
+      code: "PAYMENT_DISPUTE_OPENED",
+      message: "Contestazione (dispute) aperta su un pagamento: non evadere prima della verifica.",
+      orderId: disputeOrderId,
+      entityType: "Order",
+      entityId: disputeOrderId
+    });
+  }
+  return result;
 }
 
-/** Rimborso pieno: provider prima, commit locale idempotente dopo. */
+/**
+ * Rimborso (pieno o parziale): prima il provider con idempotency key legata
+ * all'importo cumulativo, poi il commit locale idempotente. Se il webhook di
+ * Stripe arriva prima del commit, lo registra lui e qui diventa un no-op.
+ */
 export async function refundOrder(
   orderId: string,
   actorEmail: string,
@@ -860,8 +948,9 @@ export async function refundOrder(
   if (!plan.ok) throw new DomainError(plan.reason);
 
   const paidAttempt = pickRefundablePaymentAttempt(order.paymentAttempts);
+  const automatic = order.paymentProvider === "stripe";
   let refundReference: string | null = null;
-  if (order.paymentProvider === "stripe" && !opts?.alreadyRefundedOnProvider && plan.amountCents > 0) {
+  if (automatic && !opts?.alreadyRefundedOnProvider && plan.amountCents > 0) {
     if (!paidAttempt?.providerPaymentRef) {
       throw new DomainError("PaymentIntent Stripe assente: rimborso bloccato per riconciliazione manuale.");
     }
@@ -872,52 +961,52 @@ export async function refundOrder(
       plan.amountCents,
       `stripe-refund:${order.id}:${plan.nextRefundedCents}`
     );
-    if (!refunded.ok) throw new DomainError(refunded.error ?? "Rimborso Stripe non riuscito.");
+    if (!refunded.ok) {
+      throw new DomainError("Stripe non ha accettato il rimborso. Riprova tra qualche minuto o verifica dalla dashboard Stripe.");
+    }
     refundReference = refunded.reference ?? null;
   }
 
-  await prisma.$transaction(async (tx) => {
-    if (plan.fullyRefunded) {
-      await transitionOrderInTx(tx, order.id, "REFUNDED", actorEmail, {
-        note: `${note ?? "Rimborso completo"}${refundReference ? ` (ref ${refundReference})` : ""}`
-      });
-      if (paidAttempt) {
-        await tx.paymentAttempt.updateMany({
-          where: { id: paidAttempt.id, status: { in: [...REFUNDABLE_PAYMENT_ATTEMPT_STATUSES] } },
-          data: { status: "REFUNDED", completedAt: new Date() }
-        });
-      }
-    } else {
-      await tx.order.update({
-        where: { id: order.id },
-        data: { refundedCents: plan.nextRefundedCents, paymentStatus: "PARTIALLY_REFUNDED" }
-      });
-      await tx.orderEvent.create({
-        data: {
-          orderId: order.id,
-          type: "PAYMENT",
-          message: `Rimborso parziale di ${(plan.amountCents / 100).toFixed(2)} EUR${refundReference ? ` (ref ${refundReference})` : ""}.`,
-          actor: actorEmail
-        }
-      });
-    }
-    if (plan.fullyRefunded) {
-      await tx.order.update({ where: { id: order.id }, data: { refundedCents: plan.nextRefundedCents } });
-    }
-  });
+  const outcome = await prisma.$transaction((tx) =>
+    applyRefundInTx(tx, order.id, {
+      targetRefundedCents: plan.nextRefundedCents,
+      actor: actorEmail,
+      note: note ?? (plan.fullyRefunded ? "Rimborso completo" : "Rimborso parziale"),
+      refundReference,
+      automatic
+    })
+  );
   await audit(actorEmail, "order.refund", "Order", order.id, {
     provider: order.paymentProvider,
     amountCents: plan.amountCents,
     fullyRefunded: plan.fullyRefunded,
-    refundReference
+    refundReference,
+    appliedLocally: outcome.applied
   });
-  await enqueueEmail({
-    toEmail: order.email,
-    subject: `Rimborso ordine ${order.code} — Sessa 1930`,
-    type: "REFUND_CONFIRMATION",
-    reference: order.code,
-    body:
-      `Abbiamo emesso un rimborso di ${(plan.amountCents / 100).toFixed(2)} EUR sull'ordine ${order.code}.` +
-      (plan.fullyRefunded ? " L'ordine risulta interamente rimborsato." : " Si tratta di un rimborso parziale.")
-  }).catch(() => undefined);
+}
+
+/**
+ * Ritorno da Stripe (success_url): verifica subito la sessione lato server, cosi
+ * il cliente vede "pagato" senza dipendere dai tempi del webhook. La sessione
+ * deve appartenere all'ordine (metadata firmati alla creazione).
+ */
+export async function reconcileStripeReturn(orderId: string, sessionId: string): Promise<void> {
+  if (!isStripeConfigured() || !/^cs_[A-Za-z0-9_]{8,200}$/.test(sessionId)) return;
+  try {
+    const session = await getStripe().checkout.sessions.retrieve(sessionId);
+    if (session.metadata?.orderId !== orderId || session.payment_status !== "paid") return;
+    const paymentIntent = typeof session.payment_intent === "string" ? session.payment_intent : session.payment_intent?.id ?? null;
+    await reconcileStripeSuccess({
+      eventId: `return:${session.id}:paid`,
+      eventType: "return.checkout_session.paid",
+      providerRef: session.id,
+      providerPaymentRef: paymentIntent,
+      amountCents: session.amount_total,
+      currency: session.currency,
+      metadataOrderId: session.metadata?.orderId,
+      metadataAttemptId: session.metadata?.paymentAttemptId
+    });
+  } catch {
+    // Il webhook resta la fonte autoritativa: qui e solo un'accelerazione.
+  }
 }

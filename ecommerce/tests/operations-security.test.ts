@@ -90,8 +90,10 @@ test("il checkout accetta la gift card come credito, non come metodo scelto dal 
     email: "cliente@example.com",
     firstName: "Ada",
     lastName: "Lovelace",
+    phone: "333 123 4567",
     fulfillmentType: "PICKUP",
-    fulfillmentAt: when,
+    slot: when,
+    acceptTerms: "on",
     paymentMethod: "card"
   };
   assert.equal(checkoutSchema.safeParse(base).success, true);

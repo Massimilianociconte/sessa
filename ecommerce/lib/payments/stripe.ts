@@ -25,7 +25,7 @@ let cached: Stripe | null = null;
 export function getStripe(): Stripe {
   if (!process.env.STRIPE_SECRET_KEY) throw new Error("Stripe non configurato.");
   // Timeout nettamente inferiore al lease INITIALIZING (60s): nessuna seconda
-  // lambda puo riacquisire il tentativo mentre questa chiamata e ancora viva.
+  // lambda può riacquisire il tentativo mentre questa chiamata e ancora viva.
   // I retry applicativi riusano poi la stessa idempotency key persistita.
   if (!cached) cached = new Stripe(process.env.STRIPE_SECRET_KEY, { timeout: 15_000, maxNetworkRetries: 0 });
   return cached;
@@ -53,6 +53,10 @@ export const stripeProvider: PaymentProvider = {
       const expiresAt = stripeSessionExpiry(input.reservationExpiresAt);
       const session = await stripe.checkout.sessions.create({
         mode: "payment",
+        // Solo carta (Apple Pay e Google Pay inclusi): i metodi asincroni
+        // (SEPA, bonifico Stripe, alcuni BNPL) completano giorni dopo, quando la
+        // prenotazione dello stock e già scaduta e l'ordine annullato.
+        payment_method_types: ["card"],
         client_reference_id: input.orderCode,
         locale: "it",
         line_items: [
@@ -68,8 +72,8 @@ export const stripeProvider: PaymentProvider = {
         allow_promotion_codes: false,
         billing_address_collection: "auto",
         customer_email: input.email,
-        success_url: `${SITE_URL}/ordine/${input.orderCode}?t=${input.publicToken}&checkout=success&session_id={CHECKOUT_SESSION_ID}`,
-        cancel_url: `${SITE_URL}/ordine/${input.orderCode}?t=${input.publicToken}&payment=cancelled`,
+        success_url: `${SITE_URL}/ordine/${encodeURIComponent(input.orderCode)}?t=${input.publicToken}&checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${SITE_URL}/ordine/${encodeURIComponent(input.orderCode)}?t=${input.publicToken}&payment=cancelled`,
         metadata,
         payment_intent_data: { metadata },
         expires_at: Math.floor(expiresAt.getTime() / 1000)
@@ -125,7 +129,7 @@ export const stripeProvider: PaymentProvider = {
     if (!isStripeConfigured()) return { ok: false, error: "Stripe non configurato." };
     try {
       const session = await getStripe().checkout.sessions.retrieve(reference);
-      if (session.payment_status === "paid") return { ok: false, error: "Sessione gia pagata." };
+      if (session.payment_status === "paid") return { ok: false, error: "Sessione già pagata." };
       if (session.status === "open") await getStripe().checkout.sessions.expire(reference);
       return { ok: true };
     } catch (error) {

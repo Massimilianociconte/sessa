@@ -227,8 +227,11 @@ export default async function EditProductPage({
                   <label className="label-field">Posizione</label>
                   <input name="position" type="number" min={0} defaultValue={product.variants.length} className="input-field" />
                 </div>
+                <label className="flex items-center gap-2 text-sm sm:col-span-2">
+                  <input type="checkbox" name="isActive" defaultChecked className="accent-terracotta" /> Variante attiva
+                </label>
                 <button type="submit" className="btn-primary sm:col-span-2">
-                  Crea variante (pubblicata su tutte le sedi, stock 0)
+                  Crea variante (stock 0, da rendere disponibile sede per sede)
                 </button>
               </form>
             </details>

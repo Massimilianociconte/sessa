@@ -45,6 +45,10 @@ export type StoreProductView = {
   taxRateBps: number;
   allergens: string;
   ingredients: string;
+  storageInfo: string;
+  /** LOCAL = fresco (ritiro/consegna locale), NATIONAL = spedibile. */
+  shippingScope: "LOCAL" | "NATIONAL";
+  leadTimeHours: number;
   category: { name: string; slug: string } | null;
   variants: StoreVariantView[];
   priceMin: number;
@@ -65,6 +69,9 @@ export type RawProduct = {
   taxRateBps: number;
   allergens: string;
   ingredients: string;
+  storageInfo?: string;
+  shippingScope?: string;
+  leadTimeHours?: number;
   category: { name: string; slug: string } | null;
   variants: Array<{
     id: string;
@@ -118,6 +125,9 @@ export function toStoreProductView(product: RawProduct): StoreProductView {
     taxRateBps: product.taxRateBps,
     allergens: product.allergens,
     ingredients: product.ingredients,
+    storageInfo: product.storageInfo ?? "",
+    shippingScope: product.shippingScope === "NATIONAL" ? "NATIONAL" : "LOCAL",
+    leadTimeHours: product.leadTimeHours ?? 0,
     category: product.category ? { name: product.category.name, slug: product.category.slug } : null,
     variants,
     priceMin: prices.length ? Math.min(...prices) : 0,
@@ -184,6 +194,26 @@ export const getStoreProduct = cache(async function getStoreProduct(
   });
   return row ? toStoreProductView(row as RawProduct) : null;
 });
+
+/**
+ * Sede canonica di un prodotto: la prima sede attiva (per posizione) che lo
+ * vende. Le schede identiche nelle altre sedi puntano qui come canonical,
+ * evitando contenuti duplicati e cannibalizzazione tra sedi.
+ */
+export async function getCanonicalLocationSlug(productId: string): Promise<string | null> {
+  return memoTtl(`catalog:canonical:${productId}`, CATALOG_TTL_MS, async () => {
+    const row = await prisma.storeVariant.findFirst({
+      where: {
+        isAvailable: true,
+        location: { isActive: true },
+        variant: { isActive: true, productId, product: { status: "ACTIVE" } }
+      },
+      orderBy: [{ location: { position: "asc" } }],
+      select: { location: { select: { slug: true } } }
+    });
+    return row?.location.slug ?? null;
+  });
+}
 
 /** Categorie che hanno almeno un prodotto acquistabile nella sede. */
 export async function listStoreCategories(locationId: string) {

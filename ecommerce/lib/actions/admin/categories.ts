@@ -14,7 +14,7 @@ export async function createCategoryAction(formData: FormData): Promise<void> {
   const user = await requireAdminCapability("catalog:manage");
   const parsed = categorySchema.safeParse({
     ...formDataToObject(formData),
-    isActive: formData.get("isActive") !== "off"
+    isActive: formData.get("isActive") === "on"
   });
   if (!parsed.success) backWithError(PATH, firstZodMessage(parsed.error));
   const exists = await prisma.category.findUnique({ where: { slug: parsed.data.slug } });

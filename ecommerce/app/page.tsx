@@ -4,9 +4,8 @@ import type { CSSProperties } from "react";
 import JsonLd from "@/components/seo/JsonLd";
 import Footer from "@/components/storefront/Footer";
 import Header from "@/components/storefront/Header";
+import { PreferredLocationHint } from "@/components/storefront/PreferredLocation";
 import { buildHomeJsonLd } from "@/lib/seo/sessa-local";
-import { getSessionCustomer } from "@/lib/auth/customer-session";
-import { getCustomerPreferenceSnapshot } from "@/lib/services/customer-account";
 import { listActiveLocations } from "@/lib/services/locations";
 import { SITE_URL } from "@/lib/site";
 
@@ -36,16 +35,14 @@ const ACCENTS = [
 ];
 
 export default async function HomePage() {
-  const [locations, customer] = await Promise.all([listActiveLocations(), getSessionCustomer()]);
-  const preferred = customer ? (await getCustomerPreferenceSnapshot(customer.id)).effectiveLocation : null;
-  const preferredSlug = preferred?.slug ?? null;
-  const orderedLocations = preferredSlug
-    ? [...locations].sort((left, right) => Number(right.slug === preferredSlug) - Number(left.slug === preferredSlug))
-    : locations;
+  // Nessun cookie letto lato server: la home e statica (ISR) e servita dalla
+  // CDN. La sede preferita viene suggerita nel browser (PreferredLocationHint).
+  const locations = await listActiveLocations();
+  const orderedLocations = locations;
 
   return (
     <>
-      <Header currentLocation={preferred ? { slug: preferred.slug, name: preferred.name } : undefined} />
+      <Header />
       <JsonLd data={buildHomeJsonLd(locations)} />
       <main className="shop-main mx-auto max-w-6xl px-4">
         <section className="shop-home-hero py-10 md:py-16">
@@ -77,14 +74,7 @@ export default async function HomePage() {
           <span className="kicker">I nostri punti vendita</span>
         </div>
 
-        {preferredSlug && (
-          <p className="mb-4 text-sm text-ink/60">
-            La tua sede preferita e in evidenza.{" "}
-            <Link href={`/sede/${preferredSlug}`} className="font-semibold text-terracotta hover:underline">
-              Apri il catalogo
-            </Link>
-          </p>
-        )}
+        <PreferredLocationHint />
         <div className="location-grid grid grid-cols-1 gap-6 pb-8 sm:grid-cols-2 lg:grid-cols-3">
           {orderedLocations.map((location, i) => {
             const theme = ACCENTS[i % ACCENTS.length];

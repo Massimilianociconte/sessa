@@ -6,6 +6,9 @@ import {
 } from "@/lib/actions/admin/locations";
 import { prisma } from "@/lib/db";
 import { requireAdminCapability } from "@/lib/auth/session";
+import { DAY_LABELS_IT, formatRangesText, parseWeeklyHours, type DayKey } from "@/lib/commerce/scheduling";
+
+const WEEK: DayKey[] = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
 
 export const dynamic = "force-dynamic";
 
@@ -31,7 +34,74 @@ type LocationDefaults = {
   longitude?: number | null;
   googleMapsUrl?: string | null;
   gbpUrl?: string | null;
+  openingHours?: string | null;
+  closedDates?: string;
+  leadTimeMinutes?: number;
+  slotMinutes?: number;
+  slotCapacity?: number;
+  maxAdvanceDays?: number;
+  notificationEmail?: string | null;
+  localDeliveryPostalCodes?: string;
 };
+
+function ScheduleFields({ d }: { d?: LocationDefaults }) {
+  const hours = parseWeeklyHours(d?.openingHours ?? null);
+  return (
+    <section className="rounded-2xl border border-terracotta/20 bg-terracotta/5 p-4 sm:col-span-2">
+      <p className="font-semibold">Fasce di ritiro e consegna</p>
+      <p className="text-xs text-ink/55">
+        Il checkout propone solo fasce dentro questi orari, rispettando chiusure, tempo di preparazione e capienza.
+        Formato: <code>06:30-13:00, 16:00-20:00</code> oppure <code>chiuso</code>. Lasciando tutto vuoto si usa un orario prudente
+        (9-19) segnalato come da configurare.
+      </p>
+      <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        {WEEK.map((day) => (
+          <div key={day}>
+            <label className="label-field">{DAY_LABELS_IT[day]}</label>
+            <input
+              name={`hours_${day}`}
+              defaultValue={hours ? formatRangesText(hours[day]) : ""}
+              placeholder="09:00-19:00"
+              className="input-field"
+            />
+          </div>
+        ))}
+      </div>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <div>
+          <label className="label-field">Preparazione minima (minuti)</label>
+          <input name="leadTimeMinutes" type="number" min={0} max={20160} defaultValue={d?.leadTimeMinutes ?? 120} className="input-field" />
+        </div>
+        <div>
+          <label className="label-field">Durata fascia (minuti)</label>
+          <input name="slotMinutes" type="number" min={5} max={240} defaultValue={d?.slotMinutes ?? 30} className="input-field" />
+        </div>
+        <div>
+          <label className="label-field">Ordini max per fascia (0 = illimitati)</label>
+          <input name="slotCapacity" type="number" min={0} defaultValue={d?.slotCapacity ?? 0} className="input-field" />
+        </div>
+        <div>
+          <label className="label-field">Anticipo massimo (giorni)</label>
+          <input name="maxAdvanceDays" type="number" min={1} max={366} defaultValue={d?.maxAdvanceDays ?? 60} className="input-field" />
+        </div>
+      </div>
+      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <div>
+          <label className="label-field">Chiusure straordinarie (date AAAA-MM-GG)</label>
+          <textarea name="closedDates" rows={2} defaultValue={d?.closedDates ?? ""} className="input-field" placeholder="2026-12-25, 2027-01-01" />
+        </div>
+        <div>
+          <label className="label-field">CAP serviti dalla consegna del fresco</label>
+          <textarea name="localDeliveryPostalCodes" rows={2} defaultValue={d?.localDeliveryPostalCodes ?? ""} className="input-field" placeholder="80044, 80040 oppure prefissi come 800" />
+        </div>
+        <div className="sm:col-span-2">
+          <label className="label-field">Email avvisi nuovi ordini della sede</label>
+          <input name="notificationEmail" type="email" defaultValue={d?.notificationEmail ?? ""} className="input-field" placeholder="laboratorio@sessa1930.com" />
+        </div>
+      </div>
+    </section>
+  );
+}
 
 function LocationFields({ d }: { d?: LocationDefaults }) {
   return (
@@ -65,8 +135,8 @@ function LocationFields({ d }: { d?: LocationDefaults }) {
         <input name="phone" defaultValue={d?.phone ?? ""} className="input-field" />
       </div>
       <div>
-        <label className="label-field">Orari</label>
-        <input name="hours" defaultValue={d?.hours ?? ""} className="input-field" placeholder="07:00-00:00" />
+        <label className="label-field">Orari (testo mostrato ai clienti)</label>
+        <input name="hours" defaultValue={d?.hours ?? ""} className="input-field" placeholder="07:00-00:00, martedì chiuso" />
       </div>
       <div>
         <label className="label-field">Latitudine</label>
@@ -102,6 +172,7 @@ function LocationFields({ d }: { d?: LocationDefaults }) {
           Sede attiva
         </label>
       </div>
+      <ScheduleFields d={d} />
       <section className="rounded-2xl border border-ceramic/20 bg-ceramic/5 p-4 sm:col-span-2">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div><p className="font-semibold">Inventario locale Google</p><p className="text-xs text-ink/50">Attiva solo dopo aver copiato il codice esatto dal Google Business Profile.</p></div>

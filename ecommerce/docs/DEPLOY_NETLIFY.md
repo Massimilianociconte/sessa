@@ -3,12 +3,16 @@
 Sito temporaneo: `https://sessa-ecommerce.netlify.app` (project id
 `3d1f1103-dc52-40c2-b30b-09adc32517d1`, non collegato a Git: deploy da CLI).
 
+Prima del primo lancio seguire `docs/OPERATIONS_RUNBOOK.md` (rotazione
+segreti, owner, dominio, backup) e portare a zero i punti bloccanti di
+**Gestionale → Checklist lancio**.
+
 ## Sequenza completa di release (macOS / zsh)
 
 ### 1. Preflight del codice
 
 ```bash
-cd /Users/massimilianociconte/Documents/sito-sessa-bozza/ecommerce
+cd ecommerce   # dalla radice del repository
 
 git branch --show-current
 git status --short
@@ -23,10 +27,12 @@ npx prisma generate
 npm run lint
 npx tsc --noEmit
 npm test
+npm run test:integration   # Postgres locale sessa_test, ricreato a ogni run
 ```
 
-Non eseguire `npm run test:flow` su produzione: il test e intenzionalmente
-distruttivo e deve usare soltanto un database locale/sacrificabile.
+`test:integration` rifiuta qualunque database diverso da `sessa_test` su
+localhost: non puo toccare la produzione. Gli stessi controlli girano in CI
+(`.github/workflows/ecommerce-ci.yml`) a ogni push che tocca `ecommerce/`.
 
 ### 2. Connessione migrazioni e backup
 
@@ -64,8 +70,10 @@ npm run db:verify
 unset MIGRATION_DATABASE_URL
 ```
 
-`db:deploy` applica in ordine le migrazioni additive `0002`-`0007`;
-`db:verify` deve terminare con `No difference detected.`. Su un database di
+`db:deploy` applica in ordine le migrazioni additive `0002`-`0011` (tutte
+idempotenti, registrate nel ledger `_sessa_migration_ledger`) e, verso un host
+remoto, chiede di digitare `MIGRA` prima di procedere; `db:verify` deve
+terminare con `Verifica schema completata.`. Su un database di
 produzione esistente **non usare mai** `npm run db:bootstrap`: contiene
 l'asserzione di database vuoto ed e riservato al primo setup di un database
 nuovo.
@@ -79,8 +87,13 @@ npm run deploy:preview
 npm run deploy:prod
 ```
 
-Entrambi i deploy buildano tramite `netlify.toml` e caricano asset, funzione
-server, proxy e scheduled functions. Il build **non esegue migrazioni**. Una
+Entrambi i deploy: rifiutano un working tree non committato
+(`scripts/predeploy-guard.mjs`), buildano tramite `netlify.toml`, verificano che
+il bundle non contenga file `.env` ne valori dei segreti presenti nei `.env*`
+locali (`scripts/check-deploy-bundle.mjs`) e solo allora caricano asset,
+funzione server, proxy e scheduled functions. Il build **non esegue
+migrazioni**: la migrazione `0011` va applicata PRIMA del deploy del codice che
+la usa. Una
 preview non e una sandbox dati: usare un database preview dedicato oppure
 limitarla a smoke test in sola lettura.
 
@@ -123,9 +136,15 @@ errore: `available_functions: []` nel deploy Netlify.
 
 Obbligatorie:
 
-`DATABASE_URL`, `SESSION_SECRET`, `ADMIN_SETUP_TOKEN`, `MAINTENANCE_SECRET`,
-`MERCHANT_FEED_TOKEN`, `ADMIN_2FA_REQUIRED=true`, `NEXT_PUBLIC_SITE_URL`,
+`DATABASE_URL`, `SESSION_SECRET`, `MAINTENANCE_SECRET`, `MERCHANT_FEED_TOKEN`,
+`ADMIN_2FA_REQUIRED=true`, `NEXT_PUBLIC_SITE_URL`,
 `AWS_LAMBDA_JS_RUNTIME=nodejs24.x`.
+
+Solo finche non esiste il proprietario: `ADMIN_SETUP_TOKEN` (poi rimuoverlo).
+
+Al dominio definitivo: `WEBAUTHN_RP_ID` (es. `sessa1930.com`) e
+`WEBAUTHN_ORIGINS` (es. `https://sessa1930.com,https://www.sessa1930.com`).
+Con Cloudflare davanti a Netlify: `TRUSTED_PROXY=cloudflare`.
 
 Generare valori diversi e lunghi per i segreti, ad esempio con
 `openssl rand -base64 48`. Configurare `SESSION_SECRET` prima di attivare 2FA o
@@ -141,8 +160,16 @@ Senza SMTP le email non vengono dichiarate inviate: l'outbox passa a
 
 Pagamenti:
 
-`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`,
-`STOCK_RESERVATION_MINUTES=35`, `BANK_TRANSFER_RESERVATION_HOURS=48`.
+`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `STOCK_RESERVATION_MINUTES=35`.
+
+Eventi da abilitare sull'endpoint webhook Stripe (`/api/webhooks/stripe`):
+`checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+`checkout.session.async_payment_failed`, `checkout.session.expired`,
+`charge.refunded`, `charge.dispute.created`.
+
+Regole di pagamento (importo massimo e anticipo del pagamento in sede, giorni
+lavorativi minimi e scadenza del bonifico, tentativi carta) e finestra di
+annullo cliente: **Gestionale → Impostazioni**.
 
 ## Worker e osservabilita
 

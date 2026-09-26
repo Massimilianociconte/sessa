@@ -78,16 +78,16 @@ export function assertOrderTransitionAllowed(input: {
   }
   const paymentCaptured = input.paymentStatus === "PAID" || input.paymentStatus === "PARTIALLY_REFUNDED";
   if (input.to === "REFUNDED" && !paymentCaptured) {
-    throw new DomainError("Un ordine non pagato non puo essere rimborsato.");
+    throw new DomainError("Un ordine non pagato non può essere rimborsato.");
   }
   if (input.to === "CANCELLED" && paymentCaptured) {
     throw new DomainError("Un ordine pagato deve essere rimborsato, non annullato.");
   }
   if (input.to === "READY" && input.fulfillmentType !== "PICKUP") {
-    throw new DomainError("Solo un ordine con ritiro in sede puo diventare pronto per il ritiro.");
+    throw new DomainError("Solo un ordine con ritiro in sede può diventare pronto per il ritiro.");
   }
   if (input.to === "SHIPPED" && input.fulfillmentType !== "DELIVERY") {
-    throw new DomainError("Solo un ordine con consegna puo essere segnato come spedito.");
+    throw new DomainError("Solo un ordine con consegna può essere segnato come spedito.");
   }
 }
 
@@ -124,13 +124,13 @@ export const PAYMENT_STATUS_LABELS: Record<PaymentStatus, string> = {
 export const PAYMENT_METHODS = ["bank_transfer", "cash_on_pickup", "card", "gift_card"] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
-/** Metodi che il cliente puo scegliere al checkout. La gift card e un credito, non un radio. */
+/** Metodi che il cliente può scegliere al checkout. La gift card è un credito, non un radio. */
 export const CHECKOUT_PAYMENT_METHODS = ["bank_transfer", "cash_on_pickup", "card"] as const;
 export type CheckoutPaymentMethod = (typeof CHECKOUT_PAYMENT_METHODS)[number];
 
 export const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   bank_transfer: "Bonifico bancario",
-  cash_on_pickup: "Pagamento al ritiro/consegna",
+  cash_on_pickup: "Pagamento in sede al ritiro",
   card: "Carta di credito",
   gift_card: "Gift card"
 };

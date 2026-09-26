@@ -32,6 +32,34 @@ export function formatRomeDateTime(date: Date): string {
   return romeDateTimeFormatter.format(date);
 }
 
+const romeAppointmentFormatter = new Intl.DateTimeFormat("it-IT", {
+  timeZone: ROME_TIME_ZONE,
+  weekday: "long",
+  day: "numeric",
+  month: "long",
+  hour: "2-digit",
+  minute: "2-digit"
+});
+
+const romeSlotShortFormatter = new Intl.DateTimeFormat("it-IT", {
+  timeZone: ROME_TIME_ZONE,
+  weekday: "short",
+  day: "2-digit",
+  month: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit"
+});
+
+/** Per il cliente: "sabato 26 settembre alle ore 17:30" (niente date ambigue). */
+export function formatRomeAppointment(date: Date): string {
+  return romeAppointmentFormatter.format(date);
+}
+
+/** Per sede e gestionale: "sab 26/09, 17:30", il giorno della settimana conta in laboratorio. */
+export function formatRomeSlotShort(date: Date): string {
+  return romeSlotShortFormatter.format(date);
+}
+
 function partsAt(date: Date): Record<string, number> {
   return Object.fromEntries(
     romePartsFormatter
@@ -64,7 +92,7 @@ export function parseRomeDateTimeLocal(value: string): Date | null {
   ) - wallAsUtc;
   let result = new Date(wallAsUtc - offsetAtGuess);
 
-  // Sul cambio DST l'offset al guess puo differire da quello del risultato.
+  // Sul cambio DST l'offset al guess può differire da quello del risultato.
   const atResult = partsAt(result);
   const resultWall = Date.UTC(
     atResult.year,

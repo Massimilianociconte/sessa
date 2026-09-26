@@ -9,7 +9,7 @@ export async function POST(request: Request) {
   if (!authorizeInternalJob(request)) {
     return NextResponse.json({ error: "Non autorizzato" }, { status: 401 });
   }
-  const result = await expireStockReservations(10);
+  const result = await expireStockReservations(25);
   return NextResponse.json({ ok: true, result }, {
     headers: { "Cache-Control": "private, no-store, max-age=0" }
   });

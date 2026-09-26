@@ -66,17 +66,29 @@ export async function recordOperationalEvent(input: OperationalEventInput): Prom
   };
 
   try {
-    await prisma.operationalEvent.upsert({
-      where: { fingerprint: fingerprint(input) },
-      create: { fingerprint: fingerprint(input), ...data, firstSeenAt: now, lastSeenAt: now },
+    const key = fingerprint(input);
+    const previous = level === "CRITICAL"
+      ? await prisma.operationalEvent.findUnique({ where: { fingerprint: key }, select: { resolvedAt: true, occurrenceCount: true } })
+      : null;
+    const saved = await prisma.operationalEvent.upsert({
+      where: { fingerprint: key },
+      create: { fingerprint: key, ...data, firstSeenAt: now, lastSeenAt: now },
       update: {
         ...data,
         occurrenceCount: { increment: 1 },
         lastSeenAt: now,
         resolvedAt: null,
         resolvedBy: null
-      }
+      },
+      select: { id: true, occurrenceCount: true }
     });
+    // Allarme solo alla prima occorrenza, alla riapertura e a 10/100/1000
+    // ripetizioni: niente valanghe di notifiche per lo stesso problema.
+    const count = saved.occurrenceCount;
+    const reopened = previous?.resolvedAt != null;
+    if (level === "CRITICAL" && (count === 1 || reopened || count === 10 || count === 100 || count === 1000)) {
+      await dispatchAlert({ ...data, fingerprint: key, count }).catch(() => undefined);
+    }
   } catch (error) {
     console.error(JSON.stringify({
       level: "error",
@@ -98,5 +110,51 @@ export async function recordOperationalError(
   await recordOperationalEvent({
     ...input,
     metadata: { ...input.metadata, errorName: error.name, errorCode: error.code ?? null }
+  });
+}
+
+type AlertPayload = {
+  source: string;
+  code: string;
+  message: string;
+  orderId: string | null;
+  fingerprint: string;
+  count: number;
+};
+
+/**
+ * Consegna degli allarmi CRITICAL: webhook https (Slack/Telegram/Teams) e
+ * email agli operatori. Gli allarmi generati dal worker email arrivano SOLO
+ * via webhook, altrimenti un SMTP guasto produrrebbe email di allarme a loro
+ * volta non consegnabili, all'infinito.
+ */
+async function dispatchAlert(alert: AlertPayload): Promise<void> {
+  const { getAlertsWebhookUrl, getOpsRecipients } = await import("@/lib/services/commerce-settings");
+  const { SITE_URL } = await import("@/lib/site");
+  const text =
+    `Sessa e-commerce — allarme ${alert.code} (${alert.source})\n${alert.message}` +
+    (alert.orderId ? `\nOrdine: ${SITE_URL}/admin/ordini/${alert.orderId}` : "") +
+    (alert.count > 1 ? `\nRipetizioni: ${alert.count}` : "") +
+    `\nDettagli: ${SITE_URL}/admin/osservabilita`;
+  const webhook = await getAlertsWebhookUrl();
+  if (webhook) {
+    await fetch(webhook, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text }),
+      signal: AbortSignal.timeout(4_000)
+    }).catch(() => undefined);
+  }
+  if (alert.source === "email-worker") return;
+  const recipients = await getOpsRecipients();
+  if (!recipients.alerts) return;
+  const { enqueueEmail } = await import("@/lib/services/email");
+  await enqueueEmail({
+    toEmail: recipients.alerts,
+    subject: `Allarme e-commerce: ${alert.code}`,
+    body: text,
+    type: "OPS_ALERT",
+    dedupeKey: `OPS_ALERT:${alert.fingerprint}:${alert.count}`,
+    cta: { url: `${SITE_URL}/admin/osservabilita`, label: "Apri il pannello operazioni" }
   });
 }

@@ -2,6 +2,7 @@ import { createHmac } from "node:crypto";
 import { prisma } from "@/lib/db";
 import { DomainError } from "@/lib/domain";
 import { getAuthSecret } from "@/lib/auth/secret";
+import { clientIpFromHeaders } from "@/lib/auth/client-ip";
 
 type Limit = { max: number; windowMs: number; blockMs: number };
 
@@ -9,8 +10,13 @@ const LIMITS: Record<"mutation" | "discount" | "giftcard" | "checkout", Limit> =
   mutation: { max: 120, windowMs: 5 * 60_000, blockMs: 5 * 60_000 },
   discount: { max: 30, windowMs: 15 * 60_000, blockMs: 15 * 60_000 },
   giftcard: { max: 10, windowMs: 15 * 60_000, blockMs: 30 * 60_000 },
-  checkout: { max: 5, windowMs: 15 * 60_000, blockMs: 30 * 60_000 }
+  // Tentativi di checkout per rete: largo abbastanza per il CGNAT mobile e
+  // gli uffici (più persone sullo stesso IP), stretto contro i bot.
+  checkout: { max: 20, windowMs: 15 * 60_000, blockMs: 15 * 60_000 }
 };
+
+/** Ordini conclusi per rete nella finestra: alimenta il controllo "velocity" per IP. */
+const CHECKOUT_SUCCESS_WINDOW_MS = 15 * 60_000;
 
 function digest(value: string): string {
   // Stessa derivazione del resto dell'app (fail-closed senza SESSION_SECRET
@@ -19,13 +25,7 @@ function digest(value: string): string {
 }
 
 function requestIp(headers: Headers): string {
-  const value =
-    headers.get("x-nf-client-connection-ip") ||
-    headers.get("cf-connecting-ip") ||
-    headers.get("x-forwarded-for")?.split(",")[0] ||
-    headers.get("x-real-ip") ||
-    "unknown";
-  return value.trim().toLowerCase().slice(0, 80);
+  return clientIpFromHeaders(headers);
 }
 
 async function consume(key: string, limit: Limit): Promise<number | null> {
@@ -88,5 +88,38 @@ export async function enforceCartRateLimit(
       // Se il DB e temporaneamente indisponibile, il normale flusso cart dara
       // comunque un errore; il limiter non deve trasformarlo in un outage certo.
     }
+  }
+}
+
+function successKey(headers: Headers): string {
+  return `checkout:success:ip:${digest(requestIp(headers))}`;
+}
+
+/** Numero di ordini conclusi di recente dalla stessa rete (0 se il limiter non risponde). */
+export async function recentCheckoutsFromIp(headers: Headers): Promise<number> {
+  try {
+    const entry = await prisma.rateLimitEntry.findUnique({ where: { key: successKey(headers) } });
+    if (!entry || entry.firstAt.getTime() < Date.now() - CHECKOUT_SUCCESS_WINDOW_MS) return 0;
+    return entry.count;
+  } catch {
+    return 0;
+  }
+}
+
+export async function recordCheckoutFromIp(headers: Headers): Promise<void> {
+  const key = successKey(headers);
+  const now = new Date();
+  try {
+    await prisma.rateLimitEntry.updateMany({
+      where: { key, firstAt: { lt: new Date(now.getTime() - CHECKOUT_SUCCESS_WINDOW_MS) } },
+      data: { count: 0, firstAt: now, blockedUntil: null }
+    });
+    await prisma.rateLimitEntry.upsert({
+      where: { key },
+      create: { key, count: 1, firstAt: now },
+      update: { count: { increment: 1 } }
+    });
+  } catch {
+    // Best effort: il limiter non deve mai far fallire un ordine già creato.
   }
 }

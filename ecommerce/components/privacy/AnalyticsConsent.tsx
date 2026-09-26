@@ -3,6 +3,7 @@
 import Script from "next/script";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
+import { isTrackablePath, sanitizedPageLocation } from "@/lib/analytics-location";
 import {
   getServerConsentSnapshot,
   OPEN_CONSENT_EVENT,
@@ -43,6 +44,20 @@ export default function AnalyticsConsent({ gaId }: { gaId?: string }) {
       ad_personalization: "denied"
     });
   }, [consent]);
+
+  // Page view manuali con URL ripulito: la configurazione GA non invia page view
+  // automatiche (che includerebbero query string con token di ordini e reset).
+  useEffect(() => {
+    if (!consent?.analytics || !gaId || !isTrackablePath(pathname)) return;
+    const location = sanitizedPageLocation(window.location.href);
+    const send = () =>
+      window.gtag?.("event", "page_view", { page_location: location, page_path: pathname, page_title: document.title });
+    if (window.gtag) send();
+    else {
+      const timer = window.setTimeout(send, 1500);
+      return () => window.clearTimeout(timer);
+    }
+  }, [pathname, consent?.analytics, gaId]);
 
   useEffect(() => {
     if (!preferencesOpen) return;
@@ -94,8 +109,9 @@ export default function AnalyticsConsent({ gaId }: { gaId?: string }) {
               });
               gtag('js', new Date());
               gtag('config', '${gaId}', {
-                send_page_view: true,
-                allow_google_signals: false
+                send_page_view: false,
+                allow_google_signals: false,
+                page_location: window.location.origin + window.location.pathname
               });
             `}
           </Script>
@@ -109,7 +125,8 @@ export default function AnalyticsConsent({ gaId }: { gaId?: string }) {
             <h2>Un assaggio, non un inseguimento.</h2>
             <p>
               Usiamo cookie tecnici per far funzionare account, carrello e checkout. Gli analytics facoltativi ci
-              aiutano a migliorare lo shop solo con il tuo consenso.
+              aiutano a migliorare lo shop solo con il tuo consenso.{" "}
+              <a href="/cookie" className="underline">Cookie policy</a>
             </p>
           </div>
           <div className="cookie-actions">

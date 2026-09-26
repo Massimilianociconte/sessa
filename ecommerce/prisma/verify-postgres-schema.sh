@@ -74,9 +74,28 @@ BEGIN
     missing := missing || array['Order: manca indice status+fulfillmentAt (0010)'];
   END IF;
 
+  IF EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'Order_payment_state_check'
+      AND pg_get_constraintdef(oid) NOT LIKE '%PARTIALLY_REFUNDED%'
+  ) THEN
+    missing := missing || array['Order: Order_payment_state_check blocca i rimborsi parziali (0011)'];
+  END IF;
+
+  IF NOT EXISTS (SELECT 1 FROM pg_class WHERE relkind = 'S' AND relname = 'order_number_seq') THEN
+    missing := missing || array['Manca la sequenza order_number_seq (0011)'];
+  END IF;
+
+  IF (
+    SELECT COUNT(*) FROM pg_constraint
+    WHERE conname IN ('Location_schedule_check', 'Product_fulfillment_check', 'ShippingRate_scope_check')
+  ) <> 3 THEN
+    missing := missing || array['CHECK 0011 incomplete (Location/Product/ShippingRate)'];
+  END IF;
+
   IF (
     SELECT COUNT(*) FROM "_sessa_migration_ledger"
-  ) < 9 THEN
+  ) < 10 THEN
     missing := missing || array['Ledger migrazioni assente o incompleto: rieseguire db:deploy'];
   END IF;
 

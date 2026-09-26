@@ -1,21 +1,34 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useState } from "react";
+import { submitWithoutReset } from "@/components/submit-without-reset";
 import { loginAction, type LoginState } from "@/lib/actions/auth";
 
 const initialState: LoginState = { error: null, needsTwoFactor: false };
 
 export default function LoginForm({ nextPath }: { nextPath?: string }) {
   const [state, formAction, pending] = useActionState(loginAction, initialState);
+  // Controllati: al passo del codice 2FA (obbligatorio in produzione) le credenziali restano.
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
 
   return (
-    <form action={formAction} className="space-y-4">
+    <form action={formAction} onSubmit={submitWithoutReset(formAction)} className="space-y-4">
       {nextPath && <input type="hidden" name="next" value={nextPath} />}
       <div>
         <label htmlFor="email" className="label-field">
           Email
         </label>
-        <input id="email" name="email" type="email" required autoComplete="username" className="input-field" />
+        <input
+          id="email"
+          name="email"
+          type="email"
+          required
+          autoComplete="username"
+          className="input-field"
+          value={email}
+          onChange={(event) => setEmail(event.target.value)}
+        />
       </div>
       {state.needsTwoFactor && (
         <div className="rounded-2xl border border-ceramic/20 bg-ceramic/5 p-4">
@@ -50,6 +63,8 @@ export default function LoginForm({ nextPath }: { nextPath?: string }) {
           maxLength={128}
           autoComplete="current-password"
           className="input-field"
+          value={password}
+          onChange={(event) => setPassword(event.target.value)}
         />
       </div>
       {state.error && (

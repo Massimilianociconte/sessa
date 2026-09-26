@@ -57,7 +57,7 @@ export default async function InvitePage() {
       <AccountPanel
         eyebrow="Come funziona"
         title="Regole semplici, sconto chiaro"
-        description="Il sistema evita auto-inviti e doppi utilizzi: ogni amico puo essere associato a un solo referral."
+        description="Il sistema evita auto-inviti e doppi utilizzi: ogni amico può essere associato a un solo referral."
       >
         <div className="account-rule-grid">
           {[

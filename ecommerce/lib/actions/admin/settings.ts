@@ -6,7 +6,8 @@ import { requireAdmin, requireAdminCapability, rotateSessionsForUser } from "@/l
 import { audit } from "@/lib/audit";
 import { hashPassword, verifyPassword } from "@/lib/auth/password";
 import { setSettings } from "@/lib/services/settings";
-import { formDataToObject, storeSettingsSchema } from "@/lib/validation";
+import { formDataToObject, legalSettingsSchema, storeSettingsSchema } from "@/lib/validation";
+import { parseEuroToCents } from "@/lib/money";
 import { backWithError, backWithMessage, firstZodMessage } from "./helpers";
 import { clearAttempts, isRateLimited, registerFailedAttempt } from "@/lib/auth/rate-limit";
 import { getClientIp, rateLimitKey } from "@/lib/auth/request-context";
@@ -29,6 +30,43 @@ export async function saveStoreSettingsAction(formData: FormData): Promise<void>
   await audit(user.email, "settings.update", "Setting", "store");
   revalidatePath("/", "layout");
   backWithMessage(PATH, "Impostazioni salvate.");
+}
+
+export async function saveLegalSettingsAction(formData: FormData): Promise<void> {
+  const user = await requireAdminCapability("settings:manage");
+  const parsed = legalSettingsSchema.safeParse(formDataToObject(formData));
+  if (!parsed.success) backWithError(PATH, firstZodMessage(parsed.error));
+  let cashMaxCents: number;
+  try {
+    cashMaxCents = parseEuroToCents(parsed.data.cashMax);
+  } catch {
+    backWithError(PATH, "Importo massimo pagamento in sede non valido: usa il formato 150,00");
+  }
+  const d = parsed.data;
+  await setSettings({
+    "legal.companyName": d.companyName ?? "",
+    "legal.registeredOffice": d.registeredOffice ?? "",
+    "legal.vatNumber": d.vatNumber ?? "",
+    "legal.taxCode": d.taxCode ?? "",
+    "legal.rea": d.rea ?? "",
+    "legal.pec": d.pec ?? "",
+    "legal.supportEmail": d.supportEmail ?? "",
+    "legal.privacyEmail": d.privacyEmail ?? "",
+    "legal.supportPhone": d.supportPhone ?? "",
+    "legal.termsVersion": d.termsVersion,
+    "notifications.ordersEmail": d.ordersEmail ?? "",
+    "notifications.alertsEmail": d.alertsEmail ?? "",
+    "notifications.alertsWebhookUrl": d.alertsWebhookUrl ?? "",
+    "payments.cashMaxCents": cashMaxCents,
+    "payments.cashMaxAdvanceDays": d.cashMaxAdvanceDays,
+    "payments.bankTransferMinBusinessDays": d.bankTransferMinBusinessDays,
+    "payments.bankTransferReservationBusinessDays": d.bankTransferReservationBusinessDays,
+    "payments.maxCardAttempts": d.maxCardAttempts,
+    "orders.customerCancelHours": d.customerCancelHours
+  });
+  await audit(user.email, "settings.legal_update", "Setting", "legal");
+  revalidatePath("/", "layout");
+  backWithMessage(PATH, "Dati legali, avvisi e regole di pagamento salvati.");
 }
 
 /** Solo il proprietario può gestire gli utenti del gestionale (controllo server-side). */

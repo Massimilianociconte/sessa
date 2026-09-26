@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+import { assertDatabaseTargetAllowed } from "@/lib/db-guard";
 
 // Singleton: evita di esaurire connessioni con l'hot reload di Next in dev.
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
@@ -20,7 +21,7 @@ function withConnectionLimit(url: string | undefined): string | undefined {
       const isTransactionPooler = isSupabasePooler && parsed.port === "6543";
       // Il session pooler Supabase live ha pool_size 15: 5 connessioni per ogni
       // cold lambda lo esauriscono con appena tre istanze. Anche sul transaction
-      // pooler una connessione per lambda e il default serverless piu prudente.
+      // pooler una connessione per lambda e il default serverless più prudente.
       const configured = process.env.DATABASE_CONNECTION_LIMIT;
       const safeDefault = isSupabasePooler ? "1" : process.env.NODE_ENV === "production" ? "2" : "3";
       // Su Supabase il limite sicuro vince anche su una query string legacy con
@@ -44,34 +45,33 @@ function withConnectionLimit(url: string | undefined): string | undefined {
 const databaseUrl = withConnectionLimit(rawDatabaseUrl);
 
 /**
- * Guardia anti-disastro: in sviluppo il .env locale non deve MAI puntare al
- * database di produzione (rischio di scrivere dati demo/cancellazioni test
- * direttamente in prod). Il check e' un warning forte, non un blocco: alcuni
- * comandi amministrativi possono volersi collegare consapevolmente; per far
- * tacere l'avviso in modo esplicito esiste SESSA_ALLOW_PROD_DB_FROM_DEV=1.
+ * Guardia anti-disastro: fuori da produzione il processo si rifiuta di
+ * collegarsi a un DB remoto (vedi lib/db-guard.ts). In produzione segnala la
+ * configurazione a rischio: il session pooler Supabase (porta 5432) tiene una
+ * connessione per lambda per tutta la sua vita e si esaurisce a ~15 istanze.
  */
-function warnIfDevTargetsProduction(url: string | undefined): void {
-  if (!url || process.env.NODE_ENV === "production") return;
-  if (process.env.SESSA_ALLOW_PROD_DB_FROM_DEV === "1") return;
+assertDatabaseTargetAllowed(databaseUrl);
+
+function warnIfSessionPoolerInProduction(url: string | undefined): void {
+  if (!url || process.env.NODE_ENV !== "production") return;
   try {
-    const host = new URL(url).hostname;
-    if (host.endsWith("pooler.supabase.com") || host.endsWith("supabase.co")) {
-      console.warn(
-        "\n" +
-          "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n" +
-          "!! ATTENZIONE: sviluppo collegato a un database Supabase remoto. !!\n" +
-          "!! Se e' il DB di PRODUZIONE, ogni comando locale (dev, seed,  !!\n" +
-          "!! test) scrive sui dati reali. Imposta un DATABASE_URL locale  !!\n" +
-          "!! oppure SESSA_ALLOW_PROD_DB_FROM_DEV=1 se e' intenzionale.    !!\n" +
-          "!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!\n"
+    const parsed = new URL(url);
+    if (parsed.hostname.endsWith("pooler.supabase.com") && parsed.port !== "6543") {
+      console.error(
+        JSON.stringify({
+          level: "critical",
+          source: "db",
+          code: "SESSION_POOLER_IN_RUNTIME",
+          message: "DATABASE_URL usa il session pooler: usare il transaction pooler 6543 con pgbouncer=true."
+        })
       );
     }
   } catch {
-    // URL non parsabile: la connessione fallira' da sola con errore chiaro.
+    // URL non parsabile: la connessione fallira con errore esplicito.
   }
 }
 
-warnIfDevTargetsProduction(databaseUrl);
+warnIfSessionPoolerInProduction(databaseUrl);
 
 export const prisma =
   globalForPrisma.prisma ?? new PrismaClient(databaseUrl ? { datasourceUrl: databaseUrl } : undefined);

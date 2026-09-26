@@ -1,47 +1,34 @@
 import { randomBytes } from "node:crypto";
 import type { Prisma } from "@prisma/client";
-import { DomainError, type CheckoutPaymentMethod, type FulfillmentType } from "@/lib/domain";
-import { includedTax } from "@/lib/money";
+import { DomainError } from "@/lib/domain";
+import { formatCents } from "@/lib/money";
+import { formatRomeAppointment, romeDateKey } from "@/lib/datetime";
 import { effectivePrice } from "@/lib/services/catalog";
 import type { CartWithItems } from "@/lib/services/cart";
 import { evaluateDiscount } from "@/lib/services/discounts";
 import { checkGiftCard, giftCardApplicable, redeemGiftCardInTx } from "@/lib/services/giftcards";
-import { getQuotedRate } from "@/lib/services/shipping";
+import { allowedShippingScopes, getQuotedRate } from "@/lib/services/shipping";
 import { isStripeConfigured, providerForMethod } from "@/lib/payments";
 import { enqueueEmailInTx, enqueueEmail } from "@/lib/services/email";
-import { allocateReferralCodeInTx, maybeConvertReferral } from "@/lib/services/referral";
+import { allocateReferralCodeInTx } from "@/lib/services/referral";
 import { initializeOrderPayment } from "@/lib/services/payment-attempts";
 import { serializableTransaction } from "@/lib/services/transaction";
-import { formatCents } from "@/lib/money";
-import { parseRomeDateTimeLocal } from "@/lib/datetime";
 import { stockReservationExpiry, stripePayableAmountCents } from "@/lib/payments/reservation-policy";
 import { parseCheckoutIdempotencyKey } from "@/lib/commerce/checkout-idempotency";
 import { assessCheckoutVelocity, DEFAULT_CHECKOUT_VELOCITY } from "@/lib/commerce/fraud";
+import { bankTransferReservationExpiry, checkPaymentMethod } from "@/lib/commerce/checkout-policy";
+import { computeIncludedTax } from "@/lib/commerce/tax";
+import type { InvoiceData } from "@/lib/commerce/italian-tax-ids";
 import { safeErrorMetadata } from "@/lib/safe-log";
 import { recordOperationalError } from "@/lib/observability";
-import { SITE_URL } from "@/lib/site";
+import { getCheckoutPolicy, getOpsRecipients } from "@/lib/services/commerce-settings";
+import { productLeadMinutes, reserveSlotInTx } from "@/lib/services/fulfillment-slots";
+import { checkoutBlockedReason } from "@/lib/services/launch-readiness";
+import { orderConfirmationMessage, storeNewOrderMessage, trackingUrl, type MessageOrder } from "@/lib/services/order-messages";
+import type { CheckoutFormInput } from "@/lib/validation";
 import { prisma } from "@/lib/db";
 
-export type CheckoutInput = {
-  email: string;
-  phone?: string;
-  firstName: string;
-  lastName: string;
-  fulfillmentType: FulfillmentType;
-  fulfillmentAt: string; // datetime-local
-  // Solo per la consegna:
-  line1?: string;
-  line2?: string;
-  city?: string;
-  province?: string;
-  postalCode?: string;
-  country?: string;
-  shippingRateId?: string;
-  paymentMethod: CheckoutPaymentMethod;
-  customerNote?: string;
-  marketingOptIn: boolean;
-  checkoutIdempotencyKey?: string;
-};
+export type CheckoutInput = CheckoutFormInput;
 
 export type PlacedOrder = {
   code: string;
@@ -50,27 +37,40 @@ export type PlacedOrder = {
   paymentInstructions: string | null;
   redirectUrl: string | null;
   paymentInitError: string | null;
+  /** true se la richiesta era un ritentativo di un ordine già creato (stessa chiave). */
+  replayed: boolean;
 };
 
 export type CheckoutContext = {
   /** Deriva esclusivamente dalla sessione server, mai dal FormData. */
   authenticatedCustomerId?: string | null;
+  /** Ordini conclusi di recente dalla stessa rete (dal rate limiter). */
+  recentOrdersFromIp?: number;
+  now?: Date;
 };
 
 const txCartInclude = {
   location: true,
   discountCode: { include: { locations: true, categories: true, products: true } },
   items: {
+    orderBy: { createdAt: "asc" },
     include: {
       storeVariant: { include: { variant: { include: { product: true } } } }
     }
   }
 } satisfies Prisma.CartInclude;
 
-function parseSequenceFromCode(code?: string | null): number {
-  const match = code?.match(/^SES-\d{4}-(\d{6,})$/);
-  return match ? Number(match[1]) || 0 : 0;
-}
+type CheckoutOrderRow = { id: string; code: string; publicToken: string; totalCents: number; giftCardCents: number; status: string; paymentProvider: string };
+
+const replaySelect = {
+  id: true,
+  code: true,
+  publicToken: true,
+  totalCents: true,
+  giftCardCents: true,
+  status: true,
+  paymentProvider: true
+} satisfies Prisma.OrderSelect;
 
 /**
  * I nonce di checkout senza ordine (tentativi falliti/ritirati) non servono
@@ -88,151 +88,190 @@ export async function pruneCheckoutNonces(): Promise<number> {
   return result.count;
 }
 
-async function nextOrderSequenceInTx(tx: Prisma.TransactionClient, year: number): Promise<number> {
-  const latestOrder = await tx.order.findFirst({
-    where: { code: { startsWith: `SES-${year}-` } },
-    orderBy: { code: "desc" },
-    select: { code: true }
-  });
-  const latestExistingSequence = parseSequenceFromCode(latestOrder?.code);
+/**
+ * Codice ordine leggibile da una SEQUENCE PostgreSQL: nextval non partecipa
+ * alla transazione, quindi due checkout concorrenti non si contendono più la
+ * stessa riga (prima OrderCounter generava abort SERIALIZABLE a catena).
+ * L'anno e quello di Roma, non dell'orologio UTC della lambda.
+ */
+async function nextOrderCodeInTx(tx: Prisma.TransactionClient, now: Date): Promise<string> {
+  const rows = await tx.$queryRaw<Array<{ value: bigint }>>`SELECT nextval('"order_number_seq"') AS value`;
+  const sequence = Number(rows[0]?.value ?? 0);
+  if (!Number.isSafeInteger(sequence) || sequence <= 0) throw new Error("ORDER_SEQUENCE_UNAVAILABLE");
+  return `SES-${romeDateKey(now).slice(0, 4)}-${String(sequence).padStart(6, "0")}`;
+}
 
-  // Upsert nativo (INSERT ... ON CONFLICT): niente try/catch sul conflitto,
-  // che su Postgres abortirebbe l'intera transazione (SQLite invece perdonava).
-  await tx.orderCounter.upsert({
-    where: { year },
-    create: { year, value: latestExistingSequence },
-    update: {}
-  });
+/** Ordine già creato con questa chiave di checkout (ritentativo dopo risposta persa). */
+export async function findOrderForCheckoutKey(rawKey: string | undefined | null): Promise<CheckoutOrderRow | null> {
+  const key = parseCheckoutIdempotencyKey(rawKey ?? undefined);
+  if (!key) return null;
+  const nonce = await prisma.checkoutNonce.findUnique({ where: { key }, include: { order: { select: replaySelect } } });
+  return nonce?.order ?? null;
+}
 
-  if (latestExistingSequence > 0) {
-    await tx.orderCounter.updateMany({
-      where: { year, value: { lt: latestExistingSequence } },
-      data: { value: latestExistingSequence }
-    });
+/** Riprende un ordine già creato con la stessa chiave: niente duplicati, stesso pagamento. */
+export async function resumeCheckoutOrder(order: CheckoutOrderRow): Promise<PlacedOrder> {
+  let redirectUrl: string | null = null;
+  let paymentInitError: string | null = null;
+  // Carta ancora da pagare: si riusa la sessione Stripe aperta (stesso tentativo).
+  if (order.status === "PENDING_PAYMENT" && order.paymentProvider === "stripe" && order.totalCents - order.giftCardCents > 0) {
+    try {
+      const launch = await initializeOrderPayment(order.id);
+      redirectUrl = launch.redirectUrl;
+      paymentInitError = launch.error;
+    } catch {
+      paymentInitError = "Pagamento non inizializzato. Puoi riprovare dalla pagina dell'ordine.";
+    }
   }
+  return {
+    code: order.code,
+    publicToken: order.publicToken,
+    totalCents: order.totalCents,
+    paymentInstructions: null,
+    redirectUrl,
+    paymentInitError,
+    replayed: true
+  };
+}
 
-  const counter = await tx.orderCounter.update({
-    where: { year },
-    data: { value: { increment: 1 } }
-  });
-  return counter.value;
+function invoiceDataFrom(input: CheckoutInput): InvoiceData | null {
+  if (!input.invoiceRequested || !input.invoiceName || !input.invoiceAddress) return null;
+  return {
+    name: input.invoiceName,
+    vatNumber: input.invoiceVatNumber?.replace(/\s+/g, "").replace(/^IT/i, "") ?? null,
+    taxCode: input.invoiceTaxCode?.replace(/\s+/g, "").toUpperCase() ?? null,
+    sdiCode: input.invoiceSdi?.toUpperCase() ?? (input.invoiceVatNumber && input.invoicePec ? "0000000" : null),
+    pec: input.invoicePec?.toLowerCase() ?? null,
+    address: input.invoiceAddress
+  };
 }
 
 /**
  * Cuore del checkout. Unica transazione con tutte le guardie:
- * idempotenza anti-doppio ordine, ricalcolo da DB, sconto granulare con gating
- * (primo ordine / limite per utente) e consumo atomico, scarico stock per sede
- * anti-oversell, snapshot completo (sede, evasione, prezzi), ledger, riscatto sconto.
+ * idempotenza anti-doppio ordine, ricalcolo da DB, fascia con capienza,
+ * regole di consegna e pagamento, sconto con consumo atomico, scarico stock
+ * anti-oversell, snapshot completo, ledger, email a cliente e sede (outbox).
  */
 export async function placeOrder(
   cart: CartWithItems,
   input: CheckoutInput,
   context: CheckoutContext = {}
 ): Promise<PlacedOrder> {
-  if (input.paymentMethod === "card" && !isStripeConfigured()) {
+  const now = context.now ?? new Date();
+  const blocked = await checkoutBlockedReason();
+  if (blocked) throw new DomainError(blocked, "STORE_NOT_READY");
+  const stripeEnabled = isStripeConfigured();
+  if (input.paymentMethod === "card" && !stripeEnabled) {
     throw new DomainError("Pagamento con carta temporaneamente non disponibile.");
   }
   const idempotencyKey = parseCheckoutIdempotencyKey(input.checkoutIdempotencyKey);
-  if (idempotencyKey) {
-    const existingNonce = await prisma.checkoutNonce.findUnique({
-      where: { key: idempotencyKey },
-      include: { order: { select: { code: true, publicToken: true, totalCents: true } } }
-    });
-    if (existingNonce?.order) {
-      return {
-        code: existingNonce.order.code,
-        publicToken: existingNonce.order.publicToken,
-        totalCents: existingNonce.order.totalCents,
-        paymentInstructions: null,
-        redirectUrl: `/ordine/${existingNonce.order.code}?t=${existingNonce.order.publicToken}`,
-        paymentInitError: null
-      };
-    }
-  }
-  const since = new Date(Date.now() - DEFAULT_CHECKOUT_VELOCITY.emailWindowMinutes * 60_000);
+  const replayOrder = await findOrderForCheckoutKey(idempotencyKey);
+  if (replayOrder) return resumeCheckoutOrder(replayOrder);
+
+  const since = new Date(now.getTime() - DEFAULT_CHECKOUT_VELOCITY.emailWindowMinutes * 60_000);
   const recentByEmail = await prisma.order.count({
     where: { email: input.email.toLowerCase(), placedAt: { gte: since }, status: { notIn: ["CANCELLED", "REFUNDED"] } }
   });
   const velocity = assessCheckoutVelocity({
-    now: Date.now(),
+    now: now.getTime(),
     recentByEmail,
-    recentByIp: 0,
+    recentByIp: context.recentOrdersFromIp ?? 0,
     ...DEFAULT_CHECKOUT_VELOCITY
   });
-  if (!velocity.ok) throw new DomainError(velocity.reason);
-  const order = await serializableTransaction(async (tx) => {
+  if (!velocity.ok) throw new DomainError(velocity.reason, "VELOCITY_LIMIT");
+
+  const [policy, recipients] = await Promise.all([getCheckoutPolicy(), getOpsRecipients()]);
+
+  const outcome = await serializableTransaction(async (tx) => {
     if (idempotencyKey) {
-      try {
-        await tx.checkoutNonce.create({ data: { key: idempotencyKey, cartId: cart.id } });
-      } catch {
-        const raced = await tx.checkoutNonce.findUnique({
+      // ON CONFLICT DO NOTHING: niente try/catch su errori di vincolo dentro una
+      // transazione PostgreSQL (la lascerebbe abortita). Un conflitto con un
+      // checkout concorrente non ancora visibile produce un serialization
+      // failure (P2034) e il retry vede l'ordine già creato.
+      const inserted = await tx.checkoutNonce.createMany({
+        data: [{ key: idempotencyKey, cartId: cart.id }],
+        skipDuplicates: true
+      });
+      if (inserted.count === 0) {
+        const existing = await tx.checkoutNonce.findUnique({
           where: { key: idempotencyKey },
-          include: { order: { select: { code: true, publicToken: true, totalCents: true } } }
+          include: { order: { select: replaySelect } }
         });
-        if (raced?.order) {
-          throw new DomainError("Ordine già in corso di elaborazione.", "CART_ALREADY_CONVERTED");
-        }
+        if (existing?.order) return { replay: existing.order };
+        throw new DomainError("Ordine già in elaborazione: attendi qualche secondo e ricarica la pagina.", "CHECKOUT_IN_PROGRESS");
       }
     }
-    // 0. IDEMPOTENZA + ricarico dal DB
-    const txCart = await tx.cart.findUnique({ where: { id: cart.id }, include: txCartInclude });
+
+    // 0. Ricarico dal DB dentro la transazione
+    const txCart = await tx.cart.findUnique({
+      where: { id: cart.id },
+      include: txCartInclude,
+      relationLoadStrategy: "join"
+    });
     if (!txCart) throw new DomainError("Carrello non trovato.");
     if (txCart.status !== "ACTIVE") {
       throw new DomainError("Questo carrello è già stato trasformato in ordine.", "CART_ALREADY_CONVERTED");
     }
     if (txCart.items.length === 0) throw new DomainError("Il carrello è vuoto.");
-    if (!txCart.location.isActive) throw new DomainError("La sede selezionata non è disponibile.");
+    const location = txCart.location;
+    if (!location.isActive) throw new DomainError("La sede selezionata non è disponibile.");
 
     // 1. Righe e subtotale dai prezzi effettivi correnti
     for (const item of txCart.items) {
       const sv = item.storeVariant;
       if (!sv.isAvailable || !sv.variant.isActive || sv.variant.product.status !== "ACTIVE") {
-        throw new DomainError(`"${sv.variant.product.name}" non è più disponibile in questa sede.`);
+        throw new DomainError(`"${sv.variant.product.name}" non è più disponibile in questa sede. Rimuovilo dal carrello.`);
       }
     }
     const priceOf = (item: (typeof txCart.items)[number]) =>
       effectivePrice(item.storeVariant.priceCentsOverride, item.storeVariant.variant.basePriceCents);
     const subtotalCents = txCart.items.reduce((sum, item) => sum + priceOf(item) * item.qty, 0);
     if (subtotalCents <= 0) throw new DomainError("Importo dell'ordine non valido.");
+    const products = txCart.items.map((item) => item.storeVariant.variant.product);
 
-    // 2. Identita cliente. Un'email digitata non prova il possesso dell'account:
-    // profilo, consenso, indirizzi e codici riservati usano solo la sessione server.
+    // 2. Identità: un'email digitata non prova il possesso dell'account.
     const email = input.email.toLowerCase();
     const authenticatedCustomer = context.authenticatedCustomerId
       ? await tx.customer.findUnique({ where: { id: context.authenticatedCustomerId } })
       : null;
     if (context.authenticatedCustomerId && (!authenticatedCustomer || authenticatedCustomer.anonymizedAt)) {
-      throw new DomainError("Sessione cliente non valida. Accedi di nuovo.");
+      throw new DomainError("Sessione cliente non valida. Accedi di nuovo.", "LOGIN_REQUIRED");
     }
     if (authenticatedCustomer && authenticatedCustomer.email !== email) {
       throw new DomainError("L'email del checkout deve coincidere con quella dell'account autenticato.");
     }
-    if (authenticatedCustomer && input.marketingOptIn && !authenticatedCustomer.marketingOptIn) {
-      await tx.customer.update({
-        where: { id: authenticatedCustomer.id },
-        data: { marketingOptIn: true }
-      });
-    }
-
-    const existingByEmail = authenticatedCustomer
-      ? authenticatedCustomer
-      : await tx.customer.findUnique({ where: { email } });
+    const consent = input.marketingOptIn
+      ? { marketingOptIn: true, marketingConsentAt: now, marketingConsentSource: "checkout", marketingConsentVersion: policy.termsVersion }
+      : {};
     let orderCustomer = authenticatedCustomer;
-    if (!authenticatedCustomer && !existingByEmail) {
-      orderCustomer = await tx.customer.create({
-        data: {
-          email,
-          firstName: input.firstName,
-          lastName: input.lastName,
-          phone: input.phone,
-          marketingOptIn: input.marketingOptIn,
-          referralCode: await allocateReferralCodeInTx(tx, input.firstName)
-        }
-      });
-    } else if (!authenticatedCustomer && existingByEmail && !existingByEmail.passwordHash) {
-      // Anche un profilo guest storico non si muta basandosi sul solo possesso
-      // apparente dell'email; l'ordine conserva i propri snapshot.
-      orderCustomer = existingByEmail;
+    if (authenticatedCustomer && input.marketingOptIn && !authenticatedCustomer.marketingOptIn) {
+      await tx.customer.update({ where: { id: authenticatedCustomer.id }, data: consent });
+    }
+    if (!authenticatedCustomer) {
+      const existingByEmail = await tx.customer.findUnique({ where: { email } });
+      if (existingByEmail?.passwordHash && !existingByEmail.anonymizedAt) {
+        // Ordini di un account registrato solo con sessione: restano nello
+        // storico, annullabili e collegati a codici riservati e referral.
+        throw new DomainError(
+          "Questa email appartiene a un account Sessa: accedi per completare l'ordine (il carrello resta salvato).",
+          "LOGIN_REQUIRED"
+        );
+      }
+      if (existingByEmail && !existingByEmail.anonymizedAt) {
+        // Profilo ospite storico: non si muta sulla base della sola email digitata.
+        orderCustomer = existingByEmail;
+      } else if (!existingByEmail) {
+        orderCustomer = await tx.customer.create({
+          data: {
+            email,
+            firstName: input.firstName,
+            lastName: input.lastName,
+            phone: input.phone,
+            ...consent,
+            referralCode: await allocateReferralCodeInTx(tx, input.firstName)
+          }
+        });
+      }
     }
 
     const priorOrders = await tx.order.count({
@@ -241,36 +280,33 @@ export async function placeOrder(
         ...(authenticatedCustomer ? { customerId: authenticatedCustomer.id } : { email })
       }
     });
-    const isFirstOrder = priorOrders === 0;
 
     // 3. Sconto: valutazione con gating + consumo atomico + riscatto
+    const discountLines = txCart.items.map((item) => ({
+      productId: item.storeVariant.variant.product.id,
+      categoryId: item.storeVariant.variant.product.categoryId,
+      lineCents: priceOf(item) * item.qty
+    }));
     let discountCents = 0;
     let discountCodeId: string | null = null;
     let discountCodeSnapshot: string | null = null;
+    let eligibleLines = txCart.items.map(() => false);
     if (txCart.discountCode) {
       const customerRedemptions = authenticatedCustomer
         ? await tx.discountRedemption.count({
-            where: {
-              discountId: txCart.discountCode.id,
-              customerId: authenticatedCustomer.id,
-              reversedAt: null
-            }
+            where: { discountId: txCart.discountCode.id, customerId: authenticatedCustomer.id, reversedAt: null }
           })
         : 0;
       const evaluated = evaluateDiscount(txCart.discountCode, {
         locationId: txCart.locationId,
         subtotalCents,
-        lines: txCart.items.map((item) => ({
-          productId: item.storeVariant.variant.product.id,
-          categoryId: item.storeVariant.variant.product.categoryId,
-          lineCents: priceOf(item) * item.qty
-        })),
+        lines: discountLines,
         customerId: authenticatedCustomer?.id ?? null,
-        isFirstOrder,
+        isFirstOrder: priorOrders === 0,
         customerRedemptions
       });
       if (!evaluated.ok) {
-        throw new DomainError(`Codice sconto non applicabile: ${evaluated.reason}`);
+        throw new DomainError(`Codice sconto non applicabile: ${evaluated.reason} Rimuovilo dal carrello per continuare.`);
       }
       const consumed = await tx.discountCode.updateMany({
         where: {
@@ -281,16 +317,19 @@ export async function placeOrder(
         data: { usedCount: { increment: 1 } }
       });
       if (consumed.count === 0) {
-        throw new DomainError("Il codice sconto e appena terminato. Rimuovilo o riprova con un altro codice.");
+        throw new DomainError("Il codice sconto è appena terminato. Rimuovilo o riprova con un altro codice.");
       }
       discountCents = evaluated.amountCents;
       discountCodeId = txCart.discountCode.id;
       discountCodeSnapshot = txCart.discountCode.code;
+      eligibleLines = evaluated.eligibleLines;
     }
 
-    // 4. Evasione: ritiro o consegna
+    // 4. Evasione: fascia (ritiro o consegna locale) o spedizione nazionale
+    const extraLeadMinutes = productLeadMinutes(products);
     let shippingCents = 0;
     let shippingMethodName = "Ritiro in sede";
+    let fulfillmentAt: Date | null = null;
     let ship = {
       shipFullName: "",
       shipLine1: "",
@@ -301,15 +340,30 @@ export async function placeOrder(
       shipCountry: "IT"
     };
     if (input.fulfillmentType === "DELIVERY") {
-      if (!txCart.location.deliveryEnabled) {
-        throw new DomainError("Questa sede non effettua consegne a domicilio.");
-      }
+      if (!location.deliveryEnabled) throw new DomainError("Questa sede non effettua consegne a domicilio.");
       if (!input.line1 || !input.city || !input.province || !input.postalCode || !input.shippingRateId) {
         throw new DomainError("Dati di consegna incompleti.");
       }
       const country = (input.country ?? "IT").toUpperCase();
       const rate = await getQuotedRate(input.shippingRateId, country, subtotalCents - discountCents, tx);
-      if (!rate) throw new DomainError("Metodo di spedizione non valido.");
+      if (!rate) throw new DomainError("Metodo di consegna non valido.");
+      const scopes = allowedShippingScopes({
+        allItemsShippable: products.every((product) => product.shippingScope === "NATIONAL"),
+        postalCode: input.postalCode,
+        localDeliveryPostalCodes: location.localDeliveryPostalCodes
+      });
+      if (!scopes.has(rate.scope as "LOCAL" | "NATIONAL")) {
+        throw new DomainError(
+          rate.scope === "LOCAL"
+            ? `La consegna del fresco di ${location.name} non raggiunge il CAP ${input.postalCode}. Scegli il ritiro in sede.`
+            : "Nel carrello ci sono prodotti freschi che non viaggiano con il corriere: scegli il ritiro o la consegna locale.",
+          "SHIPPING_NOT_ALLOWED"
+        );
+      }
+      if (rate.scope === "LOCAL") {
+        if (!input.slot) throw new DomainError("Scegli giorno e fascia di consegna.", "SLOT_UNAVAILABLE");
+        fulfillmentAt = (await reserveSlotInTx(tx, location, input.slot, extraLeadMinutes, now)).start;
+      }
       shippingCents = rate.effectiveCents;
       shippingMethodName = rate.name;
       ship = {
@@ -317,25 +371,26 @@ export async function placeOrder(
         shipLine1: input.line1,
         shipLine2: input.line2 ?? null,
         shipCity: input.city,
-        shipProvince: input.province,
+        shipProvince: input.province.toUpperCase(),
         shipPostalCode: input.postalCode,
         shipCountry: country
       };
-      // L'indirizzo resta snapshot dell'ordine. Il salvataggio nel profilo e
-      // un'azione esplicita dell'area account, non un side effect del checkout.
     } else {
-      if (!txCart.location.pickupEnabled) {
-        throw new DomainError("Questa sede non consente il ritiro.");
-      }
+      if (!location.pickupEnabled) throw new DomainError("Questa sede non consente il ritiro.");
+      if (!input.slot) throw new DomainError("Scegli giorno e fascia di ritiro.", "SLOT_UNAVAILABLE");
+      fulfillmentAt = (await reserveSlotInTx(tx, location, input.slot, extraLeadMinutes, now)).start;
     }
 
-    // 5. IVA inclusa, scorporata dall'importo scontato
-    const discountRatio = subtotalCents > 0 ? discountCents / subtotalCents : 0;
-    const taxCents = txCart.items.reduce((sum, item) => {
-      const lineGross = priceOf(item) * item.qty;
-      const discountedGross = Math.round(lineGross * (1 - discountRatio));
-      return sum + includedTax(discountedGross, item.storeVariant.variant.product.taxRateBps);
-    }, 0);
+    // 5. IVA inclusa: sconto sulle sole righe idonee, spedizione pro quota.
+    const tax = computeIncludedTax(
+      txCart.items.map((item, index) => ({
+        grossCents: priceOf(item) * item.qty,
+        taxRateBps: item.storeVariant.variant.product.taxRateBps,
+        discountEligible: eligibleLines[index]
+      })),
+      discountCents,
+      shippingCents
+    );
 
     const totalCents = subtotalCents - discountCents + shippingCents;
     if (totalCents <= 0) throw new DomainError("Importo dell'ordine non valido.");
@@ -347,10 +402,31 @@ export async function placeOrder(
       if (previewCheck.ok) previewGiftCents = giftCardApplicable(previewCheck.card, totalCents);
     }
     const previewDueCents = totalCents - previewGiftCents;
-    if (input.paymentMethod === "card" && !stripePayableAmountCents(previewDueCents)) {
+
+    // Il cliente conferma l'importo che ha visto: nessun addebito diverso in silenzio.
+    if (input.expectedAmountDueCents !== undefined && input.expectedAmountDueCents !== previewDueCents) {
       throw new DomainError(
-        "L'importo residuo dopo la gift card e inferiore al minimo carta (€0,50). Aggiungi un prodotto, riduci la gift card o scegli un altro metodo."
+        `Il totale è cambiato da ${formatCents(input.expectedAmountDueCents)} a ${formatCents(previewDueCents)} (prezzi, disponibilità o codici aggiornati). Controlla il riepilogo e conferma di nuovo.`,
+        "TOTAL_CHANGED"
       );
+    }
+    if (previewDueCents > 0) {
+      const rule = checkPaymentMethod({
+        method: input.paymentMethod,
+        fulfillmentType: input.fulfillmentType,
+        amountDueCents: previewDueCents,
+        slotStart: fulfillmentAt,
+        hasPhone: Boolean(input.phone),
+        stripeEnabled,
+        now,
+        settings: policy
+      });
+      if (!rule.ok) throw new DomainError(rule.reason, "PAYMENT_METHOD_NOT_ALLOWED");
+      if (input.paymentMethod === "card" && !stripePayableAmountCents(previewDueCents)) {
+        throw new DomainError(
+          "L'importo residuo dopo la gift card è inferiore al minimo carta (€0,50). Aggiungi un prodotto, riduci la gift card o scegli un altro metodo."
+        );
+      }
     }
 
     if (orderCustomer && !orderCustomer.referralCode) {
@@ -368,15 +444,13 @@ export async function placeOrder(
       });
       if (updated.count === 0) {
         throw new DomainError(
-          `Disponibilità insufficiente per "${item.storeVariant.variant.product.name} — ${item.storeVariant.variant.name}".`
+          `Disponibilità insufficiente per "${item.storeVariant.variant.product.name} — ${item.storeVariant.variant.name}". Aggiorna la quantità nel carrello.`
         );
       }
     }
 
-    // 7. Codice ordine sequenziale e concorrenza-safe.
-    const now = new Date();
-    const seq = await nextOrderSequenceInTx(tx, now.getFullYear());
-    const code = `SES-${now.getFullYear()}-${String(seq).padStart(6, "0")}`;
+    // 7. Codice ordine da sequenza (fuori dalla contesa serializable).
+    const code = await nextOrderCodeInTx(tx, now);
     const publicToken = randomBytes(16).toString("hex");
 
     // 7b. Gift card: riscatto atomico sull'importo dovuto (decremento condizionale).
@@ -386,12 +460,12 @@ export async function placeOrder(
       const card = await tx.giftCard.findUnique({ where: { code: txCart.giftCardCode } });
       const check = checkGiftCard(card, authenticatedCustomer?.id ?? null);
       if (!check.ok) {
-        throw new DomainError("La gift card non e piu valida o disponibile. Rimuovila e verifica il codice.");
+        throw new DomainError("La gift card non è più valida o disponibile. Rimuovila e verifica il codice.");
       }
       const applicable = giftCardApplicable(check.card, totalCents);
       const redeemed = await redeemGiftCardInTx(tx, check.card.id, applicable, code);
       if (redeemed <= 0) {
-        throw new DomainError("Il saldo della gift card e cambiato. Ricarica il carrello e riprova.");
+        throw new DomainError("Il saldo della gift card è cambiato. Ricarica il carrello e riprova.");
       }
       giftCardCents = redeemed;
       giftCardCodeSnapshot = check.card.code;
@@ -403,17 +477,23 @@ export async function placeOrder(
       : input.paymentMethod === "cash_on_pickup"
         ? "CONFIRMED"
         : "PENDING_PAYMENT";
+    const stockReservationExpiresAt = fullyPaidByGiftCard
+      ? null
+      : input.paymentMethod === "bank_transfer"
+        ? bankTransferReservationExpiry(now, fulfillmentAt, policy)
+        : stockReservationExpiry(input.paymentMethod, now);
+    const invoice = invoiceDataFrom(input);
 
-    // 8. Ordine con snapshot completo (sede, evasione, prezzi)
+    // 8. Ordine con snapshot completo (sede, evasione, prezzi, condizioni)
     const created = await tx.order.create({
       data: {
         code,
         publicToken,
         status: initialOrderStatus,
         locationId: txCart.locationId,
-        locationName: txCart.location.name,
+        locationName: location.name,
         fulfillmentType: input.fulfillmentType,
-        fulfillmentAt: parseRomeDateTimeLocal(input.fulfillmentAt),
+        fulfillmentAt,
         customerId: orderCustomer?.id ?? null,
         email,
         phone: input.phone,
@@ -422,7 +502,7 @@ export async function placeOrder(
         discountCents,
         giftCardCents,
         shippingCents,
-        taxCents,
+        taxCents: tax.taxCents,
         totalCents,
         discountCodeId,
         discountCodeSnapshot,
@@ -433,9 +513,11 @@ export async function placeOrder(
         paymentStatus: fullyPaidByGiftCard ? "PAID" : "PENDING",
         paidAt: fullyPaidByGiftCard ? now : null,
         customerNote: input.customerNote,
-        stockReservationExpiresAt: fullyPaidByGiftCard
-          ? null
-          : stockReservationExpiry(input.paymentMethod, now),
+        stockReservationExpiresAt,
+        invoiceRequested: Boolean(invoice),
+        invoiceData: invoice ? JSON.stringify(invoice) : null,
+        termsAcceptedAt: now,
+        termsVersion: policy.termsVersion,
         items: {
           create: txCart.items.map((item) => ({
             variantId: item.storeVariant.variantId,
@@ -450,9 +532,14 @@ export async function placeOrder(
           }))
         },
         events: {
-          create: { type: "CREATED", message: "Ordine ricevuto dallo storefront.", actor: "storefront" }
+          create: {
+            type: "CREATED",
+            message: `Ordine ricevuto dallo storefront (condizioni ${policy.termsVersion} accettate).`,
+            actor: "storefront"
+          }
         }
-      }
+      },
+      include: { items: true }
     });
 
     // 8b. Riscatto sconto (tracciamento + gating per-utente)
@@ -507,34 +594,49 @@ export async function placeOrder(
       });
     }
 
-    // 11. Conferma ordine accodata DENTRO la transazione (outbox): committa
-    // atomicamente con l'ordine — un crash post-commit non puo piu perderla.
-    // Le istruzioni di pagamento (bonifico/ritiro) seguono in un secondo
-    // messaggio dopo l'inizializzazione; restano comunque visibili sulla
-    // pagina dell'ordine.
-    const amountDuePreview = created.totalCents - created.giftCardCents;
+    // 11. Email a cliente e sede accodate DENTRO la transazione (outbox):
+    // committano atomicamente con l'ordine, un crash non può perderle.
+    const messageOrder: MessageOrder = {
+      ...created,
+      location: {
+        address: location.address,
+        city: location.city,
+        postalCode: location.postalCode,
+        phone: location.phone,
+        hours: location.hours
+      }
+    };
+    const confirmation = orderConfirmationMessage(messageOrder);
     await enqueueEmailInTx(tx, {
       toEmail: created.email,
-      subject: `Conferma ordine ${created.code} — Sessa 1930`,
-      body:
-        `Grazie per il tuo ordine ${created.code}.\n` +
-        `Sede: ${created.locationName}\n` +
-        `Totale: ${formatCents(created.totalCents)}\n` +
-        (created.giftCardCents > 0 ? `Gift card: −${formatCents(created.giftCardCents)}\n` : "") +
-        (amountDuePreview > 0 ? `Da pagare: ${formatCents(amountDuePreview)}\n` : "Ordine già pagato.\n") +
-        `\nSegui lo stato del tuo ordine:\n${SITE_URL}/ordine/${created.code}?t=${created.publicToken}`,
+      subject: confirmation.subject,
+      body: confirmation.body,
+      cta: confirmation.cta,
       type: "ORDER_CONFIRMATION",
       reference: created.code
     });
+    const storeRecipient = location.notificationEmail?.trim() || recipients.orders;
+    if (storeRecipient) {
+      const notice = storeNewOrderMessage({ ...messageOrder, id: created.id });
+      await enqueueEmailInTx(tx, {
+        toEmail: storeRecipient,
+        subject: notice.subject,
+        body: notice.body,
+        cta: notice.cta,
+        type: "STORE_NEW_ORDER",
+        reference: created.code
+      });
+    }
 
-    return created;
+    return { created };
   });
 
-  // Importo effettivamente da pagare (al netto della gift card).
-  const amountDueCents = order.totalCents - order.giftCardCents;
+  if ("replay" in outcome && outcome.replay) return resumeCheckoutOrder(outcome.replay);
+  const order = outcome.created;
 
   // Inizializzazione pagamento fuori dalla transazione: PaymentAttempt persiste
   // prima della rete e usa una chiave idempotente stabile.
+  const amountDueCents = order.totalCents - order.giftCardCents;
   let paymentInstructions: string | null = null;
   let redirectUrl: string | null = null;
   let paymentInitError: string | null = null;
@@ -544,19 +646,20 @@ export async function placeOrder(
       paymentInstructions = launch.instructions;
       redirectUrl = launch.redirectUrl;
       paymentInitError = launch.error;
-      // Le istruzioni operative (coordinate bonifico, modalita ritiro)
-      // viaggiano in un messaggio dedicato e deduplicato per ordine.
-      if (launch.instructions) {
+      // Le coordinate del bonifico viaggiano in un messaggio dedicato; per il
+      // pagamento in sede basta la riga nella conferma (niente doppia email).
+      if (launch.instructions && order.paymentMethod !== "cash_on_pickup") {
         await enqueueEmail({
           toEmail: order.email,
           subject: `Come completare l'ordine ${order.code} — Sessa 1930`,
-          body: `${launch.instructions}\n\nSegui lo stato del tuo ordine:\n${SITE_URL}/ordine/${order.code}?t=${order.publicToken}`,
+          body: `${launch.instructions}${order.stockReservationExpiresAt ? `\n\nL'ordine resta prenotato fino a ${formatRomeAppointment(order.stockReservationExpiresAt)}.` : ""}`,
+          cta: { url: trackingUrl(order), label: "Segui il tuo ordine" },
           type: "PAYMENT_INSTRUCTIONS",
           reference: order.code
         }).catch(() => undefined);
       }
     } catch (error) {
-      recordOperationalError({
+      await recordOperationalError({
         level: "ERROR",
         source: "checkout",
         code: "PAYMENT_INITIALIZATION_FAILED",
@@ -571,19 +674,13 @@ export async function placeOrder(
     }
   }
 
-  // Referral: alla prima conversione dell'invitato, premia chi ha invitato.
-  if (order.status === "PAID" && order.customerId) {
-    await maybeConvertReferral(order.customerId, order.id).catch((error) => {
-      console.error("Conversione referral post-pagamento fallita:", error);
-    });
-  }
-
   return {
     code: order.code,
     publicToken: order.publicToken,
     totalCents: order.totalCents,
     paymentInstructions,
     redirectUrl,
-    paymentInitError
+    paymentInitError,
+    replayed: false
   };
 }

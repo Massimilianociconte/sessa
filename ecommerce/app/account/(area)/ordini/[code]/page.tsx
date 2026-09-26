@@ -13,7 +13,10 @@ import {
 import { requireCustomer } from "@/lib/auth/customer-session";
 import { formatCents } from "@/lib/money";
 import { getCustomerOrderByCode } from "@/lib/services/customer-account";
-import { formatRomeDateTime } from "@/lib/datetime";
+import { formatRomeAppointment, formatRomeDateTime } from "@/lib/datetime";
+import { customerCancellation } from "@/lib/commerce/customer-cancellation";
+import { getCustomerCancelHours } from "@/lib/services/commerce-settings";
+import { prisma } from "@/lib/db";
 
 export const metadata = { title: "Dettaglio ordine" };
 
@@ -41,14 +44,21 @@ export default async function AccountOrderDetailPage({
   searchParams
 }: {
   params: Promise<{ code: string }>;
-  searchParams: Promise<{ msg?: string; err?: string }>;
+  searchParams: Promise<{ msg?: string; err?: string; confirmReorder?: string }>;
 }) {
-  const [{ code }, { msg, err }, customer] = await Promise.all([params, searchParams, requireCustomer()]);
-  const order = await getCustomerOrderByCode(customer.id, code);
+  const [{ code }, { msg, err, confirmReorder }, customer] = await Promise.all([params, searchParams, requireCustomer()]);
+  const order = await getCustomerOrderByCode(customer.id, decodeURIComponent(code));
   if (!order) notFound();
+  const returnRequests = await prisma.returnRequest.findMany({
+    where: { orderId: order.id },
+    orderBy: { createdAt: "desc" },
+    select: { id: true, status: true, reason: true, adminNote: true, createdAt: true, refundCents: true }
+  });
 
   const isPickup = order.fulfillmentType === "PICKUP";
-  const cancellable = ["PENDING_PAYMENT", "CONFIRMED", "PAID"].includes(order.status);
+  const cancelHours = await getCustomerCancelHours();
+  const cancellation = customerCancellation(order, new Date(), cancelHours);
+  const cancellable = cancellation.allowed;
   const steps = completedSteps(order.status, order.paymentStatus);
   const shippingAddress = [order.shipLine1, order.shipLine2, `${order.shipPostalCode} ${order.shipCity}`.trim(), order.shipProvince]
     .filter(Boolean)
@@ -83,8 +93,8 @@ export default async function AccountOrderDetailPage({
         />
         <AccountInfoTile
           label={isPickup ? "Ritiro" : "Consegna"}
-          value={order.fulfillmentAt ? formatRomeDateTime(order.fulfillmentAt) : "Da confermare"}
-          description={isPickup ? "La sede ti aggiornera quando l'ordine sara pronto." : shippingAddress || order.shippingMethodName}
+          value={order.fulfillmentAt ? formatRomeAppointment(order.fulfillmentAt) : "Da confermare"}
+          description={isPickup ? "La sede ti aggiornerà quando l'ordine sarà pronto." : shippingAddress || order.shippingMethodName}
           tone="ceramic"
         />
         <AccountInfoTile
@@ -185,6 +195,19 @@ export default async function AccountOrderDetailPage({
         </AccountPanel>
       )}
 
+      {confirmReorder && (
+        <form action={reorderAction} className="rounded-2xl border border-terracotta/30 bg-terracotta/5 p-4 text-sm">
+          <input type="hidden" name="orderId" value={order.id} />
+          <input type="hidden" name="confirmSwitch" value="1" />
+          <p className="font-semibold text-terracotta">
+            Il carrello contiene prodotti di un&apos;altra sede. Riordinando da {order.locationName} quel carrello verrà svuotato.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button type="submit" className="btn-primary">Svuota e riordina</button>
+            <Link href="/carrello" className="btn-ghost">Vai al carrello attuale</Link>
+          </div>
+        </form>
+      )}
       <div className="account-actions-row">
         <form action={reorderAction}>
           <input type="hidden" name="orderId" value={order.id} />
@@ -192,7 +215,7 @@ export default async function AccountOrderDetailPage({
             Riordina questi prodotti
           </button>
         </form>
-        <Link href={`/ordine/${order.code}?t=${order.publicToken}`} className="btn-secondary">
+        <Link href={`/ordine/${encodeURIComponent(order.code)}?t=${order.publicToken}`} className="btn-secondary">
           Apri ricevuta
         </Link>
         {cancellable && (
@@ -204,19 +227,50 @@ export default async function AccountOrderDetailPage({
           </form>
         )}
       </div>
-      {cancellable && (
-        <p className="text-xs text-ink/45">
-          Puoi annullare finché la sede non inizia la preparazione. Lo stock viene ripristinato subito
-          {order.paymentStatus === "PAID" ? " e il pagamento verrà rimborsato dalla sede" : ""}.
-        </p>
+      <p className="text-xs text-ink/45">
+        {cancellable
+          ? `Puoi annullare fino a ${cancelHours} ore prima del ritiro o della consegna, finché la sede non inizia la preparazione.${
+              order.paymentProvider === "stripe" && order.paymentStatus === "PAID" ? " Il pagamento con carta viene rimborsato automaticamente." : ""
+            }`
+          : !["CANCELLED", "REFUNDED", "DELIVERED"].includes(order.status)
+            ? cancellation.allowed
+              ? null
+              : cancellation.reason
+            : null}
+      </p>
+      {returnRequests.length > 0 && (
+        <AccountPanel title="Segnalazioni">
+          <ul className="space-y-2 text-sm">
+            {returnRequests.map((request) => (
+              <li key={request.id} className="rounded-xl bg-cream px-3 py-2">
+                <p className="font-semibold">
+                  {request.status === "REQUESTED"
+                    ? "In valutazione"
+                    : request.status === "APPROVED"
+                      ? "Accolta: rimborso in corso"
+                      : request.status === "REFUNDED"
+                        ? `Accolta e rimborsata${request.refundCents ? ` (${formatCents(request.refundCents)})` : ""}`
+                        : "Non accolta"}{" "}
+                  · {formatRomeDateTime(request.createdAt)}
+                </p>
+                <p className="text-ink/60">{request.reason}</p>
+                {request.adminNote && request.status !== "REQUESTED" && <p className="text-ink/50">Risposta: {request.adminNote}</p>}
+              </li>
+            ))}
+          </ul>
+        </AccountPanel>
       )}
-      {order.status === "DELIVERED" && (
+      {order.status === "DELIVERED" && !returnRequests.some((request) => ["REQUESTED", "APPROVED"].includes(request.status)) && (
         <form action={requestReturnAction} className="space-y-3 rounded-2xl border border-ink/10 p-4">
           <input type="hidden" name="orderId" value={order.id} />
           <input type="hidden" name="code" value={order.code} />
-          <label htmlFor="returnReason" className="label-field">Richiedi un reso (14 giorni)</label>
+          <label htmlFor="returnReason" className="label-field">Segnala un problema con l&apos;ordine</label>
+          <p className="text-xs text-ink/50">
+            I prodotti freschi non sono soggetti al diritto di recesso, ma ogni difetto di conformità viene valutato dalla sede
+            (entro 14 giorni dalla consegna). Descrivi cosa non va.
+          </p>
           <textarea id="returnReason" name="reason" required maxLength={500} className="input-field" rows={3} />
-          <button type="submit" className="btn-secondary">Invia richiesta di reso</button>
+          <button type="submit" className="btn-secondary">Invia segnalazione</button>
         </form>
       )}
     </div>

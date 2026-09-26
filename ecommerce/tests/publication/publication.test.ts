@@ -16,7 +16,10 @@ const validProduct = {
   name: "Sfogliatelle",
   slug: "sfogliatelle",
   status: "ACTIVE",
-  taxRateBps: 1000
+  taxRateBps: 1000,
+  ingredients: "Farina, semola, ricotta, zucchero, strutto",
+  allergens: "Glutine, latte",
+  storageInfo: "Conservare in luogo fresco, consumare entro 24 ore"
 };
 
 test("il gestionale accetta solo stati prodotto noti e slug canonici", () => {
@@ -29,6 +32,15 @@ test("il gestionale accetta solo stati prodotto noti e slug canonici", () => {
   assert.equal(productSchema.safeParse({ ...validProduct, slug: "sfo gliatelle" }).success, false);
   assert.equal(productSchema.safeParse({ ...validProduct, taxRateBps: 10001 }).success, false);
   assert.equal(productSchema.safeParse({ ...validProduct, name: "" }).success, false);
+});
+
+test("un prodotto alimentare si pubblica solo con ingredienti, allergeni e conservazione", () => {
+  for (const field of ["ingredients", "allergens", "storageInfo"] as const) {
+    assert.equal(productSchema.safeParse({ ...validProduct, [field]: "" }).success, false, field);
+    assert.equal(productSchema.safeParse({ ...validProduct, status: "DRAFT", [field]: "" }).success, true, field);
+  }
+  assert.equal(productSchema.parse(validProduct).shippingScope, "LOCAL");
+  assert.equal(productSchema.safeParse({ ...validProduct, shippingScope: "MARS" }).success, false);
 });
 
 test("SKU e prezzo variante sono dogane del gestionale, non input liberi", () => {

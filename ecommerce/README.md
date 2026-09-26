@@ -15,32 +15,33 @@ Stack: **Next.js 16 (App Router, Server Actions)** · **Prisma + PostgreSQL** ·
 
 ```bash
 cd ecommerce
+createdb sessa_dev   # Postgres locale (es. brew install postgresql@17)
+cp .env.example .env # DATABASE_URL=postgresql://localhost:5432/sessa_dev + segreti locali
 npm install
 npm run db:bootstrap # solo su un database PostgreSQL nuovo e vuoto
-npm run db:seed      # carica catalogo, sedi e impostazioni iniziali
+npm run db:seed      # catalogo, sedi, fixture demo (richiede SEED_*_PASSWORD)
 npm run dev          # http://localhost:3001
 ```
 
-Prima dell'avvio, copiare `.env.example` in `.env` e configurare un database di
-sviluppo dedicato. `DATABASE_URL` è la connessione runtime al transaction pooler;
-`MIGRATION_DATABASE_URL` è opzionale e forza una connessione diversa solo per le migrazioni.
-Non puntare i comandi locali al database di produzione.
+Fuori da `NODE_ENV=production` nessun processo (dev, seed, script, test) può
+connettersi a un database remoto: `lib/db-guard.ts` blocca la connessione.
+`MIGRATION_DATABASE_URL` serve solo ai comandi di release e si passa da shell.
 
 - Storefront: `http://localhost:3001`
 - Gestionale: `http://localhost:3001/admin`
-- Primo admin: usare `/admin/setup` con un `ADMIN_SETUP_TOKEN` forte oppure
-  valorizzare `SEED_ADMIN_PASSWORD` prima del seed. Non usare credenziali fallback
-  in produzione.
+- Primo admin locale: `admin@sessa1930.com` con `SEED_ADMIN_PASSWORD` del `.env`.
+  In produzione il proprietario si crea da `/admin/setup` (vedi runbook).
 
 Verifica dei flussi critici (ordini, stock, transizioni):
 
 ```bash
 npm run lint
 npx tsc --noEmit --pretty false
-npm run test:security
+npm test                 # unitari, nessun database
 npm run build
-# Solo contro un database di test sacrificabile:
-npx tsx prisma/verify-flow.ts
+# Integrazione su Postgres locale sessa_test (ricreato a ogni run, mai remoto):
+createdb sessa_test      # solo la prima volta
+TEST_DATABASE_URL=postgresql://localhost:5432/sessa_test npm run test:integration
 ```
 
 ---
@@ -74,7 +75,8 @@ prisma/
   schema.prisma           modello dati
   migrations-postgres/    bootstrap + migrazioni additive PostgreSQL
   seed.ts                 catalogo reale Sessa
-  verify-flow.ts          test d'integrazione di sicurezza
+tests/
+  integration/            checkout, pagamenti, account su Postgres reale
 public/
   manifest.webmanifest, sw.js, offline.html, icons/   asset PWA
 ```
@@ -153,6 +155,10 @@ Configurare `NEXT_PUBLIC_SITE_URL` in `.env` con il dominio reale (usato da site
 robots e metadati assoluti).
 
 ## Passare in produzione
+
+Prima volta: [`docs/OPERATIONS_RUNBOOK.md`](docs/OPERATIONS_RUNBOOK.md)
+(segreti, proprietario, backup, SMTP, dati legali, dominio) e **Gestionale →
+Checklist lancio**, che deve arrivare a zero punti bloccanti.
 
 1. Configurare `DATABASE_URL` sul pooler runtime. Se serve una connessione diversa
    per le migrazioni, usare `MIGRATION_DATABASE_URL`. Su un DB esistente usare `npm run db:deploy`;

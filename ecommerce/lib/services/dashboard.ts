@@ -87,18 +87,20 @@ export async function getDashboardData(filter?: DashboardFilter) {
     locations
   ] = await Promise.all([
     prisma.order.count({ where: { ...scope, placedAt: { gte: from } } }),
+    // Incasso = ordini pagati (anche in sede) al netto dei rimborsi parziali.
     prisma.order.aggregate({
-      _sum: { totalCents: true },
+      _sum: { totalCents: true, refundedCents: true },
       _count: { _all: true },
-      where: { ...scope, placedAt: { gte: from }, status: { in: REVENUE_STATUSES } }
+      where: { ...scope, placedAt: { gte: from }, status: { in: REVENUE_STATUSES }, paymentStatus: { in: ["PAID", "PARTIALLY_REFUNDED"] } }
     }),
     prisma.order.count({ where: { ...scope, placedAt: { gte: prevFrom, lt: prevTo } } }),
     prisma.order.aggregate({
-      _sum: { totalCents: true },
-      where: { ...scope, placedAt: { gte: prevFrom, lt: prevTo }, status: { in: REVENUE_STATUSES } }
+      _sum: { totalCents: true, refundedCents: true },
+      where: { ...scope, placedAt: { gte: prevFrom, lt: prevTo }, status: { in: REVENUE_STATUSES }, paymentStatus: { in: ["PAID", "PARTIALLY_REFUNDED"] } }
     }),
     prisma.order.count({ where: { ...scope, status: "PENDING_PAYMENT" } }),
-    prisma.order.count({ where: { ...scope, status: { in: ["PAID", "PROCESSING"] } } }),
+    // "Da evadere" include il pagamento al ritiro (CONFIRMED): va preparato come gli altri.
+    prisma.order.count({ where: { ...scope, status: { in: ["CONFIRMED", "PAID", "PROCESSING"] } } }),
     prisma.order.count({ where: { ...scope, status: "READY" } }),
     // Coda operativa: cosa preparare, ordinata per data di ritiro/consegna richiesta.
     prisma.order.findMany({
@@ -143,8 +145,16 @@ export async function getDashboardData(filter?: DashboardFilter) {
     })
   ]);
 
-  const revenueCents = revenueInRange._sum.totalCents ?? 0;
-  const prevRevenueCents = prevRevenue._sum.totalCents ?? 0;
+  const revenueCents = (revenueInRange._sum.totalCents ?? 0) - (revenueInRange._sum.refundedCents ?? 0);
+  const prevRevenueCents = (prevRevenue._sum.totalCents ?? 0) - (prevRevenue._sum.refundedCents ?? 0);
+  const [openReturns, overdueOrders, latestOrder] = await Promise.all([
+    prisma.returnRequest.count({ where: { status: { in: ["REQUESTED", "APPROVED"] }, order: scope } }),
+    // Fascia passata da oltre 2 ore ma ordine mai chiuso (ritirato, annullato o no-show).
+    prisma.order.count({
+      where: { ...scope, status: { in: ["CONFIRMED", "PAID", "PROCESSING", "READY"] }, fulfillmentAt: { lt: new Date(Date.now() - 2 * 60 * 60_000) } }
+    }),
+    prisma.order.findFirst({ where: scope, orderBy: { placedAt: "desc" }, select: { code: true } })
+  ]);
 
   return {
     range,
@@ -160,6 +170,9 @@ export async function getDashboardData(filter?: DashboardFilter) {
     pendingCount,
     processingCount,
     readyCount,
+    openReturns,
+    overdueOrders,
+    latestOrderCode: latestOrder?.code ?? null,
     fulfillmentQueue,
     recentOrders,
     lowStock,

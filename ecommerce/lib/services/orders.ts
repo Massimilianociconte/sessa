@@ -11,9 +11,14 @@ import {
 import { audit } from "@/lib/audit";
 import { safeErrorMetadata } from "@/lib/safe-log";
 import { maybeConvertReferral } from "@/lib/services/referral";
-import { enqueueEmail } from "@/lib/services/email";
-import { SITE_URL } from "@/lib/site";
+import { enqueueEmailInTx } from "@/lib/services/email";
 import { secretEquals } from "@/lib/security/secret-equals";
+import {
+  orderCancelledMessage,
+  statusUpdateMessage,
+  type CancellationReason,
+  type MessageOrder
+} from "@/lib/services/order-messages";
 import { romeDateKey, romeDayRange } from "@/lib/datetime";
 import { getStripe, isStripeConfigured } from "@/lib/payments/stripe";
 
@@ -39,6 +44,10 @@ export type OrderFilter = {
   fulfillmentOn?: Date; // giorno di ritiro/consegna richiesto
   page?: number; // 1-based
   take?: number;
+  /** Solo ordini con segnalazioni cliente aperte. */
+  openReturnsOnly?: boolean;
+  /** Solo ordini con fascia passata da oltre 2 ore ma ancora aperti. */
+  overdueOnly?: boolean;
   /** null/undefined = globale; array vuoto = nessuna sede autorizzata. */
   allowedLocationIds?: string[] | null;
 };
@@ -62,6 +71,13 @@ export function buildOrderWhere(filter?: OrderFilter): Prisma.OrderWhereInput {
       ...(filter.placedFrom ? { gte: filter.placedFrom } : {}),
       ...(filter.placedTo ? { lt: filter.placedTo } : {})
     };
+  }
+  if (filter?.openReturnsOnly) {
+    where.returnRequests = { some: { status: { in: ["REQUESTED", "APPROVED"] } } };
+  }
+  if (filter?.overdueOnly) {
+    where.status = { in: ["CONFIRMED", "PAID", "PROCESSING", "READY"] };
+    where.fulfillmentAt = { lt: new Date(Date.now() - 2 * 60 * 60_000) };
   }
   if (filter?.fulfillmentOn) {
     const range = romeDayRange(romeDateKey(filter.fulfillmentOn));
@@ -160,6 +176,10 @@ type TransitionOptions = {
   paymentRef?: string;
   restock?: boolean;
   paymentStatus?: PaymentStatus;
+  /** Motivo comunicato al cliente in caso di annullamento. */
+  cancelReason?: CancellationReason;
+  /** false per non avvisare il cliente (es. rimborso che invia la propria email). */
+  notifyCustomer?: boolean;
 };
 
 type TransitionResult = {
@@ -170,7 +190,7 @@ type TransitionResult = {
   to: OrderStatus;
 };
 
-/** Restituisce gift card e disponibilita coupon quando l'ordine viene stornato. */
+/** Restituisce gift card e disponibilità coupon quando l'ordine viene stornato. */
 async function reverseCheckoutBenefitsInTx(
   tx: Prisma.TransactionClient,
   order: {
@@ -232,6 +252,9 @@ async function reverseCheckoutBenefitsInTx(
  * Variante transazionale condivisa da admin e webhook. L'update condizionale
  * sullo stato e la barriera che impedisce doppio restock/evento sotto concorrenza.
  */
+/** Stati che generano un'email al cliente (gli altri sono solo interni). */
+export const CUSTOMER_NOTIFIED_STATUSES: OrderStatus[] = ["CANCELLED", "READY", "SHIPPED", "DELIVERED"];
+
 export async function transitionOrderInTx(
   tx: Prisma.TransactionClient,
   orderId: string,
@@ -239,7 +262,7 @@ export async function transitionOrderInTx(
   actorEmail: string,
   opts?: TransitionOptions
 ): Promise<TransitionResult> {
-  const order = await tx.order.findUnique({ where: { id: orderId }, include: { items: true } });
+  const order = await tx.order.findUnique({ where: { id: orderId }, include: { items: true, location: true } });
   if (!order) throw new DomainError("Ordine non trovato.");
   const from = order.status as OrderStatus;
   assertOrderTransitionAllowed({
@@ -323,6 +346,39 @@ export async function transitionOrderInTx(
     }
   });
 
+  // Avviso al cliente nella stessa transazione (outbox): nessun cambio di
+  // stato rilevante resta sconosciuto a chi ha ordinato.
+  if (opts?.notifyCustomer !== false && CUSTOMER_NOTIFIED_STATUSES.includes(to)) {
+    const messageOrder: MessageOrder = {
+      ...order,
+      location: order.location
+        ? {
+            address: order.location.address,
+            city: order.location.city,
+            postalCode: order.location.postalCode,
+            phone: order.location.phone,
+            hours: order.location.hours
+          }
+        : null
+    };
+    const message =
+      to === "CANCELLED"
+        ? orderCancelledMessage(messageOrder, opts?.cancelReason ?? "STORE")
+        : statusUpdateMessage(
+            messageOrder,
+            to as "READY" | "SHIPPED" | "DELIVERED",
+            order.trackingCode ? `${order.trackingCarrier ?? ""} ${order.trackingCode}`.trim() : null
+          );
+    await enqueueEmailInTx(tx, {
+      toEmail: order.email,
+      subject: message.subject,
+      body: message.body,
+      cta: message.cta,
+      type: to === "CANCELLED" ? "ORDER_CANCELLED" : to === "READY" ? "ORDER_READY" : to === "SHIPPED" ? "ORDER_SHIPPED" : "ORDER_DELIVERED",
+      reference: order.code
+    });
+  }
+
   return { orderId, orderCode: order.code, customerId: order.customerId, from, to };
 }
 
@@ -354,7 +410,7 @@ export async function transitionOrder(
       select: { id: true, status: true, providerRef: true }
     });
     if (activeStripeAttempts.length > 0 && !isStripeConfigured()) {
-      throw new DomainError("Impossibile annullare in sicurezza: Stripe non e configurato per chiudere il pagamento attivo.");
+      throw new DomainError("Impossibile annullare in sicurezza: Stripe non è configurato per chiudere il pagamento attivo.");
     }
     for (const attempt of activeStripeAttempts) {
       if (attempt.status === "INITIALIZING" && !attempt.providerRef) {
@@ -364,7 +420,7 @@ export async function transitionOrder(
         try {
           const session = await getStripe().checkout.sessions.retrieve(attempt.providerRef);
           if (session.payment_status === "paid") {
-            throw new DomainError("Pagamento gia acquisito: attendi la riconciliazione prima di annullare.");
+            throw new DomainError("Pagamento già acquisito: attendi la riconciliazione prima di annullare.");
           }
           if (session.status === "open") {
             await getStripe().checkout.sessions.expire(attempt.providerRef);
@@ -373,7 +429,7 @@ export async function transitionOrder(
           }
         } catch (error) {
           if (error instanceof DomainError) throw error;
-          throw new DomainError("Non e stato possibile chiudere la sessione Stripe; ordine non annullato.");
+          throw new DomainError("Non è stato possibile chiudere la sessione Stripe; ordine non annullato.");
         }
       }
       await prisma.paymentAttempt.updateMany({
@@ -385,26 +441,12 @@ export async function transitionOrder(
   const result = await prisma.$transaction((tx) => transitionOrderInTx(tx, orderId, to, actorEmail, opts));
 
   await audit(actorEmail, "order.status", "Order", orderId, { to, note: opts?.note });
-  if (to === "PAID" && result.customerId) {
+  // Il premio referral scatta a ordine consegnato/ritirato e pagato: un
+  // ordine poi annullato o rimborsato non genera più ricompense.
+  if (to === "DELIVERED" && result.customerId) {
     await maybeConvertReferral(result.customerId, orderId).catch((error) => {
-      console.error("Conversione referral post-pagamento fallita", safeErrorMetadata(error));
+      console.error("Conversione referral post-consegna fallita", safeErrorMetadata(error));
     });
-  }
-  const notify = await prisma.order.findUnique({
-    where: { id: orderId },
-    select: { email: true, code: true, publicToken: true, locationName: true, totalCents: true }
-  });
-  if (notify && (to === "READY" || to === "SHIPPED")) {
-    await enqueueEmail({
-      toEmail: notify.email,
-      subject: to === "READY" ? `Ordine ${notify.code} pronto al ritiro — Sessa 1930` : `Ordine ${notify.code} spedito — Sessa 1930`,
-      type: to === "READY" ? "ORDER_READY" : "ORDER_SHIPPED",
-      reference: notify.code,
-      body:
-        to === "READY"
-          ? `Il tuo ordine ${notify.code} e pronto per il ritiro presso ${notify.locationName}.\nSegui lo stato: ${SITE_URL}/ordine/${notify.code}?t=${notify.publicToken}`
-          : `Il tuo ordine ${notify.code} e stato spedito.\nSegui lo stato: ${SITE_URL}/ordine/${notify.code}?t=${notify.publicToken}`
-    }).catch(() => undefined);
   }
 }
 

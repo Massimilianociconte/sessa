@@ -17,7 +17,7 @@ export type CartIntegrityInput = {
 
 export const CART_LINE_MAX_QTY = 99;
 
-/** Quantita dopo un add: somma con riga esistente, senza superare stock. */
+/** Quantità dopo un add: somma con riga esistente, senza superare stock. */
 export function planCartQuantity(input: {
   alreadyInCart: number;
   addQty: number;
@@ -28,7 +28,7 @@ export function planCartQuantity(input: {
   return { qty, requested, clamped: qty < requested };
 }
 
-/** Quantita dopo un set esplicito. */
+/** Quantità dopo un set esplicito. */
 export function planSetCartQuantity(input: {
   requestedQty: number;
   stockQty: number;
@@ -53,8 +53,8 @@ export function describeCartIntegrityWarnings(
       const name = names[item.itemId] ?? item.productName;
       const subject = name ? `"${name}"` : "Un prodotto";
       return item.reason === "unavailable"
-        ? `${subject} non e piu disponibile in questa sede ed e stato rimosso.`
-        : `${subject} e esaurito ed e stato rimosso dal carrello.`;
+        ? `${subject} non è più disponibile in questa sede: rimuovilo per procedere all'ordine.`
+        : `${subject} è esaurito al momento: rimuovilo o riprova più tardi.`;
     }),
     ...result.clamped.map((item) =>
       describeStockClamp({
@@ -123,4 +123,11 @@ export function sanitizeCartLines(lines: CartIntegrityInput[]): CartIntegrityRes
   }
 
   return { kept, removed, clamped, priceChanges };
+}
+
+export function describePriceChange(input: { productName?: string; from: number; to: number }): string {
+  const format = (cents: number) =>
+    new Intl.NumberFormat("it-IT", { style: "currency", currency: "EUR" }).format(cents / 100);
+  const subject = input.productName?.trim() ? `"${input.productName.trim()}"` : "Un prodotto";
+  return `Il prezzo di ${subject} è cambiato da ${format(input.from)} a ${format(input.to)}.`;
 }

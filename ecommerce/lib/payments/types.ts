@@ -44,6 +44,6 @@ export interface PaymentProvider {
     amountCents: number,
     idempotencyKey: string
   ): Promise<{ ok: boolean; reference?: string; error?: string }>;
-  /** Chiude una sessione non ancora pagata quando l'ordine non e piu pagabile. */
+  /** Chiude una sessione non ancora pagata quando l'ordine non e più pagabile. */
   cancel?(reference: string): Promise<{ ok: boolean; error?: string }>;
 }

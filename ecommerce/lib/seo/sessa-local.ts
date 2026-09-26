@@ -226,7 +226,7 @@ export function getStoreSeo(location: LocationLike) {
     `${address}, ${cityName}. Ritiro${location.deliveryEnabled ? " e consegna" : ""}.`;
   const h1 = `${name}: ecommerce della sede di ${cityName}`;
   const directAnswer =
-    `${name} e la pagina ecommerce locale di Sessa 1930 per ${profile.geoArea}. Qui puoi ordinare online ` +
+    `${name} è la pagina ecommerce locale di Sessa 1930 per ${profile.geoArea}. Qui puoi ordinare online ` +
     `${profile.signatureProducts.slice(0, 4).join(", ")} e prodotti della pasticceria napoletana, con disponibilità e stock collegati alla sede.`;
   const narrative =
     `${BRAND_DESCRIPTION} La sede ${name} porta questa identità a ${profile.geoArea}, con un catalogo online pensato per ritiro` +
@@ -306,7 +306,7 @@ export function buildStoreCategoryMetadata(location: LocationLike, category: Cat
   const title = `${category.name} a ${seo.keywordCity} - ${seo.name}`;
   const description =
     `${category.name} disponibili nello shop locale ${seo.name}. ` +
-    `${category.description ?? "Specialita artigianali Sessa 1930"} con stock collegato alla sede, ` +
+    `${category.description ?? "Specialità artigianali Sessa 1930"} con stock collegato alla sede, ` +
     `ritiro${location.deliveryEnabled ? " e consegna" : ""}.`;
   return {
     title: { absolute: title },
@@ -489,7 +489,7 @@ export function buildHomeJsonLd(locations: LocationLike[]) {
       "@id": `${SITE_URL}/#webpage`,
       name: "Shop online Sessa 1930 - scegli la sede",
       url: `${SITE_URL}/`,
-      description: "Scegli il punto vendita Sessa 1930 e ordina dal catalogo locale con disponibilita per sede.",
+      description: "Scegli il punto vendita Sessa 1930 e ordina dal catalogo locale con disponibilità per sede.",
       isPartOf: { "@id": websiteId },
       about: { "@id": organizationId },
       mainEntity: {
@@ -568,7 +568,23 @@ export function buildProductJsonLd(location: LocationLike, product: StoreProduct
       availability: variant.stockQty > 0 ? "https://schema.org/InStock" : "https://schema.org/OutOfStock",
       itemCondition: "https://schema.org/NewCondition",
       seller,
-      availableAtOrFrom: seller
+      availableAtOrFrom: seller,
+      hasMerchantReturnPolicy:
+        product.shippingScope === "NATIONAL"
+          ? {
+              "@type": "MerchantReturnPolicy",
+              applicableCountry: "IT",
+              returnPolicyCategory: "https://schema.org/MerchantReturnFiniteReturnWindow",
+              merchantReturnDays: 14,
+              returnMethod: "https://schema.org/ReturnByMail",
+              returnFees: "https://schema.org/ReturnFeesCustomerResponsibility"
+            }
+          : {
+              // Prodotti freschi deperibili: recesso escluso (art. 59 Codice del Consumo).
+              "@type": "MerchantReturnPolicy",
+              applicableCountry: "IT",
+              returnPolicyCategory: "https://schema.org/MerchantReturnNotPermitted"
+            }
     }
   }));
 
@@ -616,9 +632,18 @@ export function buildProductJsonLd(location: LocationLike, product: StoreProduct
   ];
 }
 
-export function buildProductMetadata(location: LocationLike, product: StoreProductView): Metadata {
+export function buildProductMetadata(
+  location: LocationLike,
+  product: StoreProductView,
+  canonicalLocationSlug?: string | null
+): Metadata {
   const seo = getStoreSeo(location);
   const productUrl = `${seo.canonicalUrl}/prodotti/${product.slug}`;
+  // Stessa scheda in più sedi: canonical sulla sede principale del prodotto.
+  const canonicalUrl =
+    canonicalLocationSlug && canonicalLocationSlug !== location.slug
+      ? `${SITE_URL}/sede/${canonicalLocationSlug}/prodotti/${product.slug}`
+      : productUrl;
   const city = seo.keywordCity;
   const title = `${product.name} ${city} - Ordina da ${seo.name}`;
   const description =
@@ -627,7 +652,7 @@ export function buildProductMetadata(location: LocationLike, product: StoreProdu
   return {
     title: { absolute: title },
     description,
-    alternates: { canonical: productUrl },
+    alternates: { canonical: canonicalUrl },
     robots: { index: true, follow: true },
     keywords: [
       `${product.name} ${city}`,

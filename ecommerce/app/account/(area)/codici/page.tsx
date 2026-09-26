@@ -81,7 +81,7 @@ export default async function AccountDiscountCodesPage() {
 
       <AccountInfoGrid>
         <AccountInfoTile label="Attivi" value={String(activeCodes.length)} description="Pronti per il prossimo checkout." tone="brilliant" />
-        <AccountInfoTile label="Usati" value={String(usedCodes.length)} description="Storico dei codici gia riscattati." tone="terracotta" />
+        <AccountInfoTile label="Usati" value={String(usedCodes.length)} description="Storico dei codici già riscattati." tone="terracotta" />
         <AccountInfoTile label="Scaduti/non attivi" value={String(expiredCodes.length)} description="Codici non più applicabili." tone="ceramic" />
       </AccountInfoGrid>
 
@@ -124,7 +124,7 @@ export default async function AccountDiscountCodesPage() {
                     {code.endsAt && <span>Scade il {formatRomeDate(code.endsAt)}</span>}
                     {remainingUses !== null && <span>Utilizzi rimasti: {remainingUses}</span>}
                     {code.firstOrderOnly && <span>Valido sul primo ordine</span>}
-                    {!code.stackable && <span>Non cumulabile</span>}
+                    <span>Un codice per ordine</span>
                   </div>
 
                   {code.redemptions.length > 0 && (

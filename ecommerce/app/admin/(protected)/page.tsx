@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { OrderStatusBadge } from "@/components/admin/StatusBadge";
 import { FULFILLMENT_LABELS, type FulfillmentType } from "@/lib/domain";
-import { formatRomeDate, formatRomeDateTime } from "@/lib/datetime";
+import { formatRomeDate, formatRomeSlotShort } from "@/lib/datetime";
 import { formatCents } from "@/lib/money";
 import {
   DASHBOARD_RANGE_LABELS,
@@ -10,6 +10,7 @@ import {
   getDashboardData
 } from "@/lib/services/dashboard";
 import { adminLocationScope, requireAdminCapability } from "@/lib/auth/session";
+import LiveOrdersRefresh from "@/components/admin/LiveOrdersRefresh";
 
 export const metadata = { title: "Dashboard" };
 
@@ -31,8 +32,9 @@ function Kpi({ label, value, hint }: { label: string; value: string; hint?: stri
 }
 
 function formatFulfillmentAt(date: Date | null): string {
-  if (!date) return "Da concordare";
-  return formatRomeDateTime(date);
+  // Senza fascia = spedizione con corriere: parte appena pronto.
+  if (!date) return "Senza fascia";
+  return formatRomeSlotShort(date);
 }
 
 export default async function AdminDashboardPage({
@@ -65,6 +67,9 @@ export default async function AdminDashboardPage({
             {activeLocation ? `Sede: ${activeLocation.name}` : "Tutte le sedi"} ·{" "}
             {DASHBOARD_RANGE_LABELS[data.range]}
           </p>
+          <div className="mt-2">
+            <LiveOrdersRefresh latestOrderCode={data.latestOrderCode} />
+          </div>
         </div>
         <form className="flex flex-wrap items-end gap-2">
           <div>
@@ -109,14 +114,29 @@ export default async function AdminDashboardPage({
         <Kpi
           label="Scontrino medio"
           value={data.avgOrderCents > 0 ? formatCents(data.avgOrderCents) : "—"}
-          hint="su ordini pagati nel periodo"
+          hint="su ordini pagati, al netto dei rimborsi"
         />
         <Kpi
           label="Da gestire"
           value={String(data.pendingCount + data.processingCount + data.readyCount)}
-          hint={`${data.pendingCount} da pagare · ${data.processingCount} da evadere · ${data.readyCount} pronti`}
+          hint={`${data.pendingCount} da pagare · ${data.processingCount} da evadere (incl. pagamento in sede) · ${data.readyCount} pronti`}
         />
       </div>
+
+      {(data.openReturns > 0 || data.overdueOrders > 0) && (
+        <div className="mt-6 grid gap-3 sm:grid-cols-2">
+          {data.openReturns > 0 && (
+            <Link href="/admin/ordini?resi=1" className="card border-terracotta/40 p-4 text-sm font-semibold text-terracotta hover:bg-terracotta/5">
+              {data.openReturns} segnalazion{data.openReturns === 1 ? "e" : "i"} cliente da gestire →
+            </Link>
+          )}
+          {data.overdueOrders > 0 && (
+            <Link href="/admin/ordini?scaduti=1" className="card border-majolica/60 p-4 text-sm font-semibold text-ink hover:bg-majolica/10">
+              {data.overdueOrders} ordin{data.overdueOrders === 1 ? "e" : "i"} con fascia passata ancora aperti: chiudili (ritirato, annullato o no-show) →
+            </Link>
+          )}
+        </div>
+      )}
 
       <div className="mt-8 grid gap-6 xl:grid-cols-[2fr_1fr]">
         <div className="space-y-6">

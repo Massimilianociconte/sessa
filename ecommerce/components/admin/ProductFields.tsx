@@ -99,8 +99,47 @@ export default function ProductFields({
           name="allergens"
           defaultValue={product?.allergens ?? ""}
           className="input-field"
-          placeholder="Glutine, uova, latte, frutta a guscio"
+          placeholder="Glutine, uova, latte, frutta a guscio (oppure: nessuno)"
         />
+        <p className="mt-1 text-xs text-ink/45">
+          Obbligatori (con ingredienti e conservazione) per pubblicare: Reg. UE 1169/2011 art. 14, vendita a distanza.
+        </p>
+      </div>
+      <div className="sm:col-span-2">
+        <label className="label-field" htmlFor="storageInfo">
+          Conservazione e consumo
+        </label>
+        <input
+          id="storageInfo"
+          name="storageInfo"
+          defaultValue={product?.storageInfo ?? ""}
+          className="input-field"
+          placeholder="Conservare in frigorifero, consumare entro 48 ore"
+        />
+      </div>
+      <div>
+        <label className="label-field" htmlFor="shippingScope">
+          Consegna
+        </label>
+        <select id="shippingScope" name="shippingScope" defaultValue={product?.shippingScope ?? "LOCAL"} className="input-field">
+          <option value="LOCAL">Fresco: solo ritiro o consegna locale</option>
+          <option value="NATIONAL">Confezionato: spedibile con corriere</option>
+        </select>
+      </div>
+      <div>
+        <label className="label-field" htmlFor="leadTimeHours">
+          Preparazione minima (ore)
+        </label>
+        <input
+          id="leadTimeHours"
+          name="leadTimeHours"
+          type="number"
+          min={0}
+          max={720}
+          defaultValue={product?.leadTimeHours ?? 0}
+          className="input-field"
+        />
+        <p className="mt-1 text-xs text-ink/45">Es. 48 per torte su ordinazione. Si somma al tempo minimo della sede.</p>
       </div>
       <div>
         <label className="label-field" htmlFor="categoryId">

@@ -8,7 +8,7 @@ import { parseCheckoutIdempotencyKey } from "@/lib/commerce/checkout-idempotency
 import { planCartQuantity, planSetCartQuantity, CART_LINE_MAX_QTY } from "@/lib/commerce/cart-integrity";
 import { isBrowserReusableCartToken, buildIsolatedCartToken } from "@/lib/commerce/cart-session-isolation";
 import { includedTax, parseEuroToCents, percentOf } from "@/lib/money";
-import { checkoutPickupInput, futureCheckoutWhen, makeDiscount } from "../support/fixtures";
+import { checkoutPickupInput, makeDiscount } from "../support/fixtures";
 
 test("il checkout ritiro non chiede indirizzo, la consegna si", () => {
   assert.equal(checkoutSchema.safeParse(checkoutPickupInput()).success, true);
@@ -33,15 +33,37 @@ test("il checkout ritiro non chiede indirizzo, la consegna si", () => {
   assert.equal(deliveryOk.success, true);
 });
 
-test("la fascia orario rifiuta il passato prossimo e le date troppo lontane", () => {
-  const tooSoon = checkoutSchema.safeParse(checkoutPickupInput({ fulfillmentAt: futureCheckoutWhen(0.2) }));
-  assert.equal(tooSoon.success, false);
-  const tooFar = checkoutSchema.safeParse(
-    checkoutPickupInput({
-      fulfillmentAt: futureCheckoutWhen(24 * 400)
-    })
-  );
-  assert.equal(tooFar.success, false);
+test("il checkout richiede fascia, condizioni accettate e nomi senza link", () => {
+  assert.equal(checkoutSchema.safeParse(checkoutPickupInput({ slot: undefined })).success, false);
+  assert.equal(checkoutSchema.safeParse(checkoutPickupInput({ slot: "domani alle 10" })).success, false);
+  assert.equal(checkoutSchema.safeParse(checkoutPickupInput({ acceptTerms: undefined })).success, false);
+  assert.equal(checkoutSchema.safeParse(checkoutPickupInput({ firstName: "https://evil.example" })).success, false);
+  assert.equal(checkoutSchema.safeParse(checkoutPickupInput({ firstName: "D'Angelo" })).success, true);
+  // Spedizione nazionale: nessuna fascia, ma telefono obbligatorio per il corriere.
+  const national = checkoutPickupInput({
+    fulfillmentType: "DELIVERY",
+    slot: undefined,
+    line1: "Via Dante 1",
+    city: "Milano",
+    province: "MI",
+    postalCode: "20121",
+    shippingRateId: "rate-1"
+  });
+  assert.equal(checkoutSchema.safeParse(national).success, true);
+  assert.equal(checkoutSchema.safeParse({ ...national, phone: undefined }).success, false);
+});
+
+test("fattura: P.IVA e codice fiscale validati con cifra di controllo", () => {
+  const invoice = {
+    invoiceRequested: "on",
+    invoiceName: "Pasticceria Esempio Srl",
+    invoiceVatNumber: "01234567897",
+    invoiceSdi: "ABC1234",
+    invoiceAddress: "Via Roma 1, 80100 Napoli"
+  };
+  assert.equal(checkoutSchema.safeParse(checkoutPickupInput(invoice)).success, true);
+  assert.equal(checkoutSchema.safeParse(checkoutPickupInput({ ...invoice, invoiceVatNumber: "01234567890" })).success, false);
+  assert.equal(checkoutSchema.safeParse(checkoutPickupInput({ ...invoice, invoiceSdi: undefined })).success, false);
 });
 
 test("gli sconti restano granulari: percentuali, fissi, sede e primo ordine", () => {

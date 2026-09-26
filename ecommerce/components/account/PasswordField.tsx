@@ -10,10 +10,13 @@ type PasswordFieldProps = {
   minLength?: number;
   maxLength?: number;
   hint?: string;
+  /** Opzionale: campo controllato (evita il reset dei form React 19). */
+  value?: string;
+  onChange?: (value: string) => void;
 };
 
 /** Campo password con occhiello mostra/nascondi (accessibile, senza dipendenze). */
-export default function PasswordField({ id, name, label, autoComplete, minLength, maxLength, hint }: PasswordFieldProps) {
+export default function PasswordField({ id, name, label, autoComplete, minLength, maxLength, hint, value, onChange }: PasswordFieldProps) {
   const [visible, setVisible] = useState(false);
   return (
     <div>
@@ -30,6 +33,7 @@ export default function PasswordField({ id, name, label, autoComplete, minLength
           maxLength={maxLength}
           autoComplete={autoComplete}
           className="input-field"
+          {...(onChange ? { value: value ?? "", onChange: (event: React.ChangeEvent<HTMLInputElement>) => onChange(event.target.value) } : {})}
         />
         <button
           type="button"

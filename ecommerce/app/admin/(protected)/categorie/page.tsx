@@ -127,6 +127,9 @@ export default async function AdminCategoriesPage({
           <h2 className="mb-4 font-serif text-xl font-semibold">Nuova categoria</h2>
           <form action={createCategoryAction} className="space-y-4">
             <CategoryFormFields />
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" name="isActive" defaultChecked className="accent-terracotta" /> Attiva
+            </label>
             <button type="submit" className="btn-primary">
               Crea categoria
             </button>

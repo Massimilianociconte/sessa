@@ -7,6 +7,7 @@ import { requireAdminCapability } from "@/lib/auth/session";
 import { processEmailQueue, retryEmailMessage } from "@/lib/services/email";
 import { expireStockReservations } from "@/lib/services/stock-reservations";
 import { notifyAbandonedCarts } from "@/lib/services/abandoned-carts";
+import { runRetention } from "@/lib/services/retention";
 import { backWithError, backWithMessage } from "@/lib/actions/admin/helpers";
 
 const PATH = "/admin/osservabilita";
@@ -35,10 +36,10 @@ export async function runEmailWorkerAction(): Promise<void> {
 
 export async function runStockReservationWorkerAction(): Promise<void> {
   const user = await requireAdminCapability("operations:view");
-  const result = await expireStockReservations(10);
+  const result = await expireStockReservations(25);
   await audit(user.email, "operations.stock_worker", "Order", "batch", result);
   revalidatePath(PATH);
-  backWithMessage(PATH, `Prenotazioni: ${result.released} rilasciate, ${result.recoveredPaid} pagamenti recuperati, ${result.deferred} sospese.`);
+  backWithMessage(PATH, `Prenotazioni: ${result.released} rilasciate, ${result.recoveredPaid} pagamenti recuperati, ${result.deferred} sospese, ${result.reminders} promemoria bonifico.`);
 }
 
 export async function runAbandonedCartWorkerAction(): Promise<void> {
@@ -57,4 +58,15 @@ export async function retryEmailAction(formData: FormData): Promise<void> {
   await audit(user.email, "operations.email_retry", "EmailMessage", emailId);
   revalidatePath(PATH);
   backWithMessage(PATH, "Messaggio rimesso in coda.");
+}
+
+export async function runMaintenanceAction(): Promise<void> {
+  const user = await requireAdminCapability("operations:view");
+  const result = await runRetention();
+  await audit(user.email, "operations.maintenance", "Setting", "retention", result);
+  revalidatePath(PATH);
+  backWithMessage(
+    PATH,
+    `Manutenzione: ${result.registrations} registrazioni scadute, ${result.orphanCustomers} profili vuoti, ${result.auditLogs + result.operationalEvents} log rimossi, ${result.reencrypted} segreti ricifrati (${result.reencryptRemaining} residui).`
+  );
 }

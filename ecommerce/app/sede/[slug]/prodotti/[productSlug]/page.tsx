@@ -10,7 +10,7 @@ import ProductCard from "@/components/storefront/ProductCard";
 import { prisma } from "@/lib/db";
 import { formatCents } from "@/lib/money";
 import { buildProductJsonLd, buildProductMetadata, getStoreSeo } from "@/lib/seo/sessa-local";
-import { CATALOG_OCCASIONS, getStoreProduct, listStoreProducts, matchesOccasion } from "@/lib/services/catalog";
+import { CATALOG_OCCASIONS, getCanonicalLocationSlug, getStoreProduct, listStoreProducts, matchesOccasion } from "@/lib/services/catalog";
 import { getActiveLocationBySlug } from "@/lib/services/locations";
 
 export const revalidate = 30;
@@ -47,7 +47,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (!location) return {};
   const product = await getStoreProduct(location.id, productSlug);
   if (!product) return {};
-  return buildProductMetadata(location, product);
+  return buildProductMetadata(location, product, await getCanonicalLocationSlug(product.id));
 }
 
 export default async function StoreProductPage({ params }: Props) {
@@ -75,7 +75,7 @@ export default async function StoreProductPage({ params }: Props) {
     location.deliveryEnabled ? "consegna" : null
   ]
     .filter(Boolean)
-    .join(" e ");
+    .join(" o ");
 
   return (
     <>
@@ -168,9 +168,6 @@ export default async function StoreProductPage({ params }: Props) {
               ))}
             </div>
             <p className="mt-4 whitespace-pre-line text-ink/70">{product.description}</p>
-            <p className="mt-3 text-sm leading-6 text-ink/55">
-              Pagina prodotto locale per {seo.keywordCity}: disponibilità, varianti e stock sono collegati alla sede {seo.name}.
-            </p>
             <dl className="mt-4 grid gap-2 rounded-2xl border border-ink/10 bg-white px-4 py-3 text-sm">
               <div>
                 <dt className="font-semibold text-ink">Ritiro</dt>
@@ -194,20 +191,24 @@ export default async function StoreProductPage({ params }: Props) {
               </div>
             </dl>
 
-            {(product.ingredients || product.allergens) && (
-              <div className="mt-4 space-y-1 rounded-xl bg-cream px-4 py-3 text-sm">
-                {product.ingredients && (
-                  <p>
-                    <span className="font-semibold">Ingredienti:</span> {product.ingredients}
-                  </p>
-                )}
-                {product.allergens && (
-                  <p className="text-ink/70">
-                    <span className="font-semibold text-terracotta">Allergeni:</span> {product.allergens}
-                  </p>
-                )}
-              </div>
-            )}
+            <div className="mt-4 space-y-1 rounded-xl bg-cream px-4 py-3 text-sm" aria-label="Informazioni alimentari">
+              <p>
+                <span className="font-semibold">Ingredienti:</span>{" "}
+                {product.ingredients || "chiedi alla sede prima di ordinare."}
+              </p>
+              <p className="text-ink/75">
+                <span className="font-semibold text-terracotta">Allergeni:</span>{" "}
+                {product.allergens || "informazione in aggiornamento: contatta la sede prima di ordinare."}
+              </p>
+              {product.storageInfo && (
+                <p className="text-ink/70">
+                  <span className="font-semibold">Conservazione:</span> {product.storageInfo}
+                </p>
+              )}
+              <p className="text-xs text-ink/50">
+                Prodotto artigianale preparato in un laboratorio dove si lavorano anche altri allergeni.
+              </p>
+            </div>
 
             {available.length === 0 ? (
               <p className="mt-8 rounded-xl bg-ink/5 px-4 py-3 text-sm font-semibold text-ink/60">
@@ -236,21 +237,28 @@ export default async function StoreProductPage({ params }: Props) {
 
         <section className="mt-12 grid gap-4 md:grid-cols-4" aria-label="Informazioni utili sul prodotto">
           <div className="accent-card rounded-2xl border border-ink/10 bg-white p-4">
-            <p className="font-serif text-lg font-semibold">Freschezza</p>
+            <p className="font-serif text-lg font-semibold">{product.shippingScope === "NATIONAL" ? "Spedibile" : "Freschezza"}</p>
             <p className="mt-1 text-sm text-ink/60">
-              Disponibilita e stock sono letti dalla sede selezionata, con avvisi quando restano pochi pezzi.
+              {product.shippingScope === "NATIONAL"
+                ? "Prodotto confezionato: puoi ritirarlo in sede o riceverlo con corriere in tutta Italia."
+                : "Prodotto fresco del giorno: ritiro in sede o consegna locale nella fascia che scegli."}
             </p>
           </div>
           <div className="accent-card rounded-2xl border border-ink/10 bg-white p-4">
             <p className="font-serif text-lg font-semibold">Ritiro e consegna</p>
             <p className="mt-1 text-sm text-ink/60">
-              {fulfillmentCopy ? `Puoi scegliere ${fulfillmentCopy} nel checkout.` : "La sede gestisce la disponibilità prima della conferma."}
+              {!fulfillmentCopy
+                ? "Contatta la sede per concordare il ritiro."
+                : product.shippingScope === "NATIONAL" && location.deliveryEnabled
+                  ? "Al checkout scegli il ritiro in sede, con la fascia oraria, o la spedizione con corriere."
+                  : `Al checkout scegli ${fulfillmentCopy} e la fascia oraria.`}
+              {product.leadTimeHours > 0 ? ` Serve un preavviso di ${product.leadTimeHours} ore.` : ""}
             </p>
           </div>
           <div className="accent-card rounded-2xl border border-ink/10 bg-white p-4">
             <p className="font-serif text-lg font-semibold">Allergeni</p>
             <p className="mt-1 text-sm text-ink/60">
-              {product.allergens || "Il team puo confermare ingredienti e possibili contaminazioni prima del ritiro."}
+              {product.allergens || "Chiedi alla sede ingredienti e possibili tracce prima di ordinare."}
             </p>
           </div>
           <div className="accent-card rounded-2xl border border-ink/10 bg-white p-4">

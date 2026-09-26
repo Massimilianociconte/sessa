@@ -1,7 +1,7 @@
 import "server-only";
 import { createHmac, timingSafeEqual } from "node:crypto";
 import { cookies } from "next/headers";
-import { getAuthSecret } from "@/lib/auth/secret";
+import { getAuthSecret, getAuthSecretsForVerification } from "@/lib/auth/secret";
 
 /**
  * Cookie di sola presentazione col nome visualizzato del cliente.
@@ -14,8 +14,8 @@ import { getAuthSecret } from "@/lib/auth/secret";
 export const CUSTOMER_DISPLAY_NAME_COOKIE = "sessa_dn";
 const MAX_AGE_S = 30 * 24 * 60 * 60; // allineato alla durata sessione (30 giorni)
 
-function sign(value: string): string {
-  return createHmac("sha256", getAuthSecret()).update(value).digest("base64url");
+function sign(value: string, secret = getAuthSecret()): string {
+  return createHmac("sha256", secret).update(value).digest("base64url");
 }
 
 export async function setCustomerDisplayNameCookie(firstName: string | null): Promise<void> {
@@ -50,8 +50,11 @@ export async function readCustomerDisplayName(): Promise<string | null> {
     if (dot < 1) return null;
     const payload = raw.slice(0, dot);
     const provided = Buffer.from(raw.slice(dot + 1));
-    const expected = Buffer.from(sign(payload));
-    if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) return null;
+    const valid = getAuthSecretsForVerification().some((secret) => {
+      const expected = Buffer.from(sign(payload, secret));
+      return provided.length === expected.length && timingSafeEqual(provided, expected);
+    });
+    if (!valid) return null;
     const decoded = Buffer.from(payload, "base64url").toString("utf8").trim();
     return decoded ? decoded.slice(0, 40) : null;
   } catch {

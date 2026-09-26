@@ -14,7 +14,7 @@ import {
 import { prisma } from "@/lib/db";
 import { DomainError } from "@/lib/domain";
 import { SITE_URL } from "@/lib/site";
-import { getAuthSecret } from "@/lib/auth/secret";
+import { getAuthSecret, getAuthSecretsForVerification } from "@/lib/auth/secret";
 
 /**
  * Passkey WebAuthn (FIDO2) per gli account cliente.
@@ -29,16 +29,26 @@ const RP_NAME = "Sessa 1930";
 const CHALLENGE_COOKIE = "sessa_wa_ch";
 const CHALLENGE_TTL_S = 300;
 
+/**
+ * RP ID delle passkey: di default l'host del sito. Impostando WEBAUTHN_RP_ID
+ * sul dominio registrabile (es. "sessa1930.com") le passkey restano valide
+ * anche per sottodomini come shop.sessa1930.com e sopravvivono al cambio host.
+ * WEBAUTHN_ORIGINS (CSV) accetta più origini durante una migrazione di dominio.
+ */
 function rpId(): string {
-  return new URL(SITE_URL).hostname;
+  return process.env.WEBAUTHN_RP_ID?.trim() || new URL(SITE_URL).hostname;
 }
 
-function expectedOrigin(): string {
-  return new URL(SITE_URL).origin;
+function expectedOrigin(): string[] {
+  const extra = (process.env.WEBAUTHN_ORIGINS ?? "")
+    .split(",")
+    .map((origin) => origin.trim())
+    .filter((origin) => /^https:\/\/[a-z0-9.-]+(:\d+)?$/i.test(origin));
+  return [...new Set([new URL(SITE_URL).origin, ...extra])];
 }
 
-function sign(value: string): string {
-  return createHmac("sha256", getAuthSecret()).update(value).digest("base64url");
+function sign(value: string, secret = getAuthSecret()): string {
+  return createHmac("sha256", secret).update(value).digest("base64url");
 }
 
 function challengeStoreKey(claims: string): string {
@@ -82,10 +92,12 @@ async function consumeChallenge(purpose: "reg" | "auth", customerId?: string): P
   if (lastDot <= 0) return null;
   const claims = raw.slice(0, lastDot);
   const signature = raw.slice(lastDot + 1);
-  const expected = sign(claims);
   const a = Buffer.from(signature);
-  const b = Buffer.from(expected);
-  if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+  const signedByKnownSecret = getAuthSecretsForVerification().some((secret) => {
+    const b = Buffer.from(sign(claims, secret));
+    return a.length === b.length && timingSafeEqual(a, b);
+  });
+  if (!signedByKnownSecret) return null;
   let parsed: { purpose?: unknown; challenge?: unknown; customerId?: unknown; exp?: unknown };
   try {
     parsed = JSON.parse(Buffer.from(claims, "base64url").toString("utf8")) as typeof parsed;

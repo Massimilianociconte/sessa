@@ -1,6 +1,8 @@
 import type { Prisma, ShippingRate } from "@prisma/client";
 import { prisma } from "@/lib/db";
 
+export { allowedShippingScopes, isPostalCodeServed, type ShippingScope } from "@/lib/commerce/shipping-scope";
+
 export type QuotedRate = ShippingRate & {
   /** Costo effettivo per questo carrello (0 se scatta la soglia gratis). */
   effectiveCents: number;

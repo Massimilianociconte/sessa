@@ -7,10 +7,13 @@
 // sede). ProductVariant è la definizione del prodotto (nome, SKU, prezzo base, IVA).
 
 generator client {
-  provider      = "prisma-client-js"
+  provider        = "prisma-client-js"
+  // Include caricate con una sola query JOIN invece di N round-trip: con il DB
+  // in un'altra regione ogni round-trip costa centinaia di millisecondi.
+  previewFeatures = ["relationJoins"]
   // "rhel-openssl-3.0.x" serve alle lambda Netlify (Amazon Linux) quando la
   // build parte da macOS: senza, il query engine giusto non finisce nel bundle.
-  binaryTargets = ["native", "rhel-openssl-3.0.x"]
+  binaryTargets   = ["native", "rhel-openssl-3.0.x"]
 }
 
 datasource db {
@@ -23,35 +26,45 @@ datasource db {
 // ---------------------------------------------------------------------------
 
 model Location {
-  id                String             @id @default(cuid())
-  name              String
-  slug              String             @unique
-  city              String
-  address           String
-  province          String             @default("")
-  postalCode        String             @default("")
-  phone             String?
-  hours             String? // testo libero orari
-  image             String?
-  pickupEnabled     Boolean            @default(true)
-  deliveryEnabled   Boolean            @default(true)
-  isActive          Boolean            @default(true)
-  position          Int                @default(0)
-  merchantStoreCode String?            @unique
-  merchantEnabled   Boolean            @default(false)
-  merchantPickupSla String             @default("same day")
-  latitude          Float?
-  longitude         Float?
-  googleMapsUrl     String?
-  gbpUrl            String?
-  storeVariants     StoreVariant[]
-  carts             Cart[]
-  orders            Order[]
-  discountLinks     DiscountLocation[]
-  adminAssignments  AdminLocation[]
-  preferredBy       Customer[]         @relation("PreferredLocation")
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
+  id                       String             @id @default(cuid())
+  name                     String
+  slug                     String             @unique
+  city                     String
+  address                  String
+  province                 String             @default("")
+  postalCode               String             @default("")
+  phone                    String?
+  hours                    String? // testo libero orari
+  image                    String?
+  pickupEnabled            Boolean            @default(true)
+  deliveryEnabled          Boolean            @default(true)
+  isActive                 Boolean            @default(true)
+  position                 Int                @default(0)
+  merchantStoreCode        String?            @unique
+  merchantEnabled          Boolean            @default(false)
+  merchantPickupSla        String             @default("same day")
+  latitude                 Float?
+  longitude                Float?
+  googleMapsUrl            String?
+  gbpUrl                   String?
+  // Orari strutturati per le fasce di ritiro/consegna (JSON: {"mon":[["06:30","21:00"]],...}).
+  // null = non configurato: il checkout usa un orario prudente e la checklist lo segnala.
+  openingHours             String?
+  closedDates              String             @default("") // CSV di date YYYY-MM-DD (ferie, festivita)
+  leadTimeMinutes          Int                @default(120) // anticipo minimo tra ordine e ritiro/consegna
+  slotMinutes              Int                @default(30)
+  slotCapacity             Int                @default(0) // ordini massimi per fascia, 0 = illimitati
+  maxAdvanceDays           Int                @default(60)
+  notificationEmail        String? // riceve un avviso per ogni nuovo ordine della sede
+  localDeliveryPostalCodes String             @default("") // CSV di CAP o prefissi serviti dalla consegna del fresco
+  storeVariants            StoreVariant[]
+  carts                    Cart[]
+  orders                   Order[]
+  discountLinks            DiscountLocation[]
+  adminAssignments         AdminLocation[]
+  preferredBy              Customer[]         @relation("PreferredLocation")
+  createdAt                DateTime           @default(now())
+  updatedAt                DateTime           @updatedAt
 
   @@index([isActive, position])
 }
@@ -93,6 +106,9 @@ model Product {
   merchantTitle         String?
   merchantDescription   String?
   googleProductCategory String?
+  leadTimeHours         Int               @default(0) // preparazione minima (es. torte su ordinazione)
+  storageInfo           String            @default("") // modalita di conservazione (Reg. UE 1169/2011)
+  shippingScope         String            @default("LOCAL") // LOCAL = fresco, solo ritiro/consegna locale; NATIONAL = spedibile
   categoryId            String?
   category              Category?         @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   variants              ProductVariant[]
@@ -211,14 +227,15 @@ model Cart {
 }
 
 model CartItem {
-  id             String       @id @default(cuid())
-  cartId         String
-  cart           Cart         @relation(fields: [cartId], references: [id], onDelete: Cascade)
-  storeVariantId String
-  storeVariant   StoreVariant @relation(fields: [storeVariantId], references: [id], onDelete: Cascade)
-  qty            Int
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  id                String       @id @default(cuid())
+  cartId            String
+  cart              Cart         @relation(fields: [cartId], references: [id], onDelete: Cascade)
+  storeVariantId    String
+  storeVariant      StoreVariant @relation(fields: [storeVariantId], references: [id], onDelete: Cascade)
+  qty               Int
+  unitCentsSnapshot Int? // prezzo mostrato al cliente: serve a segnalare le variazioni
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
 
   @@unique([cartId, storeVariantId])
   @@index([storeVariantId])
@@ -229,43 +246,47 @@ model CartItem {
 // ---------------------------------------------------------------------------
 
 model Customer {
-  id                   String               @id @default(cuid())
-  email                String               @unique
-  firstName            String
-  lastName             String
-  phone                String?
-  notes                String?
-  marketingOptIn       Boolean              @default(false)
-  passwordHash         String? // null = ospite (checkout senza registrazione)
-  emailVerified        Boolean              @default(false)
-  referralCode         String?              @unique
+  id                      String               @id @default(cuid())
+  email                   String               @unique
+  firstName               String
+  lastName                String
+  phone                   String?
+  notes                   String?
+  marketingOptIn          Boolean              @default(false)
+  // Prova del consenso (GDPR art. 7.1): quando, da dove, con quale informativa.
+  marketingConsentAt      DateTime?
+  marketingConsentSource  String?
+  marketingConsentVersion String?
+  passwordHash            String? // null = ospite (checkout senza registrazione)
+  emailVerified           Boolean              @default(false)
+  referralCode            String?              @unique
   // Preferenze effettive (usate da checkout/header; fallback: inferenza da ultimo ordine)
-  preferredLocationId  String?
-  preferredLocation    Location?            @relation("PreferredLocation", fields: [preferredLocationId], references: [id], onDelete: SetNull)
-  preferredFulfillment String? // PICKUP | DELIVERY
-  birthday             DateTime?
+  preferredLocationId     String?
+  preferredLocation       Location?            @relation("PreferredLocation", fields: [preferredLocationId], references: [id], onDelete: SetNull)
+  preferredFulfillment    String? // PICKUP | DELIVERY
+  birthday                DateTime?
   // Account anonimizzato (GDPR): dati personali rimossi, ordini snapshot conservati
-  anonymizedAt         DateTime?
+  anonymizedAt            DateTime?
   // 2FA TOTP (RFC 6238): secret base32; enabledAt null = non attiva (secret in attesa di conferma)
-  totpSecret           String?
-  totpEnabledAt        DateTime?
-  totpLastStep         Int? // anti-replay: ultimo time-step accettato
-  backupCodes          CustomerBackupCode[]
-  passkeys             CustomerPasskey[]
-  orders               Order[]
-  addresses            Address[]
-  sessions             CustomerSession[]
-  resetTokens          PasswordResetToken[]
-  actionTokens         CustomerToken[]
-  redemptions          DiscountRedemption[]
-  reservedDiscounts    DiscountCode[]       @relation("ReservedDiscounts")
-  giftCards            GiftCard[]
-  carts                Cart[]
-  returnRequests       ReturnRequest[]
-  referralsMade        Referral[]           @relation("Referrer")
-  referralUsed         Referral?            @relation("Invited")
-  createdAt            DateTime             @default(now())
-  updatedAt            DateTime             @updatedAt
+  totpSecret              String?
+  totpEnabledAt           DateTime?
+  totpLastStep            Int? // anti-replay: ultimo time-step accettato
+  backupCodes             CustomerBackupCode[]
+  passkeys                CustomerPasskey[]
+  orders                  Order[]
+  addresses               Address[]
+  sessions                CustomerSession[]
+  resetTokens             PasswordResetToken[]
+  actionTokens            CustomerToken[]
+  redemptions             DiscountRedemption[]
+  reservedDiscounts       DiscountCode[]       @relation("ReservedDiscounts")
+  giftCards               GiftCard[]
+  carts                   Cart[]
+  returnRequests          ReturnRequest[]
+  referralsMade           Referral[]           @relation("Referrer")
+  referralUsed            Referral?            @relation("Invited")
+  createdAt               DateTime             @default(now())
+  updatedAt               DateTime             @updatedAt
 
   @@index([createdAt])
   @@index([marketingOptIn])
@@ -328,6 +349,23 @@ model CustomerToken {
   createdAt  DateTime  @default(now())
 
   @@index([customerId, type])
+  @@index([expiresAt])
+}
+
+// Registrazione in attesa di conferma: nessun Customer viene creato finche il
+// proprietario dell'email non apre il link e sceglie la password.
+model RegistrationRequest {
+  id        String    @id @default(cuid())
+  tokenHash String    @unique
+  email     String
+  firstName String
+  lastName  String
+  phone     String?
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([email, createdAt])
   @@index([expiresAt])
 }
 
@@ -468,6 +506,13 @@ model Order {
   trackingCode              String?
   stockReservationExpiresAt DateTime?
   stockReleasedAt           DateTime?
+  paymentReminderSentAt     DateTime?
+
+  // Fattura (B2B/regali aziendali) e accettazione condizioni di vendita.
+  invoiceRequested Boolean   @default(false)
+  invoiceData      String? // JSON: ragione sociale, P.IVA/CF, SDI/PEC, indirizzo
+  termsAcceptedAt  DateTime?
+  termsVersion     String?
 
   items              OrderItem[]
   events             OrderEvent[]
@@ -608,17 +653,17 @@ model CheckoutNonce {
 }
 
 model ReturnRequest {
-  id           String    @id @default(cuid())
-  orderId      String
-  order        Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  customerId   String?
-  customer     Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
-  reason       String
-  status       String    @default("REQUESTED") // REQUESTED | APPROVED | REJECTED | REFUNDED
-  refundCents  Int?
-  adminNote    String?
-  createdAt    DateTime  @default(now())
-  resolvedAt   DateTime?
+  id          String    @id @default(cuid())
+  orderId     String
+  order       Order     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  customerId  String?
+  customer    Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  reason      String
+  status      String    @default("REQUESTED") // REQUESTED | APPROVED | REJECTED | REFUNDED
+  refundCents Int?
+  adminNote   String?
+  createdAt   DateTime  @default(now())
+  resolvedAt  DateTime?
 
   @@index([orderId, createdAt])
   @@index([status, createdAt])
@@ -798,8 +843,10 @@ model ShippingRate {
   name           String
   amountCents    Int
   freeAboveCents Int?
-  position       Int          @default(0)
-  isActive       Boolean      @default(true)
+  scope          String       @default("NATIONAL") // LOCAL = consegna del fresco nei CAP della sede
+
+  position Int     @default(0)
+  isActive Boolean @default(true)
 
   @@index([zoneId, isActive, position])
 }

@@ -121,7 +121,7 @@ export default async function StoreCategoryPage({ params }: Props) {
               </h1>
               <p className="catalog-hero-description mt-4 max-w-2xl text-sm leading-6 text-ink/65 md:text-base md:leading-7">
                 {category.description ?? `Scopri la selezione ${category.name} disponibile nella sede ${seo.name}.`} Prezzi,
-                varianti e disponibilita sono aggiornati per questo punto vendita.
+                varianti e disponibilità sono aggiornati per questo punto vendita.
               </p>
               <div className="mt-5 flex flex-wrap gap-2">
                 <span className="badge bg-white/75 text-ink/65">{categoryProducts.length} prodotti</span>
@@ -178,7 +178,7 @@ export default async function StoreCategoryPage({ params }: Props) {
           </h2>
           <p className="mt-4 max-w-3xl text-base leading-7 text-ink/70">
             Questa selezione appartiene al catalogo ecommerce di {seo.name}. Ogni prodotto mostrato e associato alla
-            sede, cosi disponibilita, formati e modalita di ritiro o consegna restano coerenti fino al checkout.
+            sede, così disponibilità, formati e modalità di ritiro o consegna restano coerenti fino al checkout.
           </p>
         </section>
       </main>

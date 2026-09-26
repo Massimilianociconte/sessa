@@ -3,6 +3,7 @@ import {
   resolveOperationalEventAction,
   retryEmailAction,
   runAbandonedCartWorkerAction,
+  runMaintenanceAction,
   runEmailWorkerAction,
   runStockReservationWorkerAction
 } from "@/lib/actions/admin/operations";
@@ -49,7 +50,7 @@ export default async function ObservabilityPage({
     <>
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-terracotta">Controllo operativo</p><h1 className="mt-1 font-serif text-3xl font-semibold">Osservabilità</h1><p className="mt-1 max-w-2xl text-sm text-ink/55">Errori aggregati, coda email, webhook da riconciliare e prenotazioni stock in scadenza, senza token o dati sensibili nei log.</p></div>
-        <div className="flex flex-wrap gap-2"><form action={runEmailWorkerAction}><button type="submit" className="btn-secondary">Esegui coda email</button></form><form action={runAbandonedCartWorkerAction}><button type="submit" className="btn-secondary">Avvisa carrelli abbandonati</button></form><form action={runStockReservationWorkerAction}><button type="submit" className="btn-primary">Verifica prenotazioni</button></form></div>
+        <div className="flex flex-wrap gap-2"><form action={runEmailWorkerAction}><button type="submit" className="btn-secondary">Esegui coda email</button></form><form action={runAbandonedCartWorkerAction}><button type="submit" className="btn-secondary">Avvisa carrelli abbandonati</button></form><form action={runStockReservationWorkerAction}><button type="submit" className="btn-primary">Verifica prenotazioni</button></form><form action={runMaintenanceAction}><button type="submit" className="btn-secondary">Manutenzione dati</button></form></div>
       </div>
       <div className="mt-4"><Flash msg={msg} err={err} /></div>
 

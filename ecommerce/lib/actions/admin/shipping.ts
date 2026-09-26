@@ -14,7 +14,7 @@ export async function createShippingRateAction(formData: FormData): Promise<void
   const user = await requireAdminCapability("settings:manage");
   const parsed = shippingRateSchema.safeParse({
     ...formDataToObject(formData),
-    isActive: formData.get("isActive") !== "off"
+    isActive: true
   });
   if (!parsed.success) backWithError(PATH, firstZodMessage(parsed.error));
 
@@ -34,7 +34,8 @@ export async function createShippingRateAction(formData: FormData): Promise<void
       amountCents,
       freeAboveCents,
       position: parsed.data.position,
-      isActive: parsed.data.isActive
+      isActive: parsed.data.isActive,
+      scope: parsed.data.scope
     }
   });
   await audit(user.email, "shipping.rate.create", "ShippingRate", rate.id, parsed.data);
@@ -67,7 +68,8 @@ export async function updateShippingRateAction(formData: FormData): Promise<void
       amountCents,
       freeAboveCents,
       position: parsed.data.position,
-      isActive: parsed.data.isActive
+      isActive: parsed.data.isActive,
+      scope: parsed.data.scope
     }
   });
   await audit(user.email, "shipping.rate.update", "ShippingRate", id, parsed.data);

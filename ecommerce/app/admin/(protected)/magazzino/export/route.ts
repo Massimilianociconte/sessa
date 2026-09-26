@@ -1,6 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { adminLocationScope, getSessionUser } from "@/lib/auth/session";
-import { hasAdminCapability } from "@/lib/auth/admin-authorization";
+import { adminLocationScope, authorizeAdminRoute } from "@/lib/auth/session";
 import { formatCents } from "@/lib/money";
 import { effectivePrice } from "@/lib/services/catalog";
 import { listInventory } from "@/lib/services/inventory";
@@ -11,11 +10,9 @@ export const dynamic = "force-dynamic";
 
 /** Export CSV dello stock per sede (rispetta i filtri correnti della pagina magazzino). */
 export async function GET(request: NextRequest) {
-  const user = await getSessionUser();
-  if (!user) return NextResponse.json({ error: "Non autorizzato" }, { status: 401 });
-  if (!hasAdminCapability(user.role, "exports:download")) {
-    return NextResponse.json({ error: "Permessi insufficienti" }, { status: 403 });
-  }
+  const auth = await authorizeAdminRoute("exports:download");
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
+  const user = auth.user;
 
   const params = request.nextUrl.searchParams;
   const rows = await listInventory({

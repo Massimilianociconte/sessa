@@ -1,6 +1,8 @@
+import { cookies } from "next/headers";
 import { notFound } from "next/navigation";
+import { resolveOrderToken } from "@/lib/order-access";
 import { formatCents } from "@/lib/money";
-import { formatRomeDateTime } from "@/lib/datetime";
+import { formatRomeAppointment, formatRomeDateTime } from "@/lib/datetime";
 import { getOrderForTracking } from "@/lib/services/orders";
 import { FULFILLMENT_LABELS, type FulfillmentType } from "@/lib/domain";
 
@@ -14,9 +16,11 @@ export default async function OrderReceiptPage({
   params: Promise<{ code: string }>;
   searchParams: Promise<{ t?: string }>;
 }) {
-  const [{ code }, { t }] = await Promise.all([params, searchParams]);
-  if (!t) notFound();
-  const order = await getOrderForTracking(code, t);
+  const [{ code: rawCode }, { t }, cookieStore] = await Promise.all([params, searchParams, cookies()]);
+  const code = decodeURIComponent(rawCode);
+  const token = resolveOrderToken(code, t, (name) => cookieStore.get(name)?.value);
+  if (!token) notFound();
+  const order = await getOrderForTracking(code, token);
   if (!order) notFound();
 
   return (
@@ -27,7 +31,7 @@ export default async function OrderReceiptPage({
       <dl className="mt-6 grid gap-2 text-sm">
         <div><dt className="font-semibold">Sede</dt><dd>{order.locationName}</dd></div>
         <div><dt className="font-semibold">Cliente</dt><dd>{order.email}</dd></div>
-        <div><dt className="font-semibold">Evasione</dt><dd>{FULFILLMENT_LABELS[order.fulfillmentType as FulfillmentType]}</dd></div>
+        <div><dt className="font-semibold">Evasione</dt><dd>{FULFILLMENT_LABELS[order.fulfillmentType as FulfillmentType]}{order.fulfillmentAt ? ` · ${formatRomeAppointment(order.fulfillmentAt)}` : ""}</dd></div>
       </dl>
       <ul className="mt-6 divide-y divide-ink/10 border-y border-ink/10">
         {order.items.map((item) => (
@@ -42,7 +46,8 @@ export default async function OrderReceiptPage({
         {order.discountCents > 0 && <p className="flex justify-between"><span>Sconto</span><span>−{formatCents(order.discountCents)}</span></p>}
         {order.giftCardCents > 0 && <p className="flex justify-between"><span>Gift card</span><span>−{formatCents(order.giftCardCents)}</span></p>}
         <p className="flex justify-between"><span>Spedizione</span><span>{formatCents(order.shippingCents)}</span></p>
-        <p className="flex justify-between font-semibold"><span>Totale</span><span>{formatCents(order.totalCents)}</span></p>
+        <p className="flex justify-between font-semibold"><span>Totale (IVA inclusa)</span><span>{formatCents(order.totalCents)}</span></p>
+        <p className="flex justify-between text-ink/60"><span>di cui IVA</span><span>{formatCents(order.taxCents)}</span></p>
         {order.refundedCents > 0 && <p className="flex justify-between text-terracotta"><span>Rimborsato</span><span>−{formatCents(order.refundedCents)}</span></p>}
       </div>
       <p className="mt-8 text-xs text-ink/45">Documento informativo dello shop. Non sostituisce una fattura elettronica se dovuta.</p>

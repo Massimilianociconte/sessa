@@ -7,7 +7,7 @@ import {
   verifyTotpCode
 } from "@/lib/auth/totp";
 import { enqueueEmail } from "@/lib/services/email";
-import { BACKUP_CODES_COUNT, hashBackupCode, legacyBackupCodeHash } from "@/lib/auth/two-factor-credentials";
+import { BACKUP_CODES_COUNT, backupCodeHashCandidates, hashBackupCode } from "@/lib/auth/two-factor-credentials";
 import {
   decryptSensitiveValue,
   encryptSensitiveValue,
@@ -177,7 +177,7 @@ export async function verifySecondFactor(customerId: string, code: string): Prom
   const matched = await prisma.customerBackupCode.findFirst({
     where: {
       customerId,
-      codeHash: { in: [hashBackupCode(code), legacyBackupCodeHash(code)] },
+      codeHash: { in: backupCodeHashCandidates(code) },
       usedAt: null
     },
     select: { id: true, codeHash: true }
@@ -188,7 +188,8 @@ export async function verifySecondFactor(customerId: string, code: string): Prom
     data: { usedAt: new Date() }
   });
   if (consumed.count !== 1) return false;
-  if (matched.codeHash === legacyBackupCodeHash(code)) {
+  // Hash legacy o del segreto precedente: si aggiorna al segreto corrente.
+  if (matched.codeHash !== hashBackupCode(code)) {
     await prisma.customerBackupCode
       .update({
         where: { id: matched.id },

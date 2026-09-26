@@ -5,13 +5,16 @@ import CartRefreshBeacon from "@/components/storefront/CartRefreshBeacon";
 import Footer from "@/components/storefront/Footer";
 import Header from "@/components/storefront/Header";
 import { getSessionCustomer } from "@/lib/auth/customer-session";
-import { checkoutScheduleBounds } from "@/lib/datetime";
+import { earliestDateAfterBusinessDays } from "@/lib/commerce/scheduling";
 import { formatCents } from "@/lib/money";
 import { isStripeConfigured } from "@/lib/payments";
 import { applyGiftCardAction, removeGiftCardAction } from "@/lib/actions/cart";
 import { getCartGiftCard } from "@/lib/services/cart";
 import { getCurrentCartView } from "@/lib/services/cart-session";
+import { getCheckoutPolicy } from "@/lib/services/commerce-settings";
 import { getEffectiveFulfillmentPreference, listAddresses } from "@/lib/services/customer-account";
+import { getSlotOptions, productLeadMinutes } from "@/lib/services/fulfillment-slots";
+import { checkoutBlockedReason } from "@/lib/services/launch-readiness";
 import { quoteRatesForCountry } from "@/lib/services/shipping";
 
 export const dynamic = "force-dynamic";
@@ -25,24 +28,45 @@ export default async function CheckoutPage({
 }) {
   const [{ err }, view] = await Promise.all([searchParams, getCurrentCartView()]);
   if (!view || view.lines.length === 0) redirect("/carrello");
+  // Righe esaurite o non più vendibili: si decide nel carrello, non al pagamento.
+  if (view.unavailableLines.length > 0) redirect("/carrello?err=Rimuovi%20i%20prodotti%20non%20disponibili%20per%20procedere.");
+
+  const storeClosed = await checkoutBlockedReason();
+  if (storeClosed) {
+    return (
+      <>
+        <Header />
+        <main className="mx-auto max-w-2xl px-4 py-16 text-center">
+          <h1 className="font-serif text-4xl font-semibold">Ordini online in arrivo</h1>
+          <p className="mt-4 text-ink/65">{storeClosed}</p>
+          <Link href="/carrello" className="btn-secondary mt-8">Torna al carrello</Link>
+        </main>
+        <Footer />
+      </>
+    );
+  }
 
   const location = view.cart.location;
+  const now = new Date();
+  const products = view.cart.items.map((item) => item.storeVariant.variant.product);
   const discounted = view.subtotalCents - view.discountCents;
-  const [quoted, customer] = await Promise.all([
+  const [quoted, customer, policy, slotOptions] = await Promise.all([
     location.deliveryEnabled ? quoteRatesForCountry("IT", discounted) : Promise.resolve([]),
-    getSessionCustomer()
+    getSessionCustomer(),
+    getCheckoutPolicy(),
+    getSlotOptions(location, productLeadMinutes(products), now)
   ]);
   const rates: CheckoutRate[] = quoted.map((r) => ({
     id: r.id,
     name: r.name,
-    effectiveCents: r.effectiveCents
+    effectiveCents: r.effectiveCents,
+    scope: r.scope === "LOCAL" ? "LOCAL" : "NATIONAL"
   }));
   const [addresses, fulfillmentPreference] = customer
     ? await Promise.all([listAddresses(customer.id), getEffectiveFulfillmentPreference(customer.id)])
     : [[] as SavedAddress[], null];
   const cartGiftCard = await getCartGiftCard(view.cart, customer?.id);
   const giftCard = cartGiftCard && cartGiftCard.valid ? { code: cartGiftCard.code, balanceCents: cartGiftCard.balanceCents } : null;
-  const { minWhen, defaultWhen } = checkoutScheduleBounds();
 
   return (
     <>
@@ -86,7 +110,7 @@ export default async function CheckoutPage({
         <section className="card mb-6 space-y-3 p-5">
           <h2 className="font-serif text-xl font-semibold">Gift card</h2>
           <p className="text-sm text-ink/60">
-            Il credito si stacca dal totale. Se copre tutto, non serve un altro pagamento. Se copre in parte, scegli carta, bonifico o pagamento al ritiro per il resto.
+            Il credito si stacca dal totale. Se copre tutto, non serve un altro pagamento. Se copre in parte, scegli come pagare il resto.
           </p>
           {giftCard ? (
             <form action={removeGiftCardAction} className="flex flex-wrap items-center justify-between gap-3">
@@ -99,7 +123,8 @@ export default async function CheckoutPage({
           ) : (
             <form action={applyGiftCardAction} className="flex flex-col gap-3 sm:flex-row">
               <input type="hidden" name="next" value="checkout" />
-              <input name="giftCardCode" className="input-field" placeholder="GIFT-XXXX" autoComplete="off" />
+              <label htmlFor="giftCardCode" className="sr-only">Codice gift card</label>
+              <input id="giftCardCode" name="giftCardCode" className="input-field" placeholder="GIFT-XXXX" autoComplete="off" />
               <button type="submit" className="btn-secondary shrink-0">Applica credito</button>
             </form>
           )}
@@ -116,8 +141,11 @@ export default async function CheckoutPage({
             address: location.address,
             city: location.city,
             pickupEnabled: location.pickupEnabled,
-            deliveryEnabled: location.deliveryEnabled
+            deliveryEnabled: location.deliveryEnabled,
+            localDeliveryPostalCodes: location.localDeliveryPostalCodes
           }}
+          allItemsShippable={products.every((product) => product.shippingScope === "NATIONAL")}
+          slotDays={slotOptions.days}
           items={view.lines.map((line) => ({
             productId: line.productId,
             productName: line.productName,
@@ -133,8 +161,14 @@ export default async function CheckoutPage({
           addresses={addresses}
           giftCard={giftCard}
           stripeEnabled={isStripeConfigured()}
-          minWhen={minWhen}
-          defaultWhen={defaultWhen}
+          payment={{
+            cashMaxCents: policy.cashMaxCents,
+            cashMaxAdvanceMs: policy.cashMaxAdvanceDays * 24 * 60 * 60_000,
+            cashMaxAdvanceDays: policy.cashMaxAdvanceDays,
+            bankEarliestDateKey: earliestDateAfterBusinessDays(now, policy.bankTransferMinBusinessDays),
+            bankMinBusinessDays: policy.bankTransferMinBusinessDays
+          }}
+          nowMs={now.getTime()}
           preferredFulfillment={
             fulfillmentPreference === "PICKUP" || fulfillmentPreference === "DELIVERY"
               ? fulfillmentPreference

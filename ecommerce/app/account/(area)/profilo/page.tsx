@@ -34,7 +34,7 @@ export default async function AccountProfilePage({
       <AccountInfoGrid>
         <AccountInfoTile label="Email" value={customer.emailVerified ? "Verificata" : "Da verificare"} description={customer.email} tone="ceramic" />
         <AccountInfoTile label="Telefono" value={customer.phone ? "Presente" : "Mancante"} description={customer.phone ?? "Aggiungilo per consegne e contatti sede."} tone="terracotta" />
-        <AccountInfoTile label="Newsletter" value={customer.marketingOptIn ? "Attiva" : "Non attiva"} description="Promozioni locali, ricorrenze e novita Sessa." tone="brilliant" />
+        <AccountInfoTile label="Newsletter" value={customer.marketingOptIn ? "Attiva" : "Non attiva"} description="Promozioni locali, ricorrenze e novità Sessa." tone="brilliant" />
       </AccountInfoGrid>
 
       <AccountPanel
@@ -64,7 +64,7 @@ export default async function AccountProfilePage({
           </div>
           <label className="flex items-center gap-2 text-sm text-ink/70">
             <input type="checkbox" name="marketingOptIn" defaultChecked={customer.marketingOptIn} className="accent-terracotta" />
-            Voglio ricevere novita, promozioni locali e comunicazioni Sessa.
+            Voglio ricevere novità, promozioni locali e comunicazioni Sessa.
           </label>
           <button type="submit" className="btn-primary">Salva dati</button>
         </form>

@@ -5,20 +5,42 @@
  * Prezzo e stock vivono su StoreVariant (per sede). ProductVariant tiene il
  * prezzo base; ogni sede pubblica il proprio assortimento.
  */
+import "dotenv/config";
 import { PrismaClient } from "@prisma/client";
-import { randomBytes, scryptSync } from "node:crypto";
+import { assertDatabaseTargetAllowed } from "../lib/db-guard";
+import { hashPassword } from "../lib/auth/password";
+
+// Il seed crea fixture demo: mai contro un DB remoto per errore dal .env locale.
+assertDatabaseTargetAllowed(process.env.DATABASE_URL);
 
 const prisma = new PrismaClient();
 
-function getSeedPassword(envKey: string, fallback: string): string {
-  return process.env[envKey] ?? fallback;
+/**
+ * Nessuna password di fallback nel codice (il repository e pubblico): senza
+ * variabile esplicita e robusta le fixture con credenziali non vengono create.
+ */
+function getSeedPassword(envKey: string): string | null {
+  const value = process.env[envKey]?.trim();
+  if (!value) return null;
+  if (value.length < 12) throw new Error(`${envKey} deve avere almeno 12 caratteri.`);
+  return value;
 }
 
-function hashPassword(password: string): string {
-  const salt = randomBytes(16).toString("hex");
-  const hash = scryptSync(password, salt, 64, { N: 16384, r: 8, p: 1 }).toString("hex");
-  return `scrypt$16384$8$1$${salt}$${hash}`;
+// Orari strutturati per le fasce di ritiro (stessi valori della migrazione 0011).
+function weekly(open: string, close: string, closedDays: string[] = []): string {
+  const days = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+  return JSON.stringify(Object.fromEntries(days.map((day) => [day, closedDays.includes(day) ? [] : [[open, close]]])));
 }
+const OPENING_HOURS: Record<string, string> = {
+  ottaviano: weekly("06:30", "21:00", ["tue"]),
+  torino: weekly("07:00", "24:00"),
+  milano: weekly("07:00", "24:00"),
+  firenze: weekly("07:00", "24:00"),
+  roma: weekly("07:00", "24:00"),
+  "merlata-bloom": weekly("09:00", "23:00"),
+  "roma-termini": weekly("06:00", "23:00")
+};
+
 
 // --- Sedi ufficiali Sessa 1930 (dal sito e da Mercato Centrale) ---
 const locations = [
@@ -129,6 +151,19 @@ const products: ProductSeed[] = [
   }
 ];
 
+// Conservazione (Reg. UE 1169/2011 art. 25): testi di esempio per i database
+// nuovi, da far validare al laboratorio. Solo in creazione: non sovrascrive
+// mai quanto inserito dal gestionale.
+const storageBySlug: Record<string, string> = {
+  "colomba-artigianale-1kg": "Conservare in luogo fresco e asciutto, lontano da fonti di calore. Consumare entro la data indicata in confezione.",
+  "panettone-sessa-1kg": "Conservare in luogo fresco e asciutto, lontano da fonti di calore. Consumare entro la data indicata in confezione.",
+  "panettone-sessa-500gr": "Conservare in luogo fresco e asciutto, lontano da fonti di calore. Consumare entro la data indicata in confezione.",
+  sfogliatelle: "Prodotto fresco: conservare in frigorifero e consumare entro 24 ore. Ottime scaldate qualche minuto in forno.",
+  babba: "Prodotto fresco: conservare in frigorifero e consumare entro 2 giorni.",
+  caprese: "Conservare in luogo fresco e asciutto e consumare entro 4 giorni.",
+  "delizia-al-limone": "Prodotto fresco con crema e panna: conservare in frigorifero (0-4 °C) e consumare entro 24 ore."
+};
+
 // Allergeni/ingredienti per slug (obbligo per alimenti).
 const productExtra: Record<string, { allergens: string; ingredients: string }> = {
   "colomba-artigianale-1kg": { allergens: "Glutine, uova, latte, frutta a guscio", ingredients: "Farina di grano tenero, uova, burro, zucchero, canditi, lievito madre" },
@@ -149,12 +184,8 @@ async function main() {
     );
   }
   const includeDemoFixtures = !isProduction && process.env.SEED_DEMO_FIXTURES !== "0";
-  const adminPassword = includeDemoFixtures
-    ? getSeedPassword("SEED_ADMIN_PASSWORD", "sessa1930!admin")
-    : null;
-  const customerPassword = includeDemoFixtures
-    ? getSeedPassword("SEED_CUSTOMER_PASSWORD", "cliente1930!")
-    : null;
+  const adminPassword = includeDemoFixtures ? getSeedPassword("SEED_ADMIN_PASSWORD") : null;
+  const customerPassword = includeDemoFixtures ? getSeedPassword("SEED_CUSTOMER_PASSWORD") : null;
 
   // Sedi
   const locationIds = new Map<string, string>();
@@ -162,8 +193,11 @@ async function main() {
     const row = await prisma.location.upsert({
       where: { slug: l.slug },
       update: { name: l.name, city: l.city, address: l.address, province: l.province, postalCode: l.postalCode, hours: l.hours, pickupEnabled: l.pickupEnabled, deliveryEnabled: l.deliveryEnabled, isActive: (l as { isActive?: boolean }).isActive ?? true, position: l.position },
-      create: { name: l.name, slug: l.slug, city: l.city, address: l.address, province: l.province, postalCode: l.postalCode, hours: l.hours, pickupEnabled: l.pickupEnabled, deliveryEnabled: l.deliveryEnabled, isActive: (l as { isActive?: boolean }).isActive ?? true, position: l.position }
+      create: { name: l.name, slug: l.slug, city: l.city, address: l.address, province: l.province, postalCode: l.postalCode, hours: l.hours, pickupEnabled: l.pickupEnabled, deliveryEnabled: l.deliveryEnabled, isActive: (l as { isActive?: boolean }).isActive ?? true, position: l.position, openingHours: OPENING_HOURS[l.slug] ?? null }
     });
+    if (!row.openingHours && OPENING_HOURS[l.slug]) {
+      await prisma.location.update({ where: { id: row.id }, data: { openingHours: OPENING_HOURS[l.slug] } });
+    }
     locationIds.set(l.slug, row.id);
   }
 
@@ -183,10 +217,12 @@ async function main() {
   for (const p of products) {
     const { variants, categorySlug, onlyLocations, ...data } = p;
     const extra = productExtra[p.slug] ?? { allergens: "", ingredients: "" };
+    // Solo i lievitati confezionati sono spedibili: il fresco resta locale.
+    const shippingScope = categorySlug === "box-regalo" ? "NATIONAL" : "LOCAL";
     const product = await prisma.product.upsert({
       where: { slug: p.slug },
       update: { ...data, ...extra, categoryId: categoryIds.get(categorySlug) },
-      create: { ...data, ...extra, categoryId: categoryIds.get(categorySlug) }
+      create: { ...data, ...extra, shippingScope, storageInfo: storageBySlug[p.slug] ?? "", categoryId: categoryIds.get(categorySlug) }
     });
 
     const sellIn = onlyLocations ?? activeLocationSlugs;
@@ -230,47 +266,64 @@ async function main() {
   if ((await prisma.shippingRate.count({ where: { zoneId: zone.id } })) === 0) {
     await prisma.shippingRate.createMany({
       data: [
-        { zoneId: zone.id, name: "Standard 48/72h", amountCents: 990, freeAboveCents: 6900, position: 0 },
-        { zoneId: zone.id, name: "Espresso 24h", amountCents: 1490, position: 1 }
+        { zoneId: zone.id, name: "Standard 48/72h", amountCents: 990, freeAboveCents: 6900, position: 0, scope: "NATIONAL" },
+        { zoneId: zone.id, name: "Espresso 24h", amountCents: 1490, position: 1, scope: "NATIONAL" }
       ]
     });
   }
 
-  // Sconti granulari d'esempio
-  const babba = await prisma.product.findUnique({ where: { slug: "babba" } });
-  const boxRegalo = categoryIds.get("box-regalo")!;
-  const merlata = locationIds.get("merlata-bloom")!;
+  // Codici sconto d'esempio: SOLO fixture locali. In produzione i codici si
+  // creano dal gestionale con limiti e scadenze decisi dal negozio.
+  if (includeDemoFixtures) {
+    const babba = await prisma.product.findUnique({ where: { slug: "babba" } });
+    const boxRegalo = categoryIds.get("box-regalo")!;
+    const merlata = locationIds.get("merlata-bloom")!;
 
-  // BENVENUTO10 — 10% ovunque, min 20€, 1 volta per cliente
-  await prisma.discountCode.upsert({
-    where: { code: "BENVENUTO10" },
-    update: {},
-    create: { code: "BENVENUTO10", description: "10% sul primo ordine", type: "PERCENT", value: 1000, scope: "ALL", minSubtotalCents: 2000, perUserLimit: 1 }
-  });
-  // CINQUEEURO — 5€ su ordini > 30€
-  await prisma.discountCode.upsert({
-    where: { code: "CINQUEEURO" },
-    update: {},
-    create: { code: "CINQUEEURO", description: "5€ su ordini oltre 30€", type: "FIXED", value: 500, scope: "ALL", minSubtotalCents: 3000 }
-  });
-  // BABAMERLATA15 — 15% sui babà della sede Merlata Bloom
-  if (babba) {
-    const d = await prisma.discountCode.upsert({
-      where: { code: "BABAMERLATA15" },
+    // BENVENUTO10 — 10% ovunque, min 20€, 1 volta per cliente
+    await prisma.discountCode.upsert({
+      where: { code: "BENVENUTO10" },
       update: {},
-      create: { code: "BABAMERLATA15", description: "15% sui babà — solo Merlata Bloom", type: "PERCENT", value: 1500, scope: "PRODUCTS" }
+      create: { code: "BENVENUTO10", description: "10% sul primo ordine", type: "PERCENT", value: 1000, scope: "ALL", minSubtotalCents: 2000, perUserLimit: 1 }
     });
-    await prisma.discountLocation.upsert({ where: { discountId_locationId: { discountId: d.id, locationId: merlata } }, update: {}, create: { discountId: d.id, locationId: merlata } });
-    await prisma.discountProduct.upsert({ where: { discountId_productId: { discountId: d.id, productId: babba.id } }, update: {}, create: { discountId: d.id, productId: babba.id } });
-  }
-  // BOXREGALO20 — 20% sulla categoria Box Regalo
-  const dc = await prisma.discountCode.upsert({
-    where: { code: "BOXREGALO20" },
-    update: {},
-    create: { code: "BOXREGALO20", description: "20% sulla categoria Box Regalo", type: "PERCENT", value: 2000, scope: "CATEGORIES" }
-  });
-  await prisma.discountCategory.upsert({ where: { discountId_categoryId: { discountId: dc.id, categoryId: boxRegalo } }, update: {}, create: { discountId: dc.id, categoryId: boxRegalo } });
+    // CINQUEEURO — 5€ su ordini > 30€
+    await prisma.discountCode.upsert({
+      where: { code: "CINQUEEURO" },
+      update: {},
+      create: { code: "CINQUEEURO", description: "5€ su ordini oltre 30€", type: "FIXED", value: 500, scope: "ALL", minSubtotalCents: 3000 }
+    });
+    // BABAMERLATA15 — 15% sui babà della sede Merlata Bloom
+    if (babba) {
+      const d = await prisma.discountCode.upsert({
+        where: { code: "BABAMERLATA15" },
+        update: {},
+        create: { code: "BABAMERLATA15", description: "15% sui babà — solo Merlata Bloom", type: "PERCENT", value: 1500, scope: "PRODUCTS" }
+      });
+      await prisma.discountLocation.upsert({ where: { discountId_locationId: { discountId: d.id, locationId: merlata } }, update: {}, create: { discountId: d.id, locationId: merlata } });
+      await prisma.discountProduct.upsert({ where: { discountId_productId: { discountId: d.id, productId: babba.id } }, update: {}, create: { discountId: d.id, productId: babba.id } });
+    }
+    // BOXREGALO20 — 20% sulla categoria Box Regalo
+    const dc = await prisma.discountCode.upsert({
+      where: { code: "BOXREGALO20" },
+      update: {},
+      create: { code: "BOXREGALO20", description: "20% sulla categoria Box Regalo", type: "PERCENT", value: 2000, scope: "CATEGORIES" }
+    });
+    await prisma.discountCategory.upsert({ where: { discountId_categoryId: { discountId: dc.id, categoryId: boxRegalo } }, update: {}, create: { discountId: dc.id, categoryId: boxRegalo } });
 
+    // Consegna locale del fresco (demo): CAP serviti da Ottaviano e tariffa LOCAL.
+    await prisma.location.update({
+      where: { slug: "ottaviano" },
+      data: { localDeliveryPostalCodes: "80044,80040,80047,80045" }
+    });
+    if ((await prisma.shippingRate.count({ where: { zoneId: zone.id, scope: "LOCAL" } })) === 0) {
+      await prisma.shippingRate.create({
+        data: { zoneId: zone.id, name: "Consegna locale del fresco", amountCents: 500, freeAboveCents: 4000, position: 2, scope: "LOCAL" }
+      });
+    }
+  }
+
+  if (includeDemoFixtures && (!adminPassword || !customerPassword)) {
+    console.log("SEED_ADMIN_PASSWORD/SEED_CUSTOMER_PASSWORD assenti: utenti demo non creati.");
+  }
   if (includeDemoFixtures && adminPassword && customerPassword) {
     // Fixture locali: mai create quando NODE_ENV=production.
     await prisma.adminUser.upsert({

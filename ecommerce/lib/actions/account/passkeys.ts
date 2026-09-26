@@ -172,7 +172,7 @@ export async function finishPasskeyLoginAction(
       select: { firstName: true, email: true, emailVerified: true, totpEnabledAt: true }
     });
     if (!customer?.emailVerified) {
-      return { ok: false, error: "Conferma prima l'email. Usa «Password dimenticata?» se il link e scaduto." };
+      return { ok: false, error: "Conferma prima l'email. Usa «Password dimenticata?» se il link è scaduto." };
     }
     await clearAttempts(rateKey);
     if (customer.totpEnabledAt) {
@@ -221,7 +221,7 @@ export async function completePasskeySecondFactorAction(
       await registerFailedAttempt(rateKey);
       return { ok: false, error: "Codice di verifica non valido." };
     }
-    // Claim atomico: un solo tentativo puo consumare il token, anche con due
+    // Claim atomico: un solo tentativo può consumare il token, anche con due
     // submit concorrenti (prima era find-then-update, quindi doppio consumo
     // teorico con due TOTP validi consecutivi).
     const claimed = await prisma.customerToken.updateMany({

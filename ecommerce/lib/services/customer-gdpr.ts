@@ -121,8 +121,22 @@ export async function deleteCustomerAccount(customerId: string): Promise<void> {
   const originalEmail = customer.email;
   const firstName = customer.firstName;
   const anonymousEmail = `eliminato-${customerId}@anonimo.sessa1930.invalid`;
+  // Ordini ancora da evadere: servono email, telefono e indirizzo per
+  // completarli. Si elimina l'account dopo il ritiro/consegna o l'annullo.
+  const openOrders = await prisma.order.count({
+    where: {
+      OR: [{ customerId }, { email: originalEmail }],
+      status: { in: ["PENDING_PAYMENT", "CONFIRMED", "PAID", "PROCESSING", "READY", "SHIPPED"] }
+    }
+  });
+  if (openOrders > 0) {
+    throw new DomainError(
+      "Hai ordini ancora in corso: potrai eliminare l'account dopo il ritiro o la consegna (oppure annullali prima)."
+    );
+  }
+  // Anche gli ordini fatti come ospite con la stessa email sono dati di questa persona.
   const linkedOrders = await prisma.order.findMany({
-    where: { customerId },
+    where: { OR: [{ customerId }, { email: originalEmail }] },
     select: { id: true }
   });
   const orderIds = linkedOrders.map((order) => order.id);
@@ -145,7 +159,7 @@ export async function deleteCustomerAccount(customerId: string): Promise<void> {
       where: { OR: [{ referrerId: customerId }, { invitedCustomerId: customerId }] }
     }),
     prisma.order.updateMany({
-      where: { customerId },
+      where: { id: { in: orderIds } },
       data: {
         customerId: null,
         email: anonymousEmail,
@@ -161,8 +175,13 @@ export async function deleteCustomerAccount(customerId: string): Promise<void> {
         trackingCarrier: null,
         trackingCode: null,
         giftCardCodeSnapshot: null,
-        referralCodeSnapshot: null
+        referralCodeSnapshot: null,
+        invoiceData: null
       }
+    }),
+    prisma.returnRequest.updateMany({
+      where: { orderId: { in: orderIds } },
+      data: { reason: "Testo anonimizzato.", adminNote: null, customerId: null }
     }),
     prisma.orderEvent.updateMany({
       where: { orderId: { in: orderIds } },
@@ -193,15 +212,12 @@ export async function deleteCustomerAccount(customerId: string): Promise<void> {
     })
   ]);
 
-  const confirmation = await enqueueEmail({
+  // La conferma resta cifrata in coda fino all'invio; dopo la consegna il
+  // worker redige corpo e destinatario (tipo ACCOUNT_DELETED).
+  await enqueueEmail({
     toEmail: originalEmail,
     subject: "Il tuo account Sessa 1930 è stato eliminato",
     type: "ACCOUNT_DELETED",
     body: `Ciao ${firstName},\n\ncome richiesto, il tuo account Sessa 1930 è stato eliminato e i dati personali anonimizzati. Gli ordini restano conservati in forma anonima per gli obblighi di legge.\n\nGrazie per essere stato con noi.`
   }).catch(() => null);
-  // La conferma viene consegnata inline e poi rimossa dall'outbox per non
-  // reintrodurre l'email appena cancellata.
-  if (confirmation) {
-    await prisma.emailMessage.deleteMany({ where: { id: confirmation.id } }).catch(() => undefined);
-  }
 }

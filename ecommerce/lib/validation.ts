@@ -8,8 +8,9 @@ import {
   CHECKOUT_PAYMENT_METHODS,
   PRODUCT_STATUSES
 } from "@/lib/domain";
-import { parseRomeDateTimeLocal, romeDayRange } from "@/lib/datetime";
+import { romeDayRange } from "@/lib/datetime";
 import { isValidItalianPostalCode, isValidItalianProvince, normalizeItalianPhone } from "@/lib/commerce/address-it";
+import { isValidCodiceFiscale, isValidPartitaIva, isValidSdiCode } from "@/lib/commerce/italian-tax-ids";
 
 /** Schemi Zod: unica dogana tra FormData/input esterni e i servizi. */
 
@@ -27,19 +28,49 @@ const optionalCalendarDate = optionalTrimmed(10).refine(
   "Data non valida"
 );
 
+/**
+ * Nomi di persona: lettere (anche accentate), spazi, apostrofi, punti e
+ * trattini. Niente cifre, URL o markup: i nomi finiscono nelle email inviate
+ * dal dominio del negozio e non devono poter trasportare link di phishing.
+ */
+const PERSON_NAME = /^[\p{L}\p{M}][\p{L}\p{M}' .\-’]*$/u;
+export const personName = (max = 80) =>
+  z
+    .string()
+    .trim()
+    .min(1, "Campo obbligatorio")
+    .max(max)
+    .regex(PERSON_NAME, "Usa solo lettere, spazi, apostrofi o trattini");
+
+/** Testo breve libero (destinatario, ragione sociale) ma senza link ne markup. */
+const NO_LINKS = /(https?:|www\.|:\/\/|[<>])/i;
+export const plainLabel = (max = 120) =>
+  z
+    .string()
+    .trim()
+    .min(1, "Campo obbligatorio")
+    .max(max)
+    .refine((value) => !NO_LINKS.test(value), "Link e simboli < > non sono ammessi");
+
 const passwordInput = z
   .string()
   .min(12, "La password deve avere almeno 12 caratteri")
   .max(128, "La password non può superare 128 caratteri");
 
+const checkbox = z.preprocess((value) => value === "on" || value === "true" || value === true, z.boolean());
+
 export const checkoutSchema = z
   .object({
-    email: z.string().trim().toLowerCase().email("Email non valida"),
-    phone: optionalTrimmed(40),
-    firstName: trimmed(80),
-    lastName: trimmed(80),
+    email: z.string().trim().toLowerCase().email("Email non valida").max(254),
+    phone: optionalTrimmed(40).refine(
+      (value) => value === undefined || normalizeItalianPhone(value) !== null,
+      "Telefono non valido"
+    ),
+    firstName: personName(80),
+    lastName: personName(80),
     fulfillmentType: z.enum(FULFILLMENT_TYPES),
-    fulfillmentAt: z.string().trim().min(1, "Indica quando vuoi ricevere l'ordine"),
+    /** Fascia scelta: "YYYY-MM-DDTHH:mm" Europe/Rome. Assente solo per la spedizione nazionale. */
+    slot: optionalTrimmed(16),
     line1: optionalTrimmed(160),
     line2: optionalTrimmed(160),
     city: optionalTrimmed(80),
@@ -49,22 +80,44 @@ export const checkoutSchema = z
     shippingRateId: optionalTrimmed(64),
     paymentMethod: z.enum(CHECKOUT_PAYMENT_METHODS),
     customerNote: optionalTrimmed(1000),
-    marketingOptIn: z.coerce.boolean().default(false),
+    marketingOptIn: checkbox.default(false),
+    acceptTerms: checkbox.default(false),
+    invoiceRequested: checkbox.default(false),
+    invoiceName: optionalTrimmed(160),
+    invoiceVatNumber: optionalTrimmed(16),
+    invoiceTaxCode: optionalTrimmed(16),
+    invoiceSdi: optionalTrimmed(7),
+    invoicePec: optionalTrimmed(254),
+    invoiceAddress: optionalTrimmed(300),
+    /** Importo che il cliente ha visto: se il server calcola altro, si chiede conferma. */
+    expectedAmountDueCents: z.coerce.number().int().min(0).optional(),
     checkoutIdempotencyKey: optionalTrimmed(80)
   })
   .superRefine((data, ctx) => {
-    // Data/ora richiesta: valida e non nel passato.
-    const when = parseRomeDateTimeLocal(data.fulfillmentAt);
-    if (!when) {
-      ctx.addIssue({ path: ["fulfillmentAt"], code: "custom", message: "Data/ora non valida" });
-    } else if (when.getTime() < Date.now() + 60 * 60_000) {
-      ctx.addIssue({ path: ["fulfillmentAt"], code: "custom", message: "Scegli almeno 1 ora da ora" });
-    } else if (when.getTime() > Date.now() + 366 * 24 * 60 * 60_000) {
-      ctx.addIssue({ path: ["fulfillmentAt"], code: "custom", message: "La data e troppo lontana" });
+    if (!data.acceptTerms) {
+      ctx.addIssue({
+        path: ["acceptTerms"],
+        code: "custom",
+        message: "Per ordinare devi accettare le condizioni di vendita"
+      });
     }
-    // Per la consegna a domicilio i campi indirizzo sono obbligatori.
+    if (data.slot !== undefined && !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(data.slot)) {
+      ctx.addIssue({ path: ["slot"], code: "custom", message: "Fascia oraria non valida" });
+    }
+    if (data.fulfillmentType === "PICKUP" && !data.slot) {
+      ctx.addIssue({ path: ["slot"], code: "custom", message: "Scegli giorno e fascia di ritiro" });
+    }
+    if (data.paymentMethod === "cash_on_pickup" && data.fulfillmentType !== "PICKUP") {
+      ctx.addIssue({
+        path: ["paymentMethod"],
+        code: "custom",
+        message: "Il pagamento in sede è disponibile solo per il ritiro"
+      });
+    }
+    // Per la consegna a domicilio i campi indirizzo e il telefono sono obbligatori.
     if (data.fulfillmentType === "DELIVERY") {
       if (!data.line1) ctx.addIssue({ path: ["line1"], code: "custom", message: "Indirizzo obbligatorio" });
+      else if (NO_LINKS.test(data.line1)) ctx.addIssue({ path: ["line1"], code: "custom", message: "Indirizzo non valido" });
       if (!data.city) ctx.addIssue({ path: ["city"], code: "custom", message: "Città obbligatoria" });
       if (!data.province) ctx.addIssue({ path: ["province"], code: "custom", message: "Provincia obbligatoria" });
       if (!data.postalCode || !isValidItalianPostalCode(data.postalCode))
@@ -72,7 +125,27 @@ export const checkoutSchema = z
       if (data.province && !isValidItalianProvince(data.province))
         ctx.addIssue({ path: ["province"], code: "custom", message: "Provincia non valida (sigla di 2 lettere)" });
       if (!data.shippingRateId)
-        ctx.addIssue({ path: ["shippingRateId"], code: "custom", message: "Scegli un metodo di spedizione" });
+        ctx.addIssue({ path: ["shippingRateId"], code: "custom", message: "Scegli un metodo di consegna" });
+      if (!data.phone)
+        ctx.addIssue({ path: ["phone"], code: "custom", message: "Il telefono serve al corriere per la consegna" });
+    }
+    if (data.invoiceRequested) {
+      if (!data.invoiceName || NO_LINKS.test(data.invoiceName))
+        ctx.addIssue({ path: ["invoiceName"], code: "custom", message: "Indica nome o ragione sociale" });
+      if (!data.invoiceVatNumber && !data.invoiceTaxCode)
+        ctx.addIssue({ path: ["invoiceTaxCode"], code: "custom", message: "Indica partita IVA o codice fiscale" });
+      if (data.invoiceVatNumber && !isValidPartitaIva(data.invoiceVatNumber))
+        ctx.addIssue({ path: ["invoiceVatNumber"], code: "custom", message: "Partita IVA non valida" });
+      if (data.invoiceTaxCode && !isValidCodiceFiscale(data.invoiceTaxCode))
+        ctx.addIssue({ path: ["invoiceTaxCode"], code: "custom", message: "Codice fiscale non valido" });
+      if (data.invoiceVatNumber && !data.invoiceSdi && !data.invoicePec)
+        ctx.addIssue({ path: ["invoiceSdi"], code: "custom", message: "Per le aziende indica codice SDI o PEC" });
+      if (data.invoiceSdi && !isValidSdiCode(data.invoiceSdi))
+        ctx.addIssue({ path: ["invoiceSdi"], code: "custom", message: "Codice SDI non valido (7 caratteri)" });
+      if (data.invoicePec && !z.string().email().safeParse(data.invoicePec).success)
+        ctx.addIssue({ path: ["invoicePec"], code: "custom", message: "PEC non valida" });
+      if (!data.invoiceAddress || NO_LINKS.test(data.invoiceAddress))
+        ctx.addIssue({ path: ["invoiceAddress"], code: "custom", message: "Indica l'indirizzo di fatturazione" });
     }
   });
 export type CheckoutFormInput = z.infer<typeof checkoutSchema>;
@@ -83,21 +156,16 @@ export const loginSchema = z.object({
 });
 
 // --- Clienti ---
-export const customerRegisterSchema = z.object({
-  email: z.string().trim().toLowerCase().email("Email non valida"),
-  password: passwordInput,
-  firstName: trimmed(80),
-  lastName: trimmed(80),
-  phone: optionalTrimmed(40),
-  marketingOptIn: z.coerce.boolean().default(false)
-});
-
 /** Registrazione sicura email-first: la password si sceglie solo dal link ricevuto. */
 export const customerRegistrationRequestSchema = z.object({
-  email: z.string().trim().toLowerCase().email("Email non valida"),
-  firstName: trimmed(80),
-  lastName: trimmed(80),
-  phone: optionalTrimmed(40)
+  email: z.string().trim().toLowerCase().email("Email non valida").max(254),
+  firstName: personName(80),
+  lastName: personName(80),
+  phone: optionalTrimmed(40).refine(
+    (value) => value === undefined || normalizeItalianPhone(value) !== null,
+    "Telefono non valido"
+  ),
+  acceptPrivacy: checkbox.refine((value) => value, "Conferma di aver letto l'informativa privacy")
 });
 
 export const customerLoginSchema = z.object({
@@ -106,15 +174,15 @@ export const customerLoginSchema = z.object({
 });
 
 export const profileSchema = z.object({
-  firstName: trimmed(80),
-  lastName: trimmed(80),
+  firstName: personName(80),
+  lastName: personName(80),
   phone: optionalTrimmed(40),
   marketingOptIn: z.coerce.boolean().default(false)
 });
 
 export const italianAddressSchema = z.object({
-  fullName: trimmed(120),
-  line1: trimmed(160),
+  fullName: plainLabel(120),
+  line1: plainLabel(160),
   city: trimmed(80),
   province: z
     .string()
@@ -131,8 +199,8 @@ export const italianAddressSchema = z.object({
 
 export const addressSchema = z.object({
   label: optionalTrimmed(40),
-  fullName: trimmed(120),
-  line1: trimmed(160),
+  fullName: plainLabel(120),
+  line1: plainLabel(160),
   line2: optionalTrimmed(160),
   city: trimmed(80),
   province: z
@@ -178,7 +246,22 @@ export const productSchema = z.object({
   merchantEnabled: z.coerce.boolean().default(true),
   merchantTitle: optionalTrimmed(150),
   merchantDescription: optionalTrimmed(5000),
-  googleProductCategory: optionalTrimmed(300)
+  googleProductCategory: optionalTrimmed(300),
+  storageInfo: z.string().trim().max(500).default(""),
+  shippingScope: z.enum(["LOCAL", "NATIONAL"]).default("LOCAL"),
+  leadTimeHours: z.coerce.number().int().min(0).max(720).default(0)
+}).superRefine((data, ctx) => {
+  // Vendita a distanza di alimenti: informazioni obbligatorie prima dell'acquisto.
+  if (data.status !== "ACTIVE") return;
+  if (!data.ingredients) {
+    ctx.addIssue({ path: ["ingredients"], code: "custom", message: "Ingredienti obbligatori per pubblicare il prodotto" });
+  }
+  if (!data.allergens) {
+    ctx.addIssue({ path: ["allergens"], code: "custom", message: "Allergeni obbligatori per pubblicare (scrivi \"nessuno\" se assenti)" });
+  }
+  if (!data.storageInfo) {
+    ctx.addIssue({ path: ["storageInfo"], code: "custom", message: "Indica come conservare il prodotto per pubblicarlo" });
+  }
 });
 
 export const variantSchema = z.object({
@@ -269,7 +352,33 @@ export const locationSchema = z.object({
     z.coerce.number().min(-180).max(180).optional()
   ),
   googleMapsUrl: optionalTrimmed(500),
-  gbpUrl: optionalTrimmed(500)
+  gbpUrl: optionalTrimmed(500),
+  closedDates: z
+    .string()
+    .trim()
+    .max(4000)
+    .default("")
+    .refine(
+      (value) => value.split(/[\s,;]+/).filter(Boolean).every((date) => romeDayRange(date) !== null),
+      "Chiusure: usa date nel formato AAAA-MM-GG separate da virgola"
+    ),
+  leadTimeMinutes: z.coerce.number().int().min(0).max(20160).default(120),
+  slotMinutes: z.coerce.number().int().min(5).max(240).default(30),
+  slotCapacity: z.coerce.number().int().min(0).max(10000).default(0),
+  maxAdvanceDays: z.coerce.number().int().min(1).max(366).default(60),
+  notificationEmail: optionalTrimmed(254).refine(
+    (value) => value === undefined || z.string().email().safeParse(value).success,
+    "Email avvisi non valida"
+  ),
+  localDeliveryPostalCodes: z
+    .string()
+    .trim()
+    .max(4000)
+    .default("")
+    .refine(
+      (value) => value.split(/[\s,;]+/).filter(Boolean).every((cap) => /^\d{2,5}$/.test(cap)),
+      "CAP serviti: usa CAP o prefissi numerici separati da virgola"
+    )
 }).superRefine((data, ctx) => {
   if (data.isActive && !data.pickupEnabled && !data.deliveryEnabled) {
     ctx.addIssue({
@@ -289,6 +398,7 @@ export const storeVariantSchema = z.object({
 export const shippingRateSchema = z.object({
   zoneId: trimmed(64),
   name: trimmed(120),
+  scope: z.enum(["LOCAL", "NATIONAL"]).default("NATIONAL"),
   amount: z.string().trim().min(1, "Costo obbligatorio"),
   freeAbove: optionalTrimmed(20),
   position: z.coerce.number().int().min(0).default(0),
@@ -326,6 +436,37 @@ export const storeSettingsSchema = z.object({
   storeAddress: optionalTrimmed(300),
   storeVat: optionalTrimmed(60),
   bankTransferInstructions: optionalTrimmed(2000)
+});
+
+const optionalEmail = optionalTrimmed(254).refine(
+  (value) => value === undefined || z.string().email().safeParse(value).success,
+  "Email non valida"
+);
+
+/** Dati aziendali (note legali, condizioni), destinatari avvisi e regole di pagamento. */
+export const legalSettingsSchema = z.object({
+  companyName: optionalTrimmed(160),
+  registeredOffice: optionalTrimmed(300),
+  vatNumber: optionalTrimmed(16).refine((value) => value === undefined || isValidPartitaIva(value), "Partita IVA non valida"),
+  taxCode: optionalTrimmed(16),
+  rea: optionalTrimmed(40),
+  pec: optionalEmail,
+  supportEmail: optionalEmail,
+  privacyEmail: optionalEmail,
+  supportPhone: optionalTrimmed(40),
+  termsVersion: z.string().trim().regex(/^[0-9A-Za-z.-]{1,20}$/, "Versione condizioni non valida").default("2026-09"),
+  ordersEmail: optionalEmail,
+  alertsEmail: optionalEmail,
+  alertsWebhookUrl: optionalTrimmed(500).refine(
+    (value) => value === undefined || /^https:\/\/[^\s]+$/.test(value),
+    "Il webhook deve essere un URL https"
+  ),
+  cashMax: z.string().trim().default("150,00"),
+  cashMaxAdvanceDays: z.coerce.number().int().min(1).max(60).default(7),
+  bankTransferMinBusinessDays: z.coerce.number().int().min(1).max(30).default(3),
+  bankTransferReservationBusinessDays: z.coerce.number().int().min(1).max(15).default(2),
+  maxCardAttempts: z.coerce.number().int().min(1).max(20).default(5),
+  customerCancelHours: z.coerce.number().int().min(0).max(720).default(24)
 });
 
 /** Converte FormData in oggetto piatto per Zod (checkbox → boolean-friendly). */

@@ -38,7 +38,14 @@ export type DiscountContext = {
 };
 
 export type DiscountEval =
-  | { ok: true; discount: DiscountWithLinks; amountCents: number; eligibleBaseCents: number }
+  | {
+      ok: true;
+      discount: DiscountWithLinks;
+      amountCents: number;
+      eligibleBaseCents: number;
+      /** Per ogni riga (stesso ordine di ctx.lines): true se lo sconto la riguarda. */
+      eligibleLines: boolean[];
+    }
   | { ok: false; reason: string };
 
 export async function loadDiscount(code: string): Promise<DiscountWithLinks | null> {
@@ -101,18 +108,17 @@ export function evaluateDiscount(discount: DiscountWithLinks, ctx: DiscountConte
   // Base idonea: intero subtotale, o solo le righe che matchano categorie/prodotti.
   const hasProductFilter = discount.products.length > 0;
   const hasCategoryFilter = discount.categories.length > 0;
-  let base = ctx.subtotalCents;
-  if (hasProductFilter || hasCategoryFilter) {
-    const prodIds = new Set(discount.products.map((p) => p.productId));
-    const catIds = new Set(discount.categories.map((c) => c.categoryId));
-    base = ctx.lines
-      .filter(
-        (l) =>
-          (l.productId !== null && prodIds.has(l.productId)) ||
-          (l.categoryId !== null && catIds.has(l.categoryId))
-      )
-      .reduce((sum, l) => sum + l.lineCents, 0);
-  }
+  const prodIds = new Set(discount.products.map((p) => p.productId));
+  const catIds = new Set(discount.categories.map((c) => c.categoryId));
+  const eligibleLines = ctx.lines.map(
+    (l) =>
+      !(hasProductFilter || hasCategoryFilter) ||
+      (l.productId !== null && prodIds.has(l.productId)) ||
+      (l.categoryId !== null && catIds.has(l.categoryId))
+  );
+  const base = hasProductFilter || hasCategoryFilter
+    ? ctx.lines.reduce((sum, l, index) => sum + (eligibleLines[index] ? l.lineCents : 0), 0)
+    : ctx.subtotalCents;
   if (base <= 0) {
     return { ok: false, reason: "Lo sconto non si applica ai prodotti nel carrello." };
   }
@@ -120,12 +126,5 @@ export function evaluateDiscount(discount: DiscountWithLinks, ctx: DiscountConte
   const raw =
     discount.type === "PERCENT" ? percentOf(base, discount.value) : Math.min(discount.value, base);
   const amountCents = Math.min(raw, ctx.subtotalCents);
-  return { ok: true, discount, amountCents, eligibleBaseCents: base };
-}
-
-/** Comodità: carica + valuta in un colpo (per anteprima carrello). */
-export async function checkDiscount(code: string, ctx: DiscountContext): Promise<DiscountEval> {
-  const discount = await loadDiscount(code);
-  if (!discount) return { ok: false, reason: "Codice sconto non valido." };
-  return evaluateDiscount(discount, ctx);
+  return { ok: true, discount, amountCents, eligibleBaseCents: base, eligibleLines };
 }

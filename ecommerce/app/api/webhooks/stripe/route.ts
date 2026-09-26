@@ -12,6 +12,10 @@ function paymentIntentRef(session: Stripe.Checkout.Session): string | null {
 }
 
 /** Firma Stripe + riconciliazione per sessione esatta, importo e valuta. */
+function paymentIntentId(value: string | Stripe.PaymentIntent | null | undefined): string | null {
+  return typeof value === "string" ? value : value?.id ?? null;
+}
+
 export async function POST(request: NextRequest) {
   if (!isStripeConfigured() || !process.env.STRIPE_WEBHOOK_SECRET) {
     return NextResponse.json({ error: "Stripe non configurato." }, { status: 501 });
@@ -33,7 +37,7 @@ export async function POST(request: NextRequest) {
   try {
     if (event.type === "checkout.session.completed" || event.type === "checkout.session.async_payment_succeeded") {
       const session = event.data.object as Stripe.Checkout.Session;
-      // checkout.session.completed puo precedere l'incasso per metodi asincroni.
+      // checkout.session.completed può precedere l'incasso per metodi asincroni.
       if (session.payment_status === "paid") {
         const result = await reconcileStripeSuccess({
           eventId: event.id,
@@ -63,7 +67,7 @@ export async function POST(request: NextRequest) {
       await reconcileStripeFailure(
         session.id,
         "FAILED",
-        "Pagamento Stripe non riuscito: il cliente puo riprovare.",
+        "Pagamento Stripe non riuscito: il cliente può riprovare.",
         { eventId: event.id, eventType: event.type }
       );
     } else if (event.type === "checkout.session.expired") {
@@ -74,17 +78,26 @@ export async function POST(request: NextRequest) {
         "Sessione Stripe scaduta prima della conferma del pagamento.",
         { eventId: event.id, eventType: event.type }
       );
-    } else if (event.type === "charge.refunded" || event.type === "charge.dispute.created") {
+    } else if (event.type === "charge.refunded") {
       const charge = event.data.object as Stripe.Charge;
-      const paymentIntent = typeof charge.payment_intent === "string"
-        ? charge.payment_intent
-        : charge.payment_intent?.id ?? null;
       await reconcileStripeExternalReversal({
         eventId: event.id,
         eventType: event.type,
-        providerPaymentRef: paymentIntent,
+        providerPaymentRef: paymentIntentId(charge.payment_intent),
+        // Cumulativo: il totale rimborsato finora sulla charge.
         amountRefundedCents: charge.amount_refunded ?? null,
         amountCents: charge.amount ?? null
+      });
+    } else if (event.type === "charge.dispute.created") {
+      // L'oggetto e una Dispute, non una Charge: nessun rimborso da applicare,
+      // solo allarme e blocco operativo sull'ordine.
+      const dispute = event.data.object as Stripe.Dispute;
+      await reconcileStripeExternalReversal({
+        eventId: event.id,
+        eventType: event.type,
+        providerPaymentRef: paymentIntentId(dispute.payment_intent),
+        amountRefundedCents: null,
+        amountCents: dispute.amount ?? null
       });
     }
   } catch (error) {

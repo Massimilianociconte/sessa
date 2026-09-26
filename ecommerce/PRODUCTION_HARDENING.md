@@ -34,8 +34,8 @@ npm run test:security
 npm run build
 ```
 
-`npx tsx prisma/verify-flow.ts`, da eseguire esclusivamente contro un database di
-test sacrificabile, copre:
+`npm run test:integration` (sostituisce `prisma/verify-flow.ts`), eseguibile solo
+contro il database locale `sessa_test` che ricrea a ogni run, copre:
 
 - ordine base;
 - idempotenza anti doppio ordine;

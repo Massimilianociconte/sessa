@@ -2,11 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
-import { assertAdminLocationAccess, requireAdmin, requireAdminCapability } from "@/lib/auth/session";
-import { hasAdminCapability } from "@/lib/auth/admin-authorization";
+import { assertAdminLocationAccess, requireAdminAnyCapability, requireAdminCapability } from "@/lib/auth/session";
 import type { Prisma } from "@prisma/client";
 import { audit } from "@/lib/audit";
 import { parseEuroToCents } from "@/lib/money";
+import { DomainError } from "@/lib/domain";
 import { formDataToObject, productSchema, variantSchema } from "@/lib/validation";
 import { backWithError, backWithMessage, firstZodMessage, requireString } from "./helpers";
 import { invalidateMemo } from "@/lib/ttl-cache";
@@ -95,7 +95,7 @@ export async function createVariantAction(formData: FormData): Promise<void> {
   const path = `/admin/prodotti/${productId}`;
   const parsed = variantSchema.safeParse({
     ...formDataToObject(formData),
-    isActive: formData.get("isActive") !== "off"
+    isActive: formData.get("isActive") === "on"
   });
   if (!parsed.success) backWithError(path, firstZodMessage(parsed.error));
 
@@ -147,7 +147,7 @@ export async function createVariantAction(formData: FormData): Promise<void> {
   });
   await audit(user.email, "variant.create", "ProductVariant", variant.id, parsed.data);
   revalidateCatalog();
-  backWithMessage(path, `Variante "${parsed.data.name}" creata. Attivala sede per sede dall'assortimento (non e visibile finche non la rendi disponibile).`);
+  backWithMessage(path, `Variante "${parsed.data.name}" creata. Attivala sede per sede dall'assortimento (non è visibile finché non la rendi disponibile).`);
 }
 
 export async function updateVariantAction(formData: FormData): Promise<void> {
@@ -219,10 +219,8 @@ export async function deleteVariantAction(formData: FormData): Promise<void> {
  * di uno StoreVariant. Lo stock si tocca solo dal magazzino (ledger).
  */
 export async function updateStoreVariantAction(formData: FormData): Promise<void> {
-  const user = await requireAdmin();
-  if (!hasAdminCapability(user.role, "catalog:manage") && !hasAdminCapability(user.role, "inventory:manage")) {
-    throw new Error("Non autorizzato.");
-  }
+  // Prezzi e disponibilità per sede: stessa politica 2FA delle altre azioni.
+  const user = await requireAdminAnyCapability(["catalog:manage", "inventory:manage"]);
   const storeVariantId = requireString(formData, "storeVariantId");
   const productId = requireString(formData, "productId");
   const path = `/admin/prodotti/${productId}`;
@@ -245,7 +243,12 @@ export async function updateStoreVariantAction(formData: FormData): Promise<void
     select: { locationId: true }
   });
   if (!current) backWithError(path, "Assortimento non trovato.");
-  assertAdminLocationAccess(user, current.locationId);
+  try {
+    assertAdminLocationAccess(user, current.locationId);
+  } catch (error) {
+    if (error instanceof DomainError) backWithError(path, error.message);
+    throw error;
+  }
 
   await prisma.storeVariant.update({
     where: { id: storeVariantId },

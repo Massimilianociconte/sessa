@@ -5,17 +5,16 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { DomainError } from "@/lib/domain";
 import { requireCustomer } from "@/lib/auth/customer-session";
-import { enqueueEmail } from "@/lib/services/email";
 import { transitionOrder } from "@/lib/services/orders";
 import { refundOrder } from "@/lib/services/payment-attempts";
 import { requestReturn } from "@/lib/services/returns";
-
-/** Stati da cui il CLIENTE può ancora annullare: prima che il laboratorio inizi la preparazione. */
-const CUSTOMER_CANCELLABLE = ["PENDING_PAYMENT", "CONFIRMED", "PAID"];
+import { customerCancellation } from "@/lib/commerce/customer-cancellation";
+import { getCustomerCancelHours } from "@/lib/services/commerce-settings";
 
 /**
- * Annullamento self-service dell'ordine. Riusa transitionOrder: macchina a stati,
- * ricarico stock della sede ed evento in cronologia inclusi.
+ * Annullamento self-service dell'ordine. Riusa transitionOrder/refundOrder:
+ * macchina a stati, ricarico stock, rimborso Stripe ed email al cliente
+ * (motivo "annullato su richiesta") sono gestiti li, in transazione.
  */
 export async function cancelCustomerOrderAction(formData: FormData): Promise<void> {
   const customer = await requireCustomer();
@@ -26,19 +25,17 @@ export async function cancelCustomerOrderAction(formData: FormData): Promise<voi
   if (!order || order.customerId !== customer.id) {
     redirect(`/account/ordini?err=${encodeURIComponent("Ordine non trovato.")}`);
   }
-  if (!CUSTOMER_CANCELLABLE.includes(order.status)) {
-    redirect(`${back}?err=${encodeURIComponent("L'ordine è già in preparazione: contatta la sede per assistenza.")}`);
-  }
+  const check = customerCancellation(order, new Date(), await getCustomerCancelHours());
+  if (!check.allowed) redirect(`${back}?err=${encodeURIComponent(check.reason)}`);
 
   try {
     const paymentCaptured = order.paymentStatus === "PAID" || order.paymentStatus === "PARTIALLY_REFUNDED";
-    if (paymentCaptured && (order.paymentProvider === "stripe" || order.paymentMethod === "gift_card")) {
-      await refundOrder(order.id, customer.email, "Rimborso richiesto dal cliente dall'area personale.");
-    } else if (paymentCaptured) {
-      throw new DomainError("Per annullare un ordine gia pagato con metodo manuale, contatta la sede.");
+    if (paymentCaptured) {
+      await refundOrder(order.id, customer.email, "Annullato e rimborsato su richiesta del cliente dall'area personale.");
     } else {
       await transitionOrder(order.id, "CANCELLED", customer.email, {
-        note: "Annullato dal cliente dall'area personale."
+        note: "Annullato dal cliente dall'area personale.",
+        cancelReason: "CUSTOMER"
       });
     }
   } catch (error) {
@@ -46,16 +43,9 @@ export async function cancelCustomerOrderAction(formData: FormData): Promise<voi
     throw error;
   }
 
-  await enqueueEmail({
-    toEmail: customer.email,
-    subject: `Ordine ${order.code} annullato — Sessa 1930`,
-    type: "ORDER_CONFIRMATION",
-    body: `Ciao ${customer.firstName},\n\nil tuo ordine ${order.code} è stato annullato come richiesto.${order.paymentStatus === "PAID" ? "\nSe il pagamento era già stato effettuato, verrà rimborsato dalla sede." : ""}\n\nGrazie,\nSessa 1930`
-  });
-
   revalidatePath("/account/ordini");
   revalidatePath(back);
-  redirect(`${back}?msg=${encodeURIComponent("Ordine annullato. Lo stock della sede è stato ripristinato.")}`);
+  redirect(`${back}?msg=${encodeURIComponent("Ordine annullato. Ti abbiamo inviato la conferma via email.")}`);
 }
 
 export async function requestReturnAction(formData: FormData): Promise<void> {
@@ -72,5 +62,5 @@ export async function requestReturnAction(formData: FormData): Promise<void> {
     throw error;
   }
   revalidatePath(back);
-  redirect(`${back}?msg=${encodeURIComponent("Richiesta di reso inviata. Ti aggiorneremo appena la sede la valuta.")}`);
+  redirect(`${back}?msg=${encodeURIComponent("Segnalazione inviata alla sede: ti risponderemo via email.")}`);
 }

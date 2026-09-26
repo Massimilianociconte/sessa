@@ -54,7 +54,8 @@ export async function sendVerificationEmail(customerId: string): Promise<Verific
     toEmail: customer.email,
     subject: "Conferma la tua email — Sessa 1930",
     type: "EMAIL_VERIFICATION",
-    body: `Ciao ${customer.firstName},\n\nconferma il tuo indirizzo email aprendo questo link (valido 24 ore):\n${link}\n\nSe non hai creato tu l'account, ignora questa email.`
+    body: `Ciao ${customer.firstName},\n\nconferma il tuo indirizzo email con il pulsante qui sotto (link valido 24 ore).\n\nSe non hai creato tu l'account, ignora questa email.`,
+    cta: { url: link, label: "Conferma l'email" }
   });
   return { link, delivery };
 }
@@ -98,7 +99,8 @@ export async function requestEmailChange(customerId: string, newEmail: string): 
     toEmail: email,
     subject: "Conferma il cambio email — Sessa 1930",
     type: "EMAIL_CHANGE",
-    body: `Ciao ${customer.firstName},\n\nper completare il cambio email del tuo account Sessa 1930 apri questo link (valido 1 ora):\n${link}\n\nSe non hai richiesto tu il cambio, ignora questa email.`
+    body: `Ciao ${customer.firstName},\n\nper completare il cambio email del tuo account Sessa 1930 usa il pulsante qui sotto (link valido 1 ora).\n\nSe non hai richiesto tu il cambio, ignora questa email.`,
+    cta: { url: link, label: "Conferma la nuova email" }
   });
   await enqueueEmail({
     toEmail: customer.email,

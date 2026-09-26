@@ -3,10 +3,14 @@ import { notFound } from "next/navigation";
 import Flash from "@/components/admin/Flash";
 import { OrderStatusBadge } from "@/components/admin/StatusBadge";
 import {
+  resolveReturnAction,
   saveAdminNoteAction,
   setTrackingAction,
   transitionOrderAction
 } from "@/lib/actions/admin/orders";
+import { hasAdminCapability } from "@/lib/auth/admin-authorization";
+import { prisma } from "@/lib/db";
+import type { InvoiceData } from "@/lib/commerce/italian-tax-ids";
 import {
   FULFILLMENT_LABELS,
   ORDER_STATUS_LABELS,
@@ -19,7 +23,7 @@ import {
   type PaymentStatus
 } from "@/lib/domain";
 import { formatCents } from "@/lib/money";
-import { formatRomeDateTime } from "@/lib/datetime";
+import { formatRomeDateTime, formatRomeSlotShort } from "@/lib/datetime";
 import { getOrder } from "@/lib/services/orders";
 import { adminLocationScope, requireAdminCapability } from "@/lib/auth/session";
 
@@ -41,12 +45,24 @@ export default async function AdminOrderDetailPage({
   ]);
   const order = await getOrder(id, adminLocationScope(user));
   if (!order) notFound();
+  const canRefund = hasAdminCapability(user.role, "orders:refund");
+  const returnRequests = await prisma.returnRequest.findMany({
+    where: { orderId: order.id },
+    orderBy: { createdAt: "desc" }
+  });
+  let invoice: InvoiceData | null = null;
+  try {
+    invoice = order.invoiceData ? (JSON.parse(order.invoiceData) as InvoiceData) : null;
+  } catch {
+    invoice = null;
+  }
+  const isCashOnPickup = order.paymentMethod === "cash_on_pickup" && order.paymentStatus !== "PAID";
 
   const nextStatuses = (ORDER_TRANSITIONS[order.status as OrderStatus] ?? []).filter((status) => {
     if (status === "READY") return order.fulfillmentType === "PICKUP";
     if (status === "SHIPPED") return order.fulfillmentType === "DELIVERY";
     if (status === "CANCELLED") return order.paymentStatus !== "PAID" && order.paymentStatus !== "PARTIALLY_REFUNDED";
-    if (status === "REFUNDED") return order.paymentStatus === "PAID" || order.paymentStatus === "PARTIALLY_REFUNDED";
+    if (status === "REFUNDED") return canRefund && (order.paymentStatus === "PAID" || order.paymentStatus === "PARTIALLY_REFUNDED");
     if (status === "PAID") return order.paymentProvider === "manual";
     return true;
   });
@@ -129,6 +145,53 @@ export default async function AdminOrderDetailPage({
             </div>
           </section>
 
+          {returnRequests.length > 0 && (
+            <section className="card border-terracotta/30 p-5">
+              <h2 className="mb-3 font-serif text-xl font-semibold">Segnalazioni del cliente</h2>
+              <ul className="space-y-4 text-sm">
+                {returnRequests.map((request) => (
+                  <li key={request.id} className="rounded-xl border border-ink/10 p-3">
+                    <p className="font-semibold">
+                      {request.status === "REQUESTED"
+                        ? "Da valutare"
+                        : request.status === "APPROVED"
+                          ? "Accolta, rimborso in corso"
+                          : request.status === "REFUNDED"
+                            ? "Accolta e rimborsata"
+                            : "Respinta"}{" "}
+                      · {formatRomeDateTime(request.createdAt)}
+                    </p>
+                    <p className="mt-1 whitespace-pre-line text-ink/70">{request.reason}</p>
+                    {request.adminNote && <p className="mt-1 text-xs text-ink/50">Nota: {request.adminNote}</p>}
+                    {(request.status === "REQUESTED" || request.status === "APPROVED") && (
+                      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                        {canRefund && (
+                          <form action={resolveReturnAction} className="space-y-2">
+                            <input type="hidden" name="requestId" value={request.id} />
+                            <input type="hidden" name="decision" value="APPROVED" />
+                            <label className="label-field" htmlFor={`refund-${request.id}`}>Rimborso (EUR, vuoto = totale)</label>
+                            <input id={`refund-${request.id}`} name="refundAmount" className="input-field" placeholder="es. 12,00" />
+                            <input name="note" maxLength={500} className="input-field" placeholder="Messaggio al cliente (opzionale)" />
+                            <button type="submit" className="btn-primary w-full">Accogli e rimborsa</button>
+                          </form>
+                        )}
+                        {request.status === "REQUESTED" && (
+                          <form action={resolveReturnAction} className="space-y-2">
+                            <input type="hidden" name="requestId" value={request.id} />
+                            <input type="hidden" name="decision" value="REJECTED" />
+                            <label className="label-field" htmlFor={`reject-${request.id}`}>Motivazione</label>
+                            <input id={`reject-${request.id}`} name="note" maxLength={500} required className="input-field" placeholder="Visibile al cliente" />
+                            <button type="submit" className="btn-secondary w-full">Respingi</button>
+                          </form>
+                        )}
+                      </div>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+
           <section className="card p-5">
             <h2 className="mb-3 font-serif text-xl font-semibold">Cronologia</h2>
             <ul className="space-y-3 text-sm">
@@ -195,14 +258,19 @@ export default async function AdminOrderDetailPage({
                         to === "CANCELLED" || to === "REFUNDED" ? "btn-secondary w-full" : "btn-primary w-full"
                       }
                     >
-                      Segna come {ORDER_STATUS_LABELS[to].toLowerCase()}
+                      {to === "DELIVERED" && isCashOnPickup
+                        ? "Consegnato e incassato in sede"
+                        : `Segna come ${ORDER_STATUS_LABELS[to].toLowerCase()}`}
                     </button>
                   </form>
                 ))}
                 {nextStatuses.includes("CANCELLED") && (
                   <p className="text-xs text-ink/40">
-                    L'annullamento da questo stato ricarica automaticamente il magazzino.
+                    L&apos;annullamento ricarica il magazzino e avvisa il cliente via email.
                   </p>
+                )}
+                {(nextStatuses.includes("READY") || nextStatuses.includes("SHIPPED") || nextStatuses.includes("DELIVERED")) && (
+                  <p className="text-xs text-ink/40">Pronto, spedito e consegnato inviano un&apos;email al cliente.</p>
                 )}
               </div>
             ) : null}
@@ -233,7 +301,7 @@ export default async function AdminOrderDetailPage({
                 <p className="mt-3 font-semibold text-ink">
                   {order.fulfillmentType === "PICKUP" ? "Ritiro richiesto" : "Consegna richiesta"}
                 </p>
-                <p className="text-ink/60">{formatRomeDateTime(order.fulfillmentAt)}</p>
+                <p className="text-ink/60">{formatRomeSlotShort(order.fulfillmentAt)}</p>
               </>
             )}
             <p className="mt-3 font-semibold text-ink">Pagamento</p>
@@ -242,14 +310,35 @@ export default async function AdminOrderDetailPage({
               {PAYMENT_STATUS_LABELS[order.paymentStatus as PaymentStatus] ?? order.paymentStatus}
             </p>
             {order.paymentRef && <p className="text-xs text-ink/40">Rif: {order.paymentRef}</p>}
-            {(order.paymentStatus === "PAID" || order.paymentStatus === "PARTIALLY_REFUNDED") && (
+            {canRefund && (order.paymentStatus === "PAID" || order.paymentStatus === "PARTIALLY_REFUNDED") && (
               <form action={transitionOrderAction} className="mt-3 space-y-2">
                 <input type="hidden" name="orderId" value={order.id} />
                 <input type="hidden" name="to" value="REFUNDED" />
-                <label className="label-field">Rimborso (EUR, vuoto = totale)</label>
-                <input name="refundAmount" className="input-field" placeholder="es. 10,00" />
+                <label className="label-field" htmlFor="refundAmount">Rimborso (EUR, vuoto = totale)</label>
+                <input id="refundAmount" name="refundAmount" className="input-field" placeholder="es. 10,00" />
                 <button type="submit" className="btn-secondary w-full">Emetti rimborso</button>
+                <p className="text-xs text-ink/45">
+                  {order.paymentProvider === "stripe"
+                    ? "Rimborso automatico sulla carta del cliente tramite Stripe."
+                    : "Pagamento manuale: il sistema registra il rimborso, il bonifico o la restituzione in contanti vanno eseguiti dalla sede."}
+                </p>
               </form>
+            )}
+            {invoice && (
+              <>
+                <p className="mt-3 font-semibold text-ink">Fattura richiesta</p>
+                <p className="text-ink/60">{invoice.name}</p>
+                {invoice.vatNumber && <p className="text-ink/60">P.IVA {invoice.vatNumber}</p>}
+                {invoice.taxCode && <p className="text-ink/60">C.F. {invoice.taxCode}</p>}
+                {invoice.sdiCode && <p className="text-ink/60">SDI {invoice.sdiCode}</p>}
+                {invoice.pec && <p className="text-ink/60">PEC {invoice.pec}</p>}
+                <p className="text-ink/60">{invoice.address}</p>
+              </>
+            )}
+            {order.termsAcceptedAt && (
+              <p className="mt-3 text-xs text-ink/40">
+                Condizioni {order.termsVersion} accettate il {formatRomeDateTime(order.termsAcceptedAt)}
+              </p>
             )}
             {order.customerNote && (
               <>
@@ -259,6 +348,7 @@ export default async function AdminOrderDetailPage({
             )}
           </section>
 
+          {order.fulfillmentType === "DELIVERY" && (
           <section className="card p-5">
             <h2 className="mb-3 font-serif text-xl font-semibold">Spedizione</h2>
             <form action={setTrackingAction} className="space-y-2">
@@ -284,6 +374,7 @@ export default async function AdminOrderDetailPage({
               </button>
             </form>
           </section>
+          )}
 
           <section className="card p-5">
             <h2 className="mb-3 font-serif text-xl font-semibold">Nota interna</h2>

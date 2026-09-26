@@ -148,6 +148,34 @@ export async function requireAdminCapability(capability: AdminCapability): Promi
   return user;
 }
 
+/** Come requireAdminCapability ma accetta più capacita alternative. */
+export async function requireAdminAnyCapability(capabilities: AdminCapability[]): Promise<SessionUser> {
+  const user = await requireAdmin();
+  if (isAdminTwoFactorRequired() && !user.twoFactorEnabled) {
+    redirect("/admin/sicurezza?required=1");
+  }
+  if (!capabilities.some((capability) => hasAdminCapability(user.role, capability))) {
+    redirect(`/admin?denied=${encodeURIComponent("Permessi insufficienti per questa operazione.")}`);
+  }
+  return user;
+}
+
+/**
+ * Gate per i Route Handler (export CSV): stessa politica delle pagine, 2FA
+ * obbligatorio compreso, ma con risposte HTTP invece di redirect.
+ */
+export async function authorizeAdminRoute(
+  capability: AdminCapability
+): Promise<{ ok: true; user: SessionUser } | { ok: false; status: 401 | 403; error: string }> {
+  const user = await getSessionUser();
+  if (!user) return { ok: false, status: 401, error: "Non autorizzato" };
+  if (isAdminTwoFactorRequired() && !user.twoFactorEnabled) {
+    return { ok: false, status: 403, error: "Attiva la verifica in due passaggi per scaricare i dati." };
+  }
+  if (!hasAdminCapability(user.role, capability)) return { ok: false, status: 403, error: "Permessi insufficienti" };
+  return { ok: true, user };
+}
+
 export function isAdminTwoFactorRequired(): boolean {
   return process.env.NODE_ENV === "production" && process.env.ADMIN_2FA_REQUIRED !== "false";
 }

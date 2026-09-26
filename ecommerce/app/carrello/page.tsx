@@ -8,6 +8,7 @@ import {
   removeCartItemAction,
   removeDiscountAction,
   removeGiftCardAction,
+  removeUnavailableAction,
   updateCartItemAction
 } from "@/lib/actions/cart";
 import CartRefreshBeacon from "@/components/storefront/CartRefreshBeacon";
@@ -15,6 +16,8 @@ import { getSessionCustomer } from "@/lib/auth/customer-session";
 import { formatCents } from "@/lib/money";
 import { getCartGiftCard } from "@/lib/services/cart";
 import { getCurrentCartView } from "@/lib/services/cart-session";
+import { listStoreProducts } from "@/lib/services/catalog";
+import { quoteRatesForCountry } from "@/lib/services/shipping";
 
 export const dynamic = "force-dynamic";
 
@@ -26,8 +29,23 @@ export default async function CartPage({
   searchParams: Promise<{ err?: string; warn?: string }>;
 }) {
   const [{ err, warn }, view, customer] = await Promise.all([searchParams, getCurrentCartView(), getSessionCustomer()]);
-  const isEmpty = !view || view.lines.length === 0;
+  const isEmpty = !view || (view.lines.length === 0 && view.unavailableLines.length === 0);
   const giftCard = view ? await getCartGiftCard(view.cart, customer?.id) : null;
+  const discounted = view ? view.subtotalCents - view.discountCents : 0;
+  const [rates, catalog] = view
+    ? await Promise.all([
+        view.cart.location.deliveryEnabled ? quoteRatesForCountry("IT", discounted) : Promise.resolve([]),
+        listStoreProducts(view.locationId)
+      ])
+    : [[], []];
+  // Soglia di consegna gratuita più vicina, per un incentivo chiaro nel riepilogo.
+  const nextFreeShipping = rates
+    .map((rate) => rate.freeAboveCents)
+    .filter((threshold): threshold is number => threshold !== null && threshold > discounted)
+    .sort((a, b) => a - b)[0];
+  const inCart = new Set(view?.lines.map((line) => line.productId) ?? []);
+  const suggestions = catalog.filter((product) => !inCart.has(product.id) && product.inStock).slice(0, 3);
+  const blocked = Boolean(view && view.unavailableLines.length > 0);
 
   return (
     <>
@@ -117,6 +135,39 @@ export default async function CartPage({
               ))}
             </ul>
 
+            {view.unavailableLines.length > 0 && (
+              <div className="card border-terracotta/30 p-4" role="status">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <p className="text-sm font-semibold text-terracotta">
+                    Alcuni prodotti non sono ordinabili ora. Rimuovili per procedere.
+                  </p>
+                  <form action={removeUnavailableAction}>
+                    <SubmitButton pendingLabel="Rimuovo…" className="btn-secondary !px-4 text-xs">
+                      Rimuovi non disponibili
+                    </SubmitButton>
+                  </form>
+                </div>
+                <ul className="mt-3 divide-y divide-ink/10">
+                  {view.unavailableLines.map((line) => (
+                    <li key={line.itemId} className="flex items-center justify-between gap-3 py-2 text-sm text-ink/60">
+                      <span>
+                        {line.qty} × {line.productName} ({line.variantName})
+                        <span className="badge ml-2 bg-ink/10 text-ink/60">
+                          {line.reason === "sold_out" ? "Esaurito" : "Non più disponibile"}
+                        </span>
+                      </span>
+                      <form action={removeCartItemAction}>
+                        <input type="hidden" name="itemId" value={line.itemId} />
+                        <SubmitButton pendingLabel="…" className="btn-ghost text-xs text-terracotta" aria-label={`Rimuovi ${line.productName}`}>
+                          Rimuovi
+                        </SubmitButton>
+                      </form>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             <div className="card p-4">
               {view.discountCode && !view.discountWarning ? (
                 <div className="flex items-center justify-between text-sm">
@@ -133,9 +184,9 @@ export default async function CartPage({
                 <form action={applyDiscountAction} className="flex flex-col gap-3 sm:flex-row sm:items-end">
                   <div className="flex-1">
                     <label htmlFor="code" className="label-field">
-                      Codice sconto / gift card
+                      Codice sconto
                     </label>
-                    <input id="code" name="code" className="input-field uppercase" placeholder="BENVENUTO10" />
+                    <input id="code" name="code" className="input-field uppercase" placeholder="Inserisci il codice" />
                   </div>
                   <SubmitButton pendingLabel="Applico…" className="btn-secondary">
                     Applica
@@ -197,7 +248,12 @@ export default async function CartPage({
                   </span>
                 </div>
               )}
-              <p className="text-xs text-ink/40">Spedizione calcolata al checkout (gratis per il ritiro).</p>
+              <p className="text-xs text-ink/40">Consegna calcolata al checkout (il ritiro in sede è gratuito).</p>
+              {nextFreeShipping !== undefined && (
+                <p className="rounded-xl bg-brilliant/10 px-3 py-2 text-xs font-semibold text-emerald-800">
+                  Ti mancano {formatCents(nextFreeShipping - discounted)} per la consegna gratuita.
+                </p>
+              )}
               <div className="flex justify-between border-t border-ink/10 pt-3 text-base font-bold">
                 <span>{giftCard?.valid ? "Da pagare (anteprima)" : "Totale parziale"}</span>
                 <span>
@@ -211,10 +267,45 @@ export default async function CartPage({
                   )}
                 </span>
               </div>
-              <Link href="/checkout" className="btn-primary mt-4 w-full">
-                Procedi al checkout
-              </Link>
+              {blocked || view.lines.length === 0 ? (
+                <p className="mt-4 rounded-xl bg-ink/5 px-4 py-3 text-center text-xs font-semibold text-ink/60">
+                  Rimuovi i prodotti non disponibili per procedere al checkout.
+                </p>
+              ) : (
+                <Link href="/checkout" className="btn-primary mt-4 w-full">
+                  Procedi al checkout
+                </Link>
+              )}
             </div>
+
+            {suggestions.length > 0 && (
+              <section aria-labelledby="cart-suggestions" className="pt-4">
+                <h2 id="cart-suggestions" className="font-serif text-2xl font-semibold">
+                  Da aggiungere dalla stessa sede
+                </h2>
+                <ul className="mt-4 grid gap-4 sm:grid-cols-3">
+                  {suggestions.map((product) => (
+                    <li key={product.id}>
+                      <Link
+                        href={`/sede/${view.locationSlug}/prodotti/${product.slug}`}
+                        className="card flex h-full items-center gap-3 p-3 transition hover:border-terracotta/40"
+                      >
+                        <span className="tile-frame h-16 w-16 shrink-0 overflow-hidden rounded-xl bg-cream">
+                          {product.image && (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img src={product.image} alt="" className="h-full w-full object-contain p-1" loading="lazy" />
+                          )}
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block truncate font-semibold">{product.name}</span>
+                          <span className="text-sm text-ink/60">da {formatCents(product.priceMin)}</span>
+                        </span>
+                      </Link>
+                    </li>
+                  ))}
+                </ul>
+              </section>
+            )}
           </div>
         )}
       </main>

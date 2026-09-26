@@ -1,3 +1,5 @@
+import { sanitizedPageLocation } from "@/lib/analytics-location";
+
 export type AnalyticsItem = {
   item_id: string;
   item_name: string;
@@ -40,6 +42,8 @@ export function centsToAnalyticsValue(cents: number): number {
 export function trackEcommerceEvent(event: string, payload: EcommerceEventPayload = {}): void {
   if (typeof window === "undefined") return;
   if (window.sessaAnalyticsConsent !== true) return;
+  // Eventi e-commerce con URL ripulito (nessun token in page_location).
+  payload = { ...payload, page_location: sanitizedPageLocation(window.location.href) };
   const normalized = { currency: "EUR", ...payload };
   const entry = { event, ecommerce: normalized, timestamp: new Date().toISOString() };
   window.sessaAnalyticsQueue = [...(window.sessaAnalyticsQueue ?? []), entry].slice(-50);

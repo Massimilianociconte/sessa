@@ -6,46 +6,47 @@
 
 ## 1. SESSION_SECRET
 
-`SESSION_SECRET` deriva le chiavi di: cifratura AES-256-GCM dei segreti TOTP
-e dei corpi email in coda (`lib/security/secret-box.ts`), HMAC del cookie
-display-name e dei challenge WebAuthn, derivazione chiavi rate-limit.
+`SESSION_SECRET` deriva le chiavi di: cifratura AES-256-GCM dei segreti TOTP,
+delle email in coda e dei dati sensibili (`lib/security/secret-box.ts`), HMAC
+dei codici di backup 2FA, del cookie display-name, dei challenge WebAuthn, dei
+link firmati (disiscrizione) e delle chiavi di rate limit.
 
-Il formato busta è versionato (`enc:v1:` legacy, `enc:v2:` corrente): le nuove
-cifrazioni usano v2; le letture v1 usano `SESSION_SECRET_PREVIOUS` quando
-presente. I valori vengono ri-cifrati in v2 in modo opportunistico ad ogni
-verifica 2FA riuscita e alla consegna delle email, quindi la previous key si
-rimuove dopo una finestra di osservazione.
+Il codice lavora con un **keyring**: firma e cifra sempre con
+`SESSION_SECRET`, ma verifica e decifra anche con `SESSION_SECRET_PREVIOUS`.
+Durante la rotazione quindi nessuno viene disconnesso, i link già inviati
+restano validi e i codici 2FA continuano a funzionare. Il job orario
+(`/api/internal/jobs/email`, minuto 0) ri-cifra in blocchi con la chiave nuova
+admin, clienti ed email in coda; i codici di backup vengono riscritti al primo
+uso.
 
-Procedura:
+Procedura (dopo aver pubblicato il codice con keyring, **mai prima**):
 
 ```bash
-# 1. Genera i due nuovi valori (32+ byte esadecimali)
-node -e "console.log(require('node:crypto').randomBytes(32).toString('hex'))"
+# 1. Genera il nuovo valore
+openssl rand -hex 32
 
 # 2. Netlify → Site configuration → Environment variables:
 #    SESSION_SECRET           = <NUOVO>
-#    SESSION_SECRET_PREVIOUS  = <VECCHIO>   ← abilita la decifratura dei dati v1
-# 3. Deploy (npm run deploy:prod).
-# 4. Finestra di osservazione 7-14 giorni: ogni verifica 2FA riuscita ri-cifra
-#    il secret TOTP dell'utente in v2; la coda email si svuota naturalmente.
-#    Verifica residui:
-#      SELECT COUNT(*) FROM "Customer" WHERE "totpSecret" LIKE 'enc:v1:%';
-#      SELECT COUNT(*) FROM "AdminUser" WHERE "totpSecret" LIKE 'enc:v1:%';
-#      SELECT COUNT(*) FROM "EmailMessage" WHERE body LIKE 'enc:v1:%';
-# 5. A residui zero (o dopo accettazione del rischio): rimuovi
-#    SESSION_SECRET_PREVIOUS e ridistribuisci.
+#    SESSION_SECRET_PREVIOUS  = <VECCHIO>
+# 3. Nuovo deploy (le variabili si leggono al deploy): npm run deploy:prod
+# 4. Gestionale → Checklist lancio → "Segreti": mostra i record ancora da
+#    ri-cifrare. Il job orario li porta a zero (di solito in poche ore).
+#    Verifica diretta, se serve:
+#      SELECT COUNT(*) FROM "Customer"  WHERE "totpSecret" IS NOT NULL;
+#      SELECT COUNT(*) FROM "AdminUser" WHERE "totpSecret" IS NOT NULL;
+# 5. A residui zero, e dopo almeno 7 giorni (link email già inviati e
+#    sessioni lunghe), rimuovi SESSION_SECRET_PREVIOUS e ridistribuisci.
 ```
 
-Nota: gli utenti con TOTP che NON effettuano login durante la finestra restano
-in v1 finché non rientrano — tenere `SESSION_SECRET_PREVIOUS` fino a copertura
-soddisfacente, oppure chiedere una riattivazione 2FA ai residuali.
+Da quel momento il vecchio valore non apre più nulla: le copie su disco del
+vecchio `.env.production` diventano innocue per questo segreto.
 
 ## 2. DATABASE_URL (password Supabase)
 
 1. Supabase → Settings → Database → Reset database password.
-2. Aggiornare le tre variabili su Netlify (`DATABASE_URL` pooler :6543 runtime,
-   `MIGRATION_DATABASE_URL` diretta :5432 per le release) e i file locali
-   `.env` / `.env.production`.
+2. Aggiornare su Netlify `DATABASE_URL` (transaction pooler :6543 runtime).
+   `MIGRATION_DATABASE_URL` (diretta :5432) non va salvata da nessuna parte:
+   si incolla nella shell al momento della release (vedi DEPLOY_NETLIFY.md).
 3. Verificare `npm run db:verify` e uno smoke checkout in preview.
 4. Il vecchio valore resta valido finché non ruotato: trattare qualunque copia
    su disco come compromessa e rimuoverla (`.env*`, note, password manager).
@@ -54,20 +55,21 @@ soddisfacente, oppure chiedere una riattivazione 2FA ai residuali.
 
 Serve solo finché `AdminUser.count() === 0`. Se un owner esiste già:
 
-- nessuna urgenza tecnica, ma va comunque rigenerato (stesso schema Netlify);
-- la pagina `/admin/setup` è auto-disabilitata quando esiste almeno un admin.
+- rimuovere la variabile da Netlify: non serve più (la Checklist lancio lo segnala);
+- la pagina `/admin/setup` è comunque auto-disabilitata quando esiste almeno un admin.
 
 ## 4. Sviluppo locale vs produzione
 
-Il `.env` locale DEVE puntare a un Postgres locale/di staging:
+Il `.env` locale punta a un Postgres locale (`sessa_dev`). `lib/db-guard.ts`
+**rifiuta** la connessione a qualunque host remoto quando `NODE_ENV` non è
+`production` (dev server, seed, script, test). L'eccezione consapevole, solo
+da riga di comando per un singolo comando di release, è
+`SESSA_ALLOW_REMOTE_DB=1`; `npm run db:deploy` verso un host remoto chiede
+inoltre di digitare `MIGRA`.
 
-```
-# .env (sviluppo)
-DATABASE_URL="postgresql://sessa:sessa@localhost:5432/sessa_dev"
-```
-
-`lib/db.ts` emette un warning forte se rileva host Supabase da NODE_ENV≠production;
-l'override consapevole è `SESSA_ALLOW_PROD_DB_FROM_DEV=1`.
+`.env.production` non serve per lavorare: le variabili di produzione vivono su
+Netlify. Se esiste ancora in locale, dopo la rotazione cancellarlo (contiene
+solo valori ormai revocati) o spostarlo in un password manager.
 
 ## 5. STRIPE_WEBHOOK_SECRET / chiavi API
 

@@ -17,7 +17,7 @@ import {
 import { prisma } from "@/lib/db";
 import { formatCents } from "@/lib/money";
 import { listOrders, orderFilterStats, type OrderFilter } from "@/lib/services/orders";
-import { formatRomeDateTime, romeDayRange } from "@/lib/datetime";
+import { formatRomeDateTime, formatRomeSlotShort, romeDayRange } from "@/lib/datetime";
 import { adminLocationScope, requireAdminCapability } from "@/lib/auth/session";
 import { hasAdminCapability } from "@/lib/auth/admin-authorization";
 
@@ -44,6 +44,8 @@ export default async function AdminOrdersPage({
     a?: string;
     giorno?: string;
     pagina?: string;
+    resi?: string;
+    scaduti?: string;
     msg?: string;
     err?: string;
   }>;
@@ -77,7 +79,9 @@ export default async function AdminOrdersPage({
     placedTo,
     fulfillmentOn: parseDay(sp.giorno),
     page,
-    allowedLocationIds
+    allowedLocationIds,
+    openReturnsOnly: sp.resi === "1",
+    overdueOnly: sp.scaduti === "1"
   };
   const [{ orders, total, pageCount }, stats] = await Promise.all([
     listOrders(filter),
@@ -96,7 +100,9 @@ export default async function AdminOrdersPage({
     codice: sp.codice,
     da: sp.da,
     a: sp.a,
-    giorno: sp.giorno
+    giorno: sp.giorno,
+    resi: sp.resi,
+    scaduti: sp.scaduti
   })) {
     if (value) currentParams.set(key, value);
   }
@@ -151,7 +157,7 @@ export default async function AdminOrdersPage({
         </div>
         <div>
           <label className="label-field">Codice sconto</label>
-          <input name="codice" defaultValue={sp.codice} className="input-field uppercase" placeholder="BENVENUTO10" />
+          <input name="codice" defaultValue={sp.codice} className="input-field uppercase" placeholder="Codice sconto" />
         </div>
         <div>
           <label className="label-field">Sede</label>
@@ -270,7 +276,7 @@ export default async function AdminOrdersPage({
                   </p>
                   <p>
                     {order.fulfillmentAt
-                      ? formatRomeDateTime(order.fulfillmentAt)
+                      ? formatRomeSlotShort(order.fulfillmentAt)
                       : "Da concordare"}
                   </p>
                 </td>

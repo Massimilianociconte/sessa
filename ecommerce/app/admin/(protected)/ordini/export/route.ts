@@ -1,6 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { adminLocationScope, getSessionUser } from "@/lib/auth/session";
-import { hasAdminCapability } from "@/lib/auth/admin-authorization";
+import { adminLocationScope, authorizeAdminRoute } from "@/lib/auth/session";
 import {
   FULFILLMENT_LABELS,
   ORDER_STATUS_LABELS,
@@ -16,7 +15,12 @@ import { formatCents } from "@/lib/money";
 import { listOrdersForExport, type OrderFilter } from "@/lib/services/orders";
 import { audit } from "@/lib/audit";
 import { csvCell } from "@/lib/security/csv";
-import { romeDayRange } from "@/lib/datetime";
+import { formatRomeDateTimeLocal, romeDayRange } from "@/lib/datetime";
+
+/** "2026-12-24 10:30" in ora di Roma: i CSV li leggono persone in negozio, non sistemi UTC. */
+function romeCell(date: Date | null): string {
+  return date ? formatRomeDateTimeLocal(date).replace("T", " ") : "";
+}
 
 export const dynamic = "force-dynamic";
 
@@ -26,11 +30,9 @@ function parseDay(value: string | null): Date | undefined {
 
 /** Export CSV degli ordini filtrati. Middleware = primo cancello; qui la sessione admin è rivalidata a DB. */
 export async function GET(request: NextRequest) {
-  const user = await getSessionUser();
-  if (!user) return NextResponse.json({ error: "Non autorizzato" }, { status: 401 });
-  if (!hasAdminCapability(user.role, "exports:download")) {
-    return NextResponse.json({ error: "Permessi insufficienti" }, { status: 403 });
-  }
+  const auth = await authorizeAdminRoute("exports:download");
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
+  const user = auth.user;
 
   const params = request.nextUrl.searchParams;
   const placedTo = params.get("a") ? romeDayRange(params.get("a")!)?.end : undefined;
@@ -60,7 +62,7 @@ export async function GET(request: NextRequest) {
 
   const header = [
     "Codice",
-    "Data ordine",
+    "Data ordine (ora di Roma)",
     "Sede",
     "Cliente",
     "Email",
@@ -70,7 +72,7 @@ export async function GET(request: NextRequest) {
     "Metodo pagamento",
     "Rif. pagamento",
     "Modalità",
-    "Ritiro/consegna il",
+    "Ritiro/consegna (ora di Roma)",
     "Articoli",
     "Subtotale",
     "Sconto",
@@ -78,11 +80,14 @@ export async function GET(request: NextRequest) {
     "Consegna",
     "Totale",
     "Codice sconto",
-    "Referral"
+    "Referral",
+    "Rimborsato",
+    "Fattura richiesta",
+    "Note cliente"
   ];
   const rows = orders.map((order) => [
     order.code,
-    order.placedAt.toISOString(),
+    romeCell(order.placedAt),
     order.location?.name ?? order.locationName,
     order.shipFullName,
     order.email,
@@ -92,7 +97,7 @@ export async function GET(request: NextRequest) {
     order.paymentMethod ?? "",
     order.paymentRef ?? "",
     FULFILLMENT_LABELS[order.fulfillmentType as FulfillmentType] ?? order.fulfillmentType,
-    order.fulfillmentAt ? order.fulfillmentAt.toISOString() : "",
+    romeCell(order.fulfillmentAt),
     order.items.map((item) => `${item.qty}x ${item.productName} (${item.variantName})`).join(" | "),
     formatCents(order.subtotalCents),
     formatCents(order.discountCents),
@@ -100,7 +105,10 @@ export async function GET(request: NextRequest) {
     formatCents(order.shippingCents),
     formatCents(order.totalCents),
     order.discountCodeSnapshot ?? "",
-    order.referralCodeSnapshot ?? ""
+    order.referralCodeSnapshot ?? "",
+    formatCents(order.refundedCents),
+    order.invoiceRequested ? "Sì" : "",
+    order.customerNote ?? ""
   ]);
 
   const csv = [header, ...rows].map((row) => row.map(csvCell).join(";")).join("\n");

@@ -20,6 +20,7 @@ const NAV: Array<{ href: string; label: string; capability?: AdminCapability }> 
   { href: "/admin/referral", label: "Referral", capability: "customers:manage" },
   { href: "/admin/clienti", label: "Clienti", capability: "customers:manage" },
   { href: "/admin/osservabilita", label: "Operazioni", capability: "operations:view" },
+  { href: "/admin/prontezza", label: "Checklist lancio", capability: "operations:view" },
   { href: "/admin/merchant-center", label: "Merchant", capability: "merchant:manage" },
   { href: "/admin/sicurezza", label: "Sicurezza" },
   { href: "/admin/impostazioni", label: "Profilo e impostazioni" }

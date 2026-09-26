@@ -40,6 +40,22 @@ export async function getReferralConfig(): Promise<ReferralConfig> {
   };
 }
 
+/**
+ * Identita email canonica per l'anti-abuso: Gmail ignora i punti e il suffisso
+ * "+etichetta", molti provider ignorano il "+". Nome.Cognome+1@gmail.com e
+ * nomecognome@gmail.com sono la stessa casella: niente auto-inviti in serie.
+ */
+export function canonicalEmailIdentity(email: string): string {
+  const [rawLocal = "", rawDomain = ""] = email.trim().toLowerCase().split("@");
+  const domain = rawDomain === "googlemail.com" ? "gmail.com" : rawDomain;
+  let local = rawLocal.split("+")[0] ?? rawLocal;
+  if (domain === "gmail.com") local = local.replaceAll(".", "");
+  return `${local}@${domain}`;
+}
+
+/** Premi referral massimi per chi invita in 30 giorni (limita il farming di account). */
+const MAX_REFERRER_REWARDS_PER_30_DAYS = 10;
+
 export function referralLink(referralCode: string): string {
   return `${SITE_URL}/r/${referralCode}`;
 }
@@ -107,7 +123,7 @@ export async function linkReferralOnSignup(
   const referrer = await prisma.customer.findUnique({ where: { referralCode } });
   if (!referrer) return;
   if (referrer.id === newCustomerId) return; // auto-invito
-  if (referrer.email.toLowerCase() === newEmail.toLowerCase()) return; // stessa persona
+  if (canonicalEmailIdentity(referrer.email) === canonicalEmailIdentity(newEmail)) return; // stessa casella (alias)
 
   const config = await getReferralConfig();
 
@@ -144,6 +160,7 @@ export async function linkReferralOnSignup(
       toEmail: newEmail,
       subject: "Benvenuto in Sessa 1930 — hai uno sconto",
       body: `Ti diamo il benvenuto! Usa il codice ${friendCode} al tuo primo ordine.`,
+      cta: { url: `${SITE_URL}/`, label: "Scegli la tua sede" },
       type: "REFERRAL_WELCOME"
     });
   } catch {
@@ -160,12 +177,14 @@ export async function linkReferralOnSignup(
 export async function maybeConvertReferral(invitedCustomerId: string, orderId: string): Promise<void> {
   const config = await getReferralConfig();
   const reward = await prisma.$transaction(async (tx) => {
+    // Solo ordini pagati E consegnati/ritirati: un ordine poi annullato o
+    // rimborsato non deve aver già generato una ricompensa.
     const paidOrder = await tx.order.findFirst({
       where: {
         id: orderId,
         customerId: invitedCustomerId,
         paymentStatus: "PAID",
-        status: { notIn: ["CANCELLED", "REFUNDED"] }
+        status: "DELIVERED"
       },
       select: { id: true }
     });
@@ -175,6 +194,14 @@ export async function maybeConvertReferral(invitedCustomerId: string, orderId: s
       include: { referrer: true }
     });
     if (!referral || referral.status !== "SIGNED_UP") return null;
+    const recentRewards = await tx.referral.count({
+      where: {
+        referrerId: referral.referrerId,
+        status: "REDEEMED",
+        redeemedAt: { gte: new Date(Date.now() - 30 * 24 * 60 * 60_000) }
+      }
+    });
+    if (recentRewards >= MAX_REFERRER_REWARDS_PER_30_DAYS) return null;
 
     const converted = await tx.referral.updateMany({
       where: { id: referral.id, status: "SIGNED_UP" },
@@ -205,6 +232,7 @@ export async function maybeConvertReferral(invitedCustomerId: string, orderId: s
     toEmail: reward.toEmail,
     subject: "Un amico ha ordinato — ecco il tuo premio",
     body: `Grazie per aver invitato un amico! Usa il codice ${reward.rewardCode} sul tuo prossimo ordine.`,
+    cta: { url: `${SITE_URL}/account/codici`, label: "I tuoi codici" },
     type: "REFERRAL_REWARD"
   });
 }

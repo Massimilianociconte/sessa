@@ -8,6 +8,7 @@ import {
   changeOwnPasswordAction,
   createAdminUserAction,
   resetAdminUserPasswordAction,
+  saveLegalSettingsAction,
   saveStoreSettingsAction,
   toggleAdminUserAction,
   updateAdminAccessAction
@@ -39,7 +40,26 @@ export default async function AdminSettingsPage({
           "store.phone",
           "store.address",
           "store.vat",
-          "payments.bankTransferInstructions"
+          "payments.bankTransferInstructions",
+          "legal.companyName",
+          "legal.registeredOffice",
+          "legal.vatNumber",
+          "legal.taxCode",
+          "legal.rea",
+          "legal.pec",
+          "legal.supportEmail",
+          "legal.privacyEmail",
+          "legal.supportPhone",
+          "legal.termsVersion",
+          "notifications.ordersEmail",
+          "notifications.alertsEmail",
+          "notifications.alertsWebhookUrl",
+          "payments.cashMaxCents",
+          "payments.cashMaxAdvanceDays",
+          "payments.bankTransferMinBusinessDays",
+          "payments.bankTransferReservationBusinessDays",
+          "payments.maxCardAttempts",
+          "orders.customerCancelHours"
         ])
       : Promise.resolve({} as Record<string, unknown>),
     canManageSettings
@@ -141,6 +161,76 @@ export default async function AdminSettingsPage({
           </form>
         </section>}
 
+        {canManageSettings && <section className="card h-fit p-6">
+          <h2 className="font-serif text-xl font-semibold">Dati legali, avvisi e regole di pagamento</h2>
+          <p className="mb-4 mt-1 text-xs text-ink/50">
+            I dati aziendali compaiono in note legali, condizioni di vendita e privacy. Finché mancano, la checklist di lancio lo segnala.
+          </p>
+          <form action={saveLegalSettingsAction} className="space-y-3">
+            {(
+              [
+                ["companyName", "legal.companyName", "Ragione sociale", "text"],
+                ["registeredOffice", "legal.registeredOffice", "Sede legale", "text"],
+                ["vatNumber", "legal.vatNumber", "Partita IVA", "text"],
+                ["taxCode", "legal.taxCode", "Codice fiscale (se diverso)", "text"],
+                ["rea", "legal.rea", "Numero REA", "text"],
+                ["pec", "legal.pec", "PEC", "email"],
+                ["supportEmail", "legal.supportEmail", "Email assistenza clienti", "email"],
+                ["privacyEmail", "legal.privacyEmail", "Email per richieste privacy", "email"],
+                ["supportPhone", "legal.supportPhone", "Telefono assistenza", "text"],
+                ["termsVersion", "legal.termsVersion", "Versione condizioni di vendita", "text"]
+              ] as const
+            ).map(([name, key, label, type]) => (
+              <div key={name}>
+                <label className="label-field" htmlFor={`legal-${name}`}>{label}</label>
+                <input id={`legal-${name}`} name={name} type={type} defaultValue={String(settings[key] ?? (name === "termsVersion" ? "2026-09" : ""))} className="input-field" />
+              </div>
+            ))}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label className="label-field" htmlFor="ordersEmail">Email avvisi nuovi ordini (fallback)</label>
+                <input id="ordersEmail" name="ordersEmail" type="email" defaultValue={String(settings["notifications.ordersEmail"] ?? "")} className="input-field" />
+              </div>
+              <div>
+                <label className="label-field" htmlFor="alertsEmail">Email allarmi tecnici</label>
+                <input id="alertsEmail" name="alertsEmail" type="email" defaultValue={String(settings["notifications.alertsEmail"] ?? "")} className="input-field" />
+              </div>
+            </div>
+            <div>
+              <label className="label-field" htmlFor="alertsWebhookUrl">Webhook allarmi (Slack/Telegram/Teams, https)</label>
+              <input id="alertsWebhookUrl" name="alertsWebhookUrl" defaultValue={String(settings["notifications.alertsWebhookUrl"] ?? "")} className="input-field" placeholder="https://hooks.slack.com/…" />
+              <p className="mt-1 text-xs text-ink/45">Consigliato: arriva anche quando le email non partono.</p>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label className="label-field" htmlFor="cashMax">Pagamento in sede fino a (€)</label>
+                <input id="cashMax" name="cashMax" defaultValue={toEuro(Number(settings["payments.cashMaxCents"] ?? 15000))} className="input-field" />
+              </div>
+              <div>
+                <label className="label-field" htmlFor="cashMaxAdvanceDays">Pagamento in sede: ritiro entro (giorni)</label>
+                <input id="cashMaxAdvanceDays" name="cashMaxAdvanceDays" type="number" min={1} max={60} defaultValue={Number(settings["payments.cashMaxAdvanceDays"] ?? 7)} className="input-field" />
+              </div>
+              <div>
+                <label className="label-field" htmlFor="bankTransferMinBusinessDays">Bonifico: anticipo minimo (giorni lavorativi)</label>
+                <input id="bankTransferMinBusinessDays" name="bankTransferMinBusinessDays" type="number" min={1} max={30} defaultValue={Number(settings["payments.bankTransferMinBusinessDays"] ?? 3)} className="input-field" />
+              </div>
+              <div>
+                <label className="label-field" htmlFor="bankTransferReservationBusinessDays">Bonifico: accredito entro (giorni lavorativi)</label>
+                <input id="bankTransferReservationBusinessDays" name="bankTransferReservationBusinessDays" type="number" min={1} max={15} defaultValue={Number(settings["payments.bankTransferReservationBusinessDays"] ?? 2)} className="input-field" />
+              </div>
+              <div>
+                <label className="label-field" htmlFor="maxCardAttempts">Tentativi carta per ordine</label>
+                <input id="maxCardAttempts" name="maxCardAttempts" type="number" min={1} max={20} defaultValue={Number(settings["payments.maxCardAttempts"] ?? 5)} className="input-field" />
+              </div>
+              <div>
+                <label className="label-field" htmlFor="customerCancelHours">Annullo online fino a (ore prima)</label>
+                <input id="customerCancelHours" name="customerCancelHours" type="number" min={0} max={720} defaultValue={Number(settings["orders.customerCancelHours"] ?? 24)} className="input-field" />
+              </div>
+            </div>
+            <button type="submit" className="btn-primary">Salva dati legali e regole</button>
+          </form>
+        </section>}
+
         <div className="space-y-6">
           {canManageSettings && <section className="card p-6">
             <h2 className="mb-4 font-serif text-xl font-semibold">Spedizioni</h2>
@@ -181,6 +271,13 @@ export default async function AdminSettingsPage({
                           />
                         </div>
                       </div>
+                      <div>
+                        <label className="label-field">Tipo</label>
+                        <select name="scope" defaultValue={rate.scope} className="input-field">
+                          <option value="NATIONAL">Corriere (solo prodotti spedibili)</option>
+                          <option value="LOCAL">Consegna locale del fresco (CAP della sede)</option>
+                        </select>
+                      </div>
                       <label className="flex items-center gap-2 text-sm">
                         <input
                           type="checkbox"
@@ -215,6 +312,10 @@ export default async function AdminSettingsPage({
                     <input name="name" placeholder="Nome" required className="input-field" />
                     <input name="amount" placeholder="Costo €" required className="input-field" />
                     <input name="freeAbove" placeholder="Gratis sopra €" className="input-field" />
+                    <select name="scope" defaultValue="LOCAL" className="input-field sm:col-span-3" aria-label="Tipo di consegna">
+                      <option value="LOCAL">Consegna locale del fresco (CAP della sede)</option>
+                      <option value="NATIONAL">Corriere (solo prodotti spedibili)</option>
+                    </select>
                     <button type="submit" className="btn-primary sm:col-span-3">
                       Crea tariffa
                     </button>

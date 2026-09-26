@@ -9,7 +9,7 @@ export const CATALOG_OCCASIONS = [
   {
     slug: "colazione",
     label: "Perfetti per colazione",
-    description: "Dolci da condividere al mattino o con il caffe."
+    description: "Dolci da condividere al mattino o con il caffè."
   },
   {
     slug: "festa",
@@ -19,7 +19,7 @@ export const CATALOG_OCCASIONS = [
   {
     slug: "classici",
     label: "Classici Sessa",
-    description: "Specialita napoletane e pasticceria tradizionale."
+    description: "Specialità napoletane e pasticceria tradizionale."
   }
 ] as const;
 

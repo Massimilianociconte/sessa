@@ -6,7 +6,7 @@ import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { requireCustomer } from "@/lib/auth/customer-session";
-import { addItemToCart, CART_COOKIE, cartCookieSetOptions, getOrCreateCartForLocation } from "@/lib/services/cart";
+import { addItemToCart, CART_COOKIE, cartCookieSetOptions, getCartByToken, getOrCreateCartForLocation } from "@/lib/services/cart";
 
 async function ensureCartToken(): Promise<string> {
   const store = await cookies();
@@ -31,6 +31,11 @@ export async function reorderAction(formData: FormData): Promise<void> {
   }
 
   const token = await ensureCartToken();
+  // Un carrello = una sede: prima di svuotare un carrello di un'altra sede si chiede conferma.
+  const current = await getCartByToken(token);
+  if (current && current.locationId !== order.locationId && current.items.length > 0 && formData.get("confirmSwitch") !== "1") {
+    redirect(`/account/ordini/${encodeURIComponent(order.code)}?confirmReorder=1`);
+  }
   const cart = await getOrCreateCartForLocation(token, order.locationId);
 
   let added = 0;

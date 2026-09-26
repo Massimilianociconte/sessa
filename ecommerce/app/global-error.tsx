@@ -58,6 +58,9 @@ export default function GlobalError({
             </button>
             <button
               type="button"
+              // Ricaricamento completo voluto: il layout radice e fallito, una
+              // navigazione client riuserebbe lo stesso albero React rotto.
+              // eslint-disable-next-line @next/next/no-location-assign-relative-destination
               onClick={() => window.location.assign("/")}
               style={{
                 border: "1px solid #a83f18",

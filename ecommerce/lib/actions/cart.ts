@@ -1,23 +1,19 @@
 "use server";
 
-import { randomBytes } from "node:crypto";
 import { revalidatePath } from "next/cache";
 import { cookies, headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
-import { DomainError } from "@/lib/domain";
 import { getSessionCustomer } from "@/lib/auth/customer-session";
 import {
-  addItemToCart,
   attachDiscount,
   attachGiftCard,
   buildCartView,
   CART_COOKIE,
   cartClampWarning,
-  cartCookieSetOptions,
   getCartByToken,
-  getOrCreateCartForLocation,
   removeItem,
+  removeUnavailableItems,
   setItemQty,
   toDiscountLines
 } from "@/lib/services/cart";
@@ -26,46 +22,9 @@ import { prisma } from "@/lib/db";
 import { checkGiftCard, loadGiftCard } from "@/lib/services/giftcards";
 import { enforceCartRateLimit } from "@/lib/services/cart-rate-limit";
 
-async function ensureCartToken(): Promise<string> {
-  const store = await cookies();
-  const existing = store.get(CART_COOKIE)?.value;
-  if (existing) return existing;
-  const token = randomBytes(24).toString("hex");
-  store.set(CART_COOKIE, token, cartCookieSetOptions());
-  return token;
-}
-
 export async function readCartToken(): Promise<string | null> {
   const store = await cookies();
   return store.get(CART_COOKIE)?.value ?? null;
-}
-
-const addSchema = z.object({
-  locationId: z.string().min(1),
-  storeVariantId: z.string().min(1),
-  qty: z.coerce.number().int().min(1).max(99).default(1)
-});
-
-export async function addToCartAction(formData: FormData): Promise<void> {
-  const parsed = addSchema.safeParse({
-    locationId: formData.get("locationId"),
-    storeVariantId: formData.get("storeVariantId"),
-    qty: formData.get("qty") ?? 1
-  });
-  if (!parsed.success) redirect("/carrello?err=Selezione non valida");
-
-  const token = await ensureCartToken();
-  try {
-    await enforceCartRateLimit(await headers(), token, "mutation");
-    const cart = await getOrCreateCartForLocation(token, parsed.data.locationId);
-    const mutation = await addItemToCart(cart.id, parsed.data.storeVariantId, parsed.data.qty);
-    revalidatePath("/", "layout");
-    const warning = cartClampWarning(mutation);
-    redirect(warning ? `/carrello?warn=${encodeURIComponent(warning)}` : "/carrello");
-  } catch (error) {
-    if (error instanceof DomainError) redirect(`/carrello?err=${encodeURIComponent(error.message)}`);
-    throw error;
-  }
 }
 
 const qtySchema = z.object({ itemId: z.string().min(1), qty: z.coerce.number().int().min(0).max(99) });
@@ -90,6 +49,17 @@ export async function removeCartItemAction(formData: FormData): Promise<void> {
     await enforceCartRateLimit(await headers(), token, "mutation");
     const cart = await getCartByToken(token);
     if (cart) await removeItem(cart.id, itemId);
+  }
+  revalidatePath("/", "layout");
+  redirect("/carrello");
+}
+
+export async function removeUnavailableAction(): Promise<void> {
+  const token = await readCartToken();
+  if (token) {
+    await enforceCartRateLimit(await headers(), token, "mutation");
+    const cart = await getCartByToken(token);
+    if (cart) await removeUnavailableItems(cart.id);
   }
   revalidatePath("/", "layout");
   redirect("/carrello");

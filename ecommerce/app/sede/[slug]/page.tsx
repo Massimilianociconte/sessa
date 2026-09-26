@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 import JsonLd from "@/components/seo/JsonLd";
 import AnalyticsBeacon from "@/components/storefront/AnalyticsBeacon";
 import CatalogExplorer from "@/components/storefront/CatalogExplorer";
+import { RememberLocation } from "@/components/storefront/PreferredLocation";
 import Footer from "@/components/storefront/Footer";
 import Header from "@/components/storefront/Header";
 import { buildStoreJsonLd, buildStoreMetadata, getStoreSeo } from "@/lib/seo/sessa-local";
@@ -53,6 +54,7 @@ export default async function StoreCatalogPage({ params }: Props) {
   return (
     <>
       <Header currentLocation={{ slug: location.slug, name: seo.name }} />
+      <RememberLocation slug={location.slug} name={location.name} />
       <JsonLd data={jsonLd} />
       <AnalyticsBeacon
         event="view_item_list"

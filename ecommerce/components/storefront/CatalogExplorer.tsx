@@ -303,7 +303,7 @@ export default function CatalogExplorer({
           <div className="card py-16 text-center">
             <p className="font-serif text-2xl font-semibold">Nessun prodotto trovato</p>
             <p className="mt-2 text-sm text-ink/55">
-              Prova a cambiare occasione, categoria o ricerca. La disponibilita resta legata alla sede selezionata.
+              Prova a cambiare occasione, categoria o ricerca. La disponibilità resta legata alla sede selezionata.
             </p>
             <button type="button" onClick={resetFilters} className="btn-secondary mt-5">
               Mostra tutto

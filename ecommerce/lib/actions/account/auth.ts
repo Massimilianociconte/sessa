@@ -16,20 +16,10 @@ import {
   getSessionCustomer,
   pruneExpiredCustomerSessions
 } from "@/lib/auth/customer-session";
-import {
-  blockedForAny,
-  clearAttempts,
-  clearAttemptKeys,
-  isRateLimited,
-  registerFailedAttempt,
-  registerFailedAttempts
-} from "@/lib/auth/rate-limit";
+import { blockedForAny, clearAttemptKeys, registerFailedAttempts } from "@/lib/auth/rate-limit";
 import { clearCustomerDisplayNameCookie, setCustomerDisplayNameCookie } from "@/lib/auth/display-name";
-import {
-  beginCustomerRegistrationRequest,
-  consumeResetToken,
-  createResetToken
-} from "@/lib/services/customer-account";
+import { consumeResetToken, createResetToken } from "@/lib/services/customer-account";
+import { beginRegistration, completeRegistration } from "@/lib/services/registration";
 import { verifySecondFactor } from "@/lib/services/customer-2fa";
 import { enqueueEmail } from "@/lib/services/email";
 import { SITE_URL } from "@/lib/site";
@@ -61,7 +51,8 @@ export async function registerCustomerAction(_prev: AuthState, formData: FormDat
     email: formData.get("email"),
     firstName: formData.get("firstName"),
     lastName: formData.get("lastName"),
-    phone: formData.get("phone") ?? ""
+    phone: formData.get("phone") ?? "",
+    acceptPrivacy: formData.get("acceptPrivacy")
   });
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Dati non validi." };
@@ -78,39 +69,47 @@ export async function registerCustomerAction(_prev: AuthState, formData: FormDat
   await registerFailedAttempts(throttleKeys);
 
   try {
-    // Nessuna password viene accettata prima della prova di possesso email.
-    const request = await beginCustomerRegistrationRequest(parsed.data);
-    const token = await createResetToken(request.email);
-    if (!token) return { error: "Impossibile avviare la registrazione. Riprova." };
-    const link = `${SITE_URL}/account/reset?token=${token}&activate=1`;
-    const delivery = await enqueueEmail({
-      toEmail: request.email,
-      subject: request.alreadyRegistered
-        ? "Accesso al tuo account Sessa 1930"
-        : "Completa il tuo account Sessa 1930",
-      body: request.alreadyRegistered
-        ? `Ciao ${request.firstName},\n\nè stata richiesta una registrazione con questa email. Il tuo account esiste già: usa il link seguente per scegliere una nuova password in modo sicuro.\n${link}\n\nSe non sei stato tu, ignora questa email.`
-        : `Ciao ${request.firstName},\n\ncompleta la registrazione scegliendo la password dal link seguente (valido 1 ora):\n${link}\n\nLa password viene scelta solo dopo la verifica dell'email, così nessuno può reclamare il tuo storico ordini.`,
-      type: "PASSWORD_RESET"
-    });
+    // Nessun account creato e nessuna password accettata prima della prova di possesso email.
+    const started = await beginRegistration(parsed.data);
     // Risposta delivery-blind (anti-enumerazione): un fallito invio NON deve
     // distinguersi dalla risposta per email inesistente. Il guasto viene
     // registrato per gli operatori, che possono riprocessare la coda.
-    if (delivery.status === "FAILED") {
-      recordOperationalError({
+    if (started.delivery?.status === "FAILED") {
+      await recordOperationalError({
         level: "WARNING",
         source: "account-registration",
         code: "REGISTRATION_EMAIL_DELIVERY_FAILED",
-        message: "Invio email di registrazione fallito; risposta neutra gia restituita all'utente.",
-        error: delivery.error ? new Error(delivery.error) : undefined
+        message: "Invio email di registrazione fallito; risposta neutra già restituita all'utente.",
+        error: started.delivery.error ? new Error(started.delivery.error) : undefined
       });
     }
-    const dev = process.env.NODE_ENV !== "production" ? `&dev=${encodeURIComponent(link)}` : "";
+    const dev = process.env.NODE_ENV !== "production" && started.devLink ? `&dev=${encodeURIComponent(started.devLink)}` : "";
     redirect(`/account/login?registration=1${dev}`);
   } catch (error) {
     if (error instanceof DomainError) return { error: error.message };
     throw error;
   }
+}
+
+export async function activateAccountAction(_prev: AuthState, formData: FormData): Promise<AuthState> {
+  const parsed = resetSchema.safeParse({
+    token: formData.get("token"),
+    password: formData.get("password")
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Dati non validi." };
+  try {
+    const result = await completeRegistration(parsed.data.token, parsed.data.password);
+    const cookieStore = await cookies();
+    const refCode = cookieStore.get(REFERRAL_COOKIE)?.value;
+    if (refCode) {
+      await linkReferralOnSignup(result.customerId, result.email, refCode).catch(() => undefined);
+      cookieStore.delete(REFERRAL_COOKIE);
+    }
+  } catch (error) {
+    if (error instanceof DomainError) return { error: error.message };
+    throw error;
+  }
+  redirect("/account/login?activated=1");
 }
 
 export async function loginCustomerAction(_prev: AuthState, formData: FormData): Promise<AuthState> {
@@ -161,17 +160,19 @@ export async function loginCustomerAction(_prev: AuthState, formData: FormData):
       // Password corretta → la form mostra il campo codice (nessuna sessione creata).
       return { error: null, needsTotp: true };
     }
-    const totpKey = rateLimitKey("customer-totp", ip, customer.id);
-    const totpBlocked = await isRateLimited(totpKey);
+    // Limite per IP e per account: un attaccante con molti IP non può
+    // provare migliaia di codici sullo stesso account.
+    const totpKeys = [rateLimitKey("customer-totp", ip, customer.id), rateLimitKey("customer-totp-account", customer.id)];
+    const totpBlocked = await blockedForAny(totpKeys);
     if (totpBlocked !== null) {
       const minutes = Math.ceil(totpBlocked / 60000);
       return { error: `Troppi codici errati. Riprova tra ${minutes} minut${minutes === 1 ? "o" : "i"}.`, needsTotp: true };
     }
     if (!(await verifySecondFactor(customer.id, totpCode))) {
-      await registerFailedAttempt(totpKey);
+      await registerFailedAttempts(totpKeys);
       return { error: "Codice di verifica non valido.", needsTotp: true };
     }
-    await clearAttempts(totpKey);
+    await clearAttemptKeys(totpKeys);
   }
 
   await clearAttemptKeys(rateKeys);
@@ -184,7 +185,8 @@ export async function loginCustomerAction(_prev: AuthState, formData: FormData):
     toEmail: customer.email,
     subject: "Nuovo accesso al tuo account Sessa 1930",
     type: "SECURITY_LOGIN",
-    body: `Ciao ${customer.firstName},\n\nabbiamo registrato un nuovo accesso al tuo account Sessa 1930.\n${describeSessionForEmail(session)}\n\nSe sei stato tu, non devi fare nulla. Se non riconosci questo accesso, entra nella sezione Sicurezza e chiudi le sessioni attive.`
+    body: `Ciao ${customer.firstName},\n\nabbiamo registrato un nuovo accesso al tuo account Sessa 1930.\n${describeSessionForEmail(session)}\n\nSe sei stato tu, non devi fare nulla. Se non riconosci questo accesso, chiudi le sessioni attive e cambia la password.`,
+    cta: { url: `${SITE_URL}/account/sicurezza`, label: "Controlla le sessioni" }
   }).catch(() => undefined);
   redirect(safeNextPath(formData.get("next"), "/account", "/account"));
 }
@@ -253,7 +255,8 @@ export async function requestResetAction(formData: FormData): Promise<void> {
     const delivery = await enqueueEmail({
       toEmail: parsed.data.email,
       subject: "Reimposta la tua password — Sessa 1930",
-      body: `Per reimpostare la password apri questo link (valido 1 ora):\n${link}`,
+      body: "Ciao,\n\nper reimpostare la password usa il pulsante qui sotto (link valido 1 ora). Se non hai richiesto tu il cambio, ignora questa email: la password resta invariata.",
+      cta: { url: link, label: "Reimposta la password" },
       type: "PASSWORD_RESET"
     });
     // Delivery-blind anche qui: niente errore distintivo per l'utente.
@@ -262,7 +265,7 @@ export async function requestResetAction(formData: FormData): Promise<void> {
         level: "WARNING",
         source: "account-reset",
         code: "RESET_EMAIL_DELIVERY_FAILED",
-        message: "Invio email di reset fallito; risposta neutra gia restituita all'utente.",
+        message: "Invio email di reset fallito; risposta neutra già restituita all'utente.",
         error: delivery.error ? new Error(delivery.error) : undefined
       });
     }

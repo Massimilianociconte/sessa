@@ -2,12 +2,28 @@ import { fileURLToPath } from "node:url";
 import { dirname } from "node:path";
 
 const projectRoot = dirname(fileURLToPath(import.meta.url));
+const isProduction = process.env.NODE_ENV === "production";
+// CSP senza nonce per restare compatibile con pagine statiche/ISR in cache:
+// 'unsafe-inline' e necessario agli script inline di Next, ma le origini degli
+// script, delle connessioni e dei frame sono limitate (niente script esterni
+// iniettati, niente esfiltrazione verso domini arbitrari). Tenere allineata
+// con netlify.toml.
 const contentSecurityPolicy = [
+  "default-src 'self'",
+  `script-src 'self' 'unsafe-inline'${isProduction ? "" : " 'unsafe-eval'"} https://www.googletagmanager.com`,
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data: blob: https:",
+  "font-src 'self' data:",
+  `connect-src 'self' https://*.google-analytics.com https://*.analytics.google.com https://*.googletagmanager.com${isProduction ? "" : " ws: wss:"}`,
+  "frame-src 'none'",
+  "worker-src 'self'",
+  "manifest-src 'self'",
+  "media-src 'self'",
   "base-uri 'self'",
   "object-src 'none'",
   "frame-ancestors 'none'",
-  "form-action 'self'",
-  ...(process.env.NODE_ENV === "production" ? ["upgrade-insecure-requests"] : [])
+  "form-action 'self' https://checkout.stripe.com",
+  ...(isProduction ? ["upgrade-insecure-requests"] : [])
 ].join("; ");
 
 const securityHeaders = [

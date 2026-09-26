@@ -1,36 +1,14 @@
 import "server-only";
 import { createHmac } from "node:crypto";
-import { isIP } from "node:net";
 import { headers } from "next/headers";
 import { getAuthSecret } from "@/lib/auth/secret";
+import { clientIpFromHeaders } from "@/lib/auth/client-ip";
 
 const MAX_USER_AGENT_LENGTH = 500;
 
-function normalizeIp(value: string | null): string | null {
-  if (!value) return null;
-  let candidate = value.trim();
-  if (candidate.startsWith("[") && candidate.includes("]")) {
-    candidate = candidate.slice(1, candidate.indexOf("]"));
-  } else if (/^\d{1,3}(?:\.\d{1,3}){3}:\d+$/.test(candidate)) {
-    candidate = candidate.slice(0, candidate.lastIndexOf(":"));
-  }
-  return isIP(candidate) ? candidate : null;
-}
-
-/** Preferisce gli header impostati dal CDN/hosting rispetto a X-Forwarded-For. */
+/** Preferisce gli header impostati dal CDN/hosting (vedi lib/auth/client-ip.ts). */
 export async function getClientIp(): Promise<string> {
-  const h = await headers();
-  const candidates = [
-    h.get("x-nf-client-connection-ip"),
-    h.get("cf-connecting-ip"),
-    h.get("x-real-ip"),
-    h.get("x-forwarded-for")?.split(",")[0] ?? null
-  ];
-  for (const candidate of candidates) {
-    const normalized = normalizeIp(candidate);
-    if (normalized) return normalized;
-  }
-  return "unknown";
+  return clientIpFromHeaders(await headers());
 }
 
 export async function getRequestSecurityContext(): Promise<{

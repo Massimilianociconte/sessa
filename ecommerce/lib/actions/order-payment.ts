@@ -10,7 +10,7 @@ export async function retryOrderPaymentAction(formData: FormData): Promise<void>
   const order = code && publicToken ? await getOrderForTracking(code, publicToken) : null;
   if (!order) redirect("/");
 
-  const backUrl = `/ordine/${order.code}?t=${order.publicToken}`;
+  const backUrl = `/ordine/${encodeURIComponent(order.code)}?t=${order.publicToken}`;
   const amountDueCents = Math.max(0, order.totalCents - order.giftCardCents);
   const canRetry =
     order.status === "PENDING_PAYMENT" &&
@@ -21,7 +21,12 @@ export async function retryOrderPaymentAction(formData: FormData): Promise<void>
 
   if (!canRetry) redirect(`${backUrl}&payment=retry-unavailable`);
 
-  const launch = await initializeOrderPayment(order.id);
+  let launch: Awaited<ReturnType<typeof initializeOrderPayment>>;
+  try {
+    launch = await initializeOrderPayment(order.id);
+  } catch {
+    redirect(`${backUrl}&payment=retry-unavailable`);
+  }
   if (launch.error) {
     redirect(`${backUrl}&payment=failed`);
   }

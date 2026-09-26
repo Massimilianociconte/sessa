@@ -1,0 +1,93 @@
+name: E-commerce CI
+
+on:
+  push:
+    branches: ["main"]
+    paths: ["ecommerce/**", ".github/workflows/ecommerce-ci.yml"]
+  pull_request:
+    paths: ["ecommerce/**", ".github/workflows/ecommerce-ci.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ecommerce-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: ecommerce
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: sessa_test
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      PRISMA_HIDE_UPDATE_MESSAGE: "1"
+      # Solo database effimero del job: nessun segreto reale in CI.
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/sessa_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: ecommerce/.node-version
+          cache: npm
+          cache-dependency-path: ecommerce/package-lock.json
+
+      - name: Install
+        run: npm ci
+
+      - name: Prisma client
+        run: npx prisma generate
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npx tsc --noEmit --pretty false
+
+      - name: Unit tests
+        # Nessun database: un test che provasse a connettersi fallirebbe subito.
+        run: npm test
+        env:
+          DATABASE_URL: postgresql://nobody@127.0.0.1:1/none
+
+      - name: Dependency audit
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Integration tests (Postgres reale, migrazioni da zero)
+        run: npm run test:integration
+
+      - name: Schema verification
+        run: npm run db:verify
+        env:
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+
+      - name: Production build
+        run: npm run build
+        env:
+          DATABASE_URL: ${{ env.TEST_DATABASE_URL }}
+          NEXT_PUBLIC_SITE_URL: https://ci.example.invalid
+          SESSION_SECRET: ci-only-session-secret-not-used-anywhere-0000000000
+          MAINTENANCE_SECRET: ci-only-maintenance-secret-not-used-anywhere-0000
+
+      - name: Deploy bundle check
+        run: node scripts/check-deploy-bundle.mjs
+        env:
+          SESSION_SECRET: ci-only-session-secret-not-used-anywhere-0000000000
+          MAINTENANCE_SECRET: ci-only-maintenance-secret-not-used-anywhere-0000

@@ -4,6 +4,10 @@ import { initializeOrderPayment, reconcileStripeSuccess } from "@/lib/services/p
 import { transitionOrderInTx } from "@/lib/services/orders";
 import { serializableTransaction } from "@/lib/services/transaction";
 import { recordOperationalError, recordOperationalEvent } from "@/lib/observability";
+import { shouldSendBankTransferReminder } from "@/lib/commerce/checkout-policy";
+import { enqueueEmail } from "@/lib/services/email";
+import { getSetting } from "@/lib/services/settings";
+import { paymentReminderMessage } from "@/lib/services/order-messages";
 
 const ACTIVE_ATTEMPT_STATUSES = ["CREATED", "INITIALIZING", "PENDING"];
 
@@ -13,6 +17,7 @@ export type ReservationWorkerResult = {
   recoveredPaid: number;
   deferred: number;
   errors: number;
+  reminders: number;
 };
 
 async function cancelExpiredOrder(orderId: string, actor: string): Promise<boolean> {
@@ -40,6 +45,7 @@ async function cancelExpiredOrder(orderId: string, actor: string): Promise<boole
     });
     await transitionOrderInTx(tx, orderId, "CANCELLED", actor, {
       paymentStatus: "FAILED",
+      cancelReason: "RESERVATION_EXPIRED",
       note: "Prenotazione stock scaduta automaticamente"
     });
     return true;
@@ -91,7 +97,7 @@ async function processStripeOrder(orderId: string): Promise<"RELEASED" | "PAID" 
     return "DEFERRED";
   }
   const attempt = await prisma.paymentAttempt.findFirst({
-    where: { orderId, provider: "stripe", status: { in: ACTIVE_ATTEMPT_STATUSES } },
+    where: { orderId, provider: "stripe", status: { in: [...ACTIVE_ATTEMPT_STATUSES, "REVIEW"] } },
     orderBy: { createdAt: "desc" }
   });
   if (!attempt) {
@@ -132,6 +138,9 @@ async function processStripeOrder(orderId: string): Promise<"RELEASED" | "PAID" 
   if (session.status === "open") {
     await getStripe().checkout.sessions.expire(session.id);
   } else if (session.status !== "expired") {
+    // Sessione completata ma non pagata (metodo asincrono): NON si annulla,
+    // altrimenti l'incasso arriverebbe su un ordine già annullato e stock
+    // già rivenduto. Resta in verifica con allarme finché Stripe non decide.
     await deferForReview(orderId, 60);
     await prisma.paymentAttempt.updateMany({
       where: { id: attempt.id, status: { in: ACTIVE_ATTEMPT_STATUSES } },
@@ -153,7 +162,56 @@ async function processStripeOrder(orderId: string): Promise<"RELEASED" | "PAID" 
   return (await cancelExpiredOrder(orderId, "stock-reservation-worker")) ? "RELEASED" : "DEFERRED";
 }
 
-export async function expireStockReservations(limit = 10): Promise<ReservationWorkerResult> {
+/** Promemoria bonifico 24 ore prima della scadenza della prenotazione. */
+async function sendBankTransferReminders(now = new Date()): Promise<number> {
+  const candidates = await prisma.order.findMany({
+    where: {
+      status: "PENDING_PAYMENT",
+      paymentMethod: "bank_transfer",
+      paymentReminderSentAt: null,
+      stockReservationExpiresAt: { gt: now, lte: new Date(now.getTime() + 24 * 60 * 60_000) }
+    },
+    include: { items: true, location: true },
+    take: 25
+  });
+  if (candidates.length === 0) return 0;
+  const instructions = await getSetting(
+    "payments.bankTransferInstructions",
+    "Trovi le coordinate per il bonifico nella pagina dell'ordine."
+  );
+  let sent = 0;
+  for (const order of candidates) {
+    if (
+      !order.stockReservationExpiresAt ||
+      !shouldSendBankTransferReminder({
+        now,
+        placedAt: order.placedAt,
+        expiresAt: order.stockReservationExpiresAt,
+        alreadySent: false
+      })
+    ) {
+      continue;
+    }
+    const claimed = await prisma.order.updateMany({
+      where: { id: order.id, paymentReminderSentAt: null },
+      data: { paymentReminderSentAt: now }
+    });
+    if (claimed.count === 0) continue;
+    const message = paymentReminderMessage(order, order.stockReservationExpiresAt, instructions);
+    await enqueueEmail({
+      toEmail: order.email,
+      subject: message.subject,
+      body: message.body,
+      cta: message.cta,
+      type: "PAYMENT_REMINDER",
+      reference: order.code
+    }).catch(() => undefined);
+    sent += 1;
+  }
+  return sent;
+}
+
+export async function expireStockReservations(limit = 25): Promise<ReservationWorkerResult> {
   const candidates = await prisma.order.findMany({
     where: {
       status: "PENDING_PAYMENT",
@@ -170,8 +228,10 @@ export async function expireStockReservations(limit = 10): Promise<ReservationWo
     released: 0,
     recoveredPaid: 0,
     deferred: 0,
-    errors: 0
+    errors: 0,
+    reminders: 0
   };
+  result.reminders = await sendBankTransferReminders().catch(() => 0);
 
   for (const order of candidates) {
     try {

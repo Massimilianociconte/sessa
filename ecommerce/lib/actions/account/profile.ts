@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { getCheckoutPolicy } from "@/lib/services/commerce-settings";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { DomainError } from "@/lib/domain";
@@ -17,6 +18,10 @@ function back(path: string, key: "msg" | "err", value: string): never {
   redirect(`${path}?${key}=${encodeURIComponent(value)}`);
 }
 
+async function currentTermsVersion(): Promise<string> {
+  return (await getCheckoutPolicy()).termsVersion;
+}
+
 export async function updateProfileAction(formData: FormData): Promise<void> {
   const customer = await requireCustomer();
   const parsed = profileSchema.safeParse({
@@ -24,13 +29,23 @@ export async function updateProfileAction(formData: FormData): Promise<void> {
     marketingOptIn: formData.get("marketingOptIn") === "on"
   });
   if (!parsed.success) back("/account/profilo", "err", parsed.error.issues[0]?.message ?? "Dati non validi.");
+  const current = await prisma.customer.findUnique({ where: { id: customer.id }, select: { marketingOptIn: true } });
+  const consentChanged = current?.marketingOptIn !== parsed.data.marketingOptIn;
   await prisma.customer.update({
     where: { id: customer.id },
     data: {
       firstName: parsed.data.firstName,
       lastName: parsed.data.lastName,
       phone: parsed.data.phone ?? null,
-      marketingOptIn: parsed.data.marketingOptIn
+      marketingOptIn: parsed.data.marketingOptIn,
+      // Prova del consenso (GDPR art. 7.1): quando e da dove e cambiato.
+      ...(consentChanged
+        ? {
+            marketingConsentAt: new Date(),
+            marketingConsentSource: "account-profile",
+            marketingConsentVersion: parsed.data.marketingOptIn ? await currentTermsVersion() : null
+          }
+        : {})
     }
   });
   await setCustomerDisplayNameCookie(parsed.data.firstName);

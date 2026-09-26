@@ -32,7 +32,63 @@ export type EmailType =
   | "REFUND_CONFIRMATION"
   | "ORDER_READY"
   | "ORDER_SHIPPED"
+  | "ORDER_CANCELLED"
+  | "ORDER_DELIVERED"
+  | "PAYMENT_REMINDER"
+  | "STORE_NEW_ORDER"
+  | "STORE_RETURN_REQUEST"
+  | "RETURN_UPDATE"
+  | "REGISTRATION"
+  | "OPS_ALERT"
   | "ABANDONED_CART";
+
+/** Pulsante principale dell'email: accettato solo se punta al sito del negozio. */
+export type EmailCta = { url: string; label: string };
+
+export type EmailInput = {
+  toEmail: string;
+  subject: string;
+  body: string;
+  type: EmailType;
+  reference?: string;
+  dedupeKey?: string;
+  cta?: EmailCta;
+  /** Link di disiscrizione (email promozionali): footer + header List-Unsubscribe. */
+  unsubscribeUrl?: string;
+};
+
+type StoredEmail = { text: string; cta?: EmailCta; unsubscribeUrl?: string };
+const STORED_EMAIL_MARKER = "sessa-email:v2:";
+
+/**
+ * Il corpo salvato (cifrato) porta con se anche CTA e link di disiscrizione:
+ * contengono token (reset, attivazione) e devono restare protetti come il testo.
+ */
+function packEmail(input: EmailInput): string {
+  const stored: StoredEmail = { text: input.body, cta: input.cta, unsubscribeUrl: input.unsubscribeUrl };
+  return `${STORED_EMAIL_MARKER}${JSON.stringify(stored)}`;
+}
+
+function unpackEmail(plain: string): StoredEmail {
+  if (!plain.startsWith(STORED_EMAIL_MARKER)) return { text: plain };
+  try {
+    const parsed = JSON.parse(plain.slice(STORED_EMAIL_MARKER.length)) as StoredEmail;
+    return typeof parsed.text === "string" ? parsed : { text: plain };
+  } catch {
+    return { text: plain };
+  }
+}
+
+/** Solo URL assoluti del sito del negozio possono diventare link o pulsanti. */
+export function isTrustedSiteUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    const site = new URL(SITE_URL);
+    return parsed.origin === site.origin && (parsed.protocol === "https:" || parsed.hostname === "localhost");
+  } catch {
+    return false;
+  }
+}
 
 export type EmailDeliveryResult = {
   id: string;
@@ -85,35 +141,41 @@ function escapeHtml(value: string): string {
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
-    .replaceAll('"', "&quot;");
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 /**
- * Veste grafica unica per tutte le email transazionali: nastro terracotta,
- * corpo su carta avorio, bottone per il primo link presente nel testo.
- * Il testo semplice resta la fonte: qui viene solo impaginato (i link diventano
- * bottone/cliccabili, i paragrafi mantengono gli a-capo).
+ * Veste grafica unica per tutte le email transazionali. Il testo semplice resta
+ * la fonte ed e sempre escapato: nessun contenuto fornito dagli utenti (nomi,
+ * note, user agent) può diventare HTML, link cliccabile o pulsante. Solo gli URL
+ * del sito del negozio sono cliccabili; il pulsante nasce da una CTA esplicita.
  */
-function renderHtml(subject: string, body: string): string {
-  const linkMatch = body.match(/https?:\/\/[^\s]+/);
-  const link = linkMatch?.[0] ?? null;
-  const paragraphs = body
+export function renderEmailHtml(subject: string, stored: StoredEmail): string {
+  const paragraphs = stored.text
     .split(/\n{2,}/)
     .map((block) => {
       const safe = escapeHtml(block.trim()).replaceAll("\n", "<br/>");
-      const withLinks = safe.replace(
-        /(https?:\/\/[^\s<]+)/g,
-        '<a href="$1" style="color:#D65A1F;word-break:break-all;">$1</a>'
-      );
+      const withLinks = safe.replace(/(https?:\/\/[^\s<]+)/g, (match) => {
+        const raw = match.replaceAll("&amp;", "&");
+        return isTrustedSiteUrl(raw)
+          ? `<a href="${match}" style="color:#D65A1F;word-break:break-all;">${match}</a>`
+          : match;
+      });
       return `<p style="margin:0 0 16px;font-size:15px;line-height:1.65;color:#2b2622;">${withLinks}</p>`;
     })
     .join("");
 
-  const button = link
+  const cta = stored.cta && isTrustedSiteUrl(stored.cta.url) ? stored.cta : null;
+  const button = cta
     ? `<table role="presentation" cellpadding="0" cellspacing="0" style="margin:8px 0 20px;"><tr><td style="border-radius:999px;background:#D65A1F;">
-        <a href="${link}" style="display:inline-block;padding:13px 30px;border-radius:999px;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:bold;letter-spacing:.4px;color:#FAF6EF;text-decoration:none;">Apri il link</a>
+        <a href="${escapeHtml(cta.url)}" style="display:inline-block;padding:13px 30px;border-radius:999px;font-family:Arial,Helvetica,sans-serif;font-size:14px;font-weight:bold;letter-spacing:.4px;color:#FAF6EF;text-decoration:none;">${escapeHtml(cta.label)}</a>
       </td></tr></table>`
     : "";
+  const unsubscribe = stored.unsubscribeUrl && isTrustedSiteUrl(stored.unsubscribeUrl)
+    ? `<br/><a href="${escapeHtml(stored.unsubscribeUrl)}" style="color:#bdb3a8;">Non ricevere più queste comunicazioni</a>`
+    : "";
+  const siteHost = escapeHtml(SITE_URL.replace(/^https?:\/\//, ""));
 
   return `<!doctype html>
 <html lang="it">
@@ -137,8 +199,8 @@ function renderHtml(subject: string, body: string): string {
           <tr>
             <td style="background:#171412;border-radius:0 0 18px 18px;padding:20px 32px;text-align:center;">
               <div style="font-family:Arial,Helvetica,sans-serif;font-size:11px;line-height:1.7;color:#bdb3a8;">
-                Sessa 1930 &middot; Pasticceria partenopea &middot; <a href="${SITE_URL}" style="color:#F2B84B;text-decoration:none;">${SITE_URL.replace(/^https?:\/\//, "")}</a><br/>
-                Email automatica: non rispondere a questo messaggio.
+                Sessa 1930 &middot; Pasticceria partenopea &middot; <a href="${escapeHtml(SITE_URL)}" style="color:#F2B84B;text-decoration:none;">${siteHost}</a><br/>
+                Email automatica: non rispondere a questo messaggio.${unsubscribe}
               </div>
             </td>
           </tr>
@@ -149,14 +211,17 @@ function renderHtml(subject: string, body: string): string {
 </html>`;
 }
 
-export async function enqueueEmail(input: {
-  toEmail: string;
-  subject: string;
-  body: string;
-  type: EmailType;
-  reference?: string;
-  dedupeKey?: string;
-}): Promise<EmailDeliveryResult> {
+/** Testo semplice: la CTA viene aggiunta in coda se non e già presente nel corpo. */
+function renderEmailText(stored: StoredEmail): string {
+  const parts = [stored.text];
+  if (stored.cta && isTrustedSiteUrl(stored.cta.url) && !stored.text.includes(stored.cta.url)) {
+    parts.push(`${stored.cta.label}: ${stored.cta.url}`);
+  }
+  if (stored.unsubscribeUrl) parts.push(`Per non ricevere più queste comunicazioni: ${stored.unsubscribeUrl}`);
+  return parts.join("\n\n");
+}
+
+export async function enqueueEmail(input: EmailInput): Promise<EmailDeliveryResult> {
   const dedupeKey = input.dedupeKey ?? (input.reference ? `${input.type}:${input.reference}` : null);
   let message: { id: string; status: string; error: string | null };
   try {
@@ -164,7 +229,7 @@ export async function enqueueEmail(input: {
       data: {
         toEmail: input.toEmail.trim().toLowerCase(),
         subject: input.subject,
-        body: encryptSensitiveValue(input.body),
+        body: encryptSensitiveValue(packEmail(input)),
         type: input.type,
         reference: input.reference,
         dedupeKey,
@@ -206,45 +271,31 @@ export async function enqueueEmail(input: {
 /**
  * Accodamento DENTRO una transazione chiamante (outbox pattern): la riga
  * EmailMessage committa atomicamente con l'evento di business che la produce
- * (es. creazione ordine). Un crash fra commit ed enqueue separato non puo piu
+ * (es. creazione ordine). Un crash fra commit ed enqueue separato non può più
  * perdere la conferma. Il dedupeKey rende l'operazione idempotente: un
- * conflitto con un messaggio gia presente viene ignorato in silenzio.
+ * conflitto con un messaggio già presente viene ignorato in silenzio.
  *
  * L'invio reale resta compito del worker (processEmailQueue).
  */
-export async function enqueueEmailInTx(
-  tx: Prisma.TransactionClient,
-  input: {
-    toEmail: string;
-    subject: string;
-    body: string;
-    type: EmailType;
-    reference?: string;
-    dedupeKey?: string;
-  }
-): Promise<void> {
+export async function enqueueEmailInTx(tx: Prisma.TransactionClient, input: EmailInput): Promise<void> {
   const dedupeKey = input.dedupeKey ?? (input.reference ? `${input.type}:${input.reference}` : null);
-  try {
-    await tx.emailMessage.create({
-      data: {
+  // ON CONFLICT DO NOTHING: un try/catch sul vincolo unico dentro una
+  // transazione PostgreSQL lascerebbe la transazione abortita.
+  await tx.emailMessage.createMany({
+    data: [
+      {
         toEmail: input.toEmail.trim().toLowerCase(),
         subject: input.subject,
-        body: encryptSensitiveValue(input.body),
+        body: encryptSensitiveValue(packEmail(input)),
         type: input.type,
         reference: input.reference,
         dedupeKey,
         status: "QUEUED",
         nextAttemptAt: new Date()
-      },
-      select: { id: true }
-    });
-  } catch (error) {
-    // Messaggio gia accodato da un tentativo precedente della stessa tx logica.
-    if (dedupeKey && typeof error === "object" && error !== null && (error as { code?: string }).code === "P2002") {
-      return;
-    }
-    throw error;
-  }
+      }
+    ],
+    skipDuplicates: true
+  });
 }
 
 async function claimEmailMessages(limit: number, onlyId?: string): Promise<ClaimedEmail[]> {
@@ -285,15 +336,21 @@ function retryDelayMs(attemptCount: number): number {
 
 async function deliverClaimed(message: ClaimedEmail): Promise<"SENT" | "FAILED" | "DEAD"> {
   try {
-    const plainBody = decryptSensitiveValue(message.body);
+    const stored = unpackEmail(decryptSensitiveValue(message.body));
     const transport = getTransport();
     if (transport) {
       await transport.sendMail({
         from: process.env.SMTP_FROM ?? "Sessa 1930 <no-reply@sessa1930.com>",
         to: message.toEmail,
         subject: message.subject,
-        text: plainBody,
-        html: renderHtml(message.subject, plainBody)
+        text: renderEmailText(stored),
+        html: renderEmailHtml(message.subject, stored),
+        ...(stored.unsubscribeUrl && isTrustedSiteUrl(stored.unsubscribeUrl)
+          ? {
+              list: { unsubscribe: { url: stored.unsubscribeUrl, comment: "Disiscrizione" } },
+              headers: { "List-Unsubscribe-Post": "List-Unsubscribe=One-Click" }
+            }
+          : {})
       });
     } else if (process.env.NODE_ENV === "production") {
       const error = new Error("SMTP_NOT_CONFIGURED") as Error & { code?: string };
@@ -307,7 +364,9 @@ async function deliverClaimed(message: ClaimedEmail): Promise<"SENT" | "FAILED" 
       data: {
         status: "SENT",
         sentAt: new Date(),
-        body: retainedEmailBody(plainBody),
+        body: retainedEmailBody(stored.text),
+        // Dopo la conferma di cancellazione account non resta traccia del destinatario.
+        ...(message.type === "ACCOUNT_DELETED" ? { toEmail: "redatto@anonimo.sessa1930.invalid" } : {}),
         error: null,
         lockToken: null,
         lockedAt: null
@@ -329,7 +388,8 @@ async function deliverClaimed(message: ClaimedEmail): Promise<"SENT" | "FAILED" 
       }
     }).catch(() => undefined);
     await recordOperationalError({
-      level: dead ? "CRITICAL" : "WARNING",
+      // Un allarme email non consegnato non genera un altro allarme via email.
+      level: dead && message.type !== "OPS_ALERT" ? "CRITICAL" : "WARNING",
       source: "email-worker",
       code: dead ? "EMAIL_DEAD" : "EMAIL_RETRY_SCHEDULED",
       message: dead ? "Messaggio email non consegnato dopo tutti i tentativi." : "Consegna email fallita; nuovo tentativo pianificato.",
@@ -343,12 +403,17 @@ async function deliverClaimed(message: ClaimedEmail): Promise<"SENT" | "FAILED" 
   }
 }
 
+const EMAIL_SEND_CONCURRENCY = 4;
+
 export async function processEmailQueue(options: { limit?: number; onlyId?: string } = {}): Promise<EmailWorkerResult> {
-  const claimed = await claimEmailMessages(options.limit ?? 3, options.onlyId);
+  const claimed = await claimEmailMessages(options.limit ?? 20, options.onlyId);
   const result: EmailWorkerResult = { claimed: claimed.length, sent: 0, failed: 0, dead: 0 };
-  // Il cron Netlify ha una finestra breve: pochi invii concorrenti evitano che
-  // un singolo handshake SMTP lento blocchi tutta la coda senza saturare il provider.
-  const statuses = await Promise.all(claimed.map(deliverClaimed));
+  // Concorrenza limitata: un handshake SMTP lento non blocca la coda e il
+  // provider non viene saturato; il lease di 5 minuti copre l'intero lotto.
+  const statuses: Array<"SENT" | "FAILED" | "DEAD"> = [];
+  for (let index = 0; index < claimed.length; index += EMAIL_SEND_CONCURRENCY) {
+    statuses.push(...(await Promise.all(claimed.slice(index, index + EMAIL_SEND_CONCURRENCY).map(deliverClaimed))));
+  }
   for (const status of statuses) {
     if (status === "SENT") result.sent += 1;
     else if (status === "DEAD") result.dead += 1;

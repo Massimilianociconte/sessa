@@ -1,19 +1,25 @@
 import Link from "next/link";
 import CookiePreferencesButton from "@/components/privacy/CookiePreferencesButton";
 import { getSetting } from "@/lib/services/settings";
+import { getLegalInfo } from "@/lib/services/commerce-settings";
 
 export default async function Footer({
   location
 }: {
   location?: { address: string; city: string; postalCode?: string; phone?: string | null; name?: string };
 }) {
-  const [name, address, phone, email, vat] = await Promise.all([
+  const [name, address, phone, email, vat, legal] = await Promise.all([
     getSetting("store.name", "Sessa 1930"),
     getSetting("store.address", ""),
     getSetting("store.phone", ""),
     getSetting("store.email", ""),
-    getSetting("store.vat", "")
+    getSetting("store.vat", ""),
+    getLegalInfo()
   ]);
+  // Dati obbligatori del gestore (D.Lgs. 70/2003): ragione sociale e P.IVA.
+  const companyLine = legal["legal.companyName"]
+    ? `${legal["legal.companyName"]}${legal["legal.vatNumber"] ? ` · P.IVA ${legal["legal.vatNumber"]}` : ""}${legal["legal.rea"] ? ` · REA ${legal["legal.rea"]}` : ""}`
+    : vat;
   const contactAddress = location
     ? `${location.address}${location.postalCode ? `, ${location.postalCode}` : ""} ${location.city}`
     : address;
@@ -43,8 +49,16 @@ export default async function Footer({
             <Link href="/account/invita" className="hover:text-terracotta">Invita un amico</Link>
             <CookiePreferencesButton />
           </p>
-          <p className="mt-4 text-xs text-ink/40">{vat}</p>
         </div>
+      </div>
+      <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 border-t border-ink/10 px-4 py-5 text-xs text-ink/50">
+        <p>{companyLine}</p>
+        <nav aria-label="Informazioni legali" className="flex flex-wrap gap-x-4 gap-y-1">
+          <Link href="/condizioni-di-vendita" className="hover:text-terracotta">Condizioni di vendita</Link>
+          <Link href="/privacy" className="hover:text-terracotta">Privacy</Link>
+          <Link href="/cookie" className="hover:text-terracotta">Cookie</Link>
+          <Link href="/note-legali" className="hover:text-terracotta">Note legali</Link>
+        </nav>
       </div>
     </footer>
   );

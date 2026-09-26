@@ -10,7 +10,7 @@ export function prismaErrorCode(error: unknown): string | null {
 }
 
 /**
- * PostgreSQL puo abortire correttamente una transazione SERIALIZABLE quando due
+ * PostgreSQL può abortire correttamente una transazione SERIALIZABLE quando due
  * checkout leggono e modificano le stesse invarianti. P2034 e quindi un segnale
  * da ritentare dall'inizio, non un errore da mostrare al cliente.
  */
@@ -38,8 +38,8 @@ export async function serializableTransaction<T>(
 
 /**
  * Transazione ReadCommitted per le mutazioni di carrello: toccano un solo
- * carrello e usano gia scritture condizionali/upsert, quindi non hanno bisogno
- * dell'isolamento SERIALIZABLE — che sul percorso piu caldo generava abort SSI
+ * carrello e usano già scritture condizionali/upsert, quindi non hanno bisogno
+ * dell'isolamento SERIALIZABLE — che sul percorso più caldo generava abort SSI
  * (P2034) e retry. La sicurezza anti-oversell resta garantita dal decremento
  * condizionale di stock dentro placeOrder (SERIALIZABLE).
  */

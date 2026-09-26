@@ -15,6 +15,7 @@ export default async function CustomerLoginPage({
 }: {
   searchParams: Promise<{
     reset?: string;
+    activated?: string;
     all?: string;
     expired?: string;
     registration?: string;
@@ -24,7 +25,7 @@ export default async function CustomerLoginPage({
     err?: string;
   }>;
 }) {
-  const [{ reset, all, expired, registration, next, dev, msg, err }, customer] = await Promise.all([
+  const [{ reset, activated, all, expired, registration, next, dev, msg, err }, customer] = await Promise.all([
     searchParams,
     getSessionCustomer()
   ]);
@@ -55,6 +56,7 @@ export default async function CustomerLoginPage({
       }
     >
       {reset && <p className="auth-notice" role="status">Password reimpostata. Ora puoi accedere.</p>}
+      {activated && <p className="auth-notice" role="status">Account attivato. Accedi con la tua email e la password scelta.</p>}
       {all && (
         <p className="auth-notice" data-tone="warn" role="status">
           Tutte le sessioni sono state chiuse. Accedi di nuovo da questo dispositivo.

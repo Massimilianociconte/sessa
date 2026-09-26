@@ -58,7 +58,7 @@ export default async function AccountGiftCardsPage({
         {cards.length === 0 ? (
           <AccountEmptyState
             title="Quando riceverai una gift card, la troverai qui."
-            description="Il portafoglio crediti e gia pronto per saldo residuo, scadenze e storico utilizzi."
+            description="Il portafoglio crediti è già pronto per saldo residuo, scadenze e storico utilizzi."
             primary={{ href: "/", label: "Scopri i prodotti" }}
           />
         ) : (

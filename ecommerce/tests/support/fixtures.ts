@@ -98,9 +98,11 @@ export function checkoutPickupInput(overrides: Record<string, unknown> = {}) {
     email: "cliente@example.com",
     firstName: "Ada",
     lastName: "Lovelace",
+    phone: "333 123 4567",
     fulfillmentType: "PICKUP" as const,
-    fulfillmentAt: futureCheckoutWhen(),
+    slot: futureCheckoutWhen(),
     paymentMethod: "card" as const,
+    acceptTerms: "on",
     ...overrides
   };
 }

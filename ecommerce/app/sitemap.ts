@@ -29,7 +29,14 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     }
   });
 
-  const entries: MetadataRoute.Sitemap = [{ url: `${SITE_URL}/`, changeFrequency: "daily", priority: 1 }];
+  const entries: MetadataRoute.Sitemap = [
+    { url: `${SITE_URL}/`, changeFrequency: "daily", priority: 1 },
+    ...["condizioni-di-vendita", "privacy", "cookie", "note-legali"].map((path) => ({
+      url: `${SITE_URL}/${path}`,
+      changeFrequency: "monthly" as const,
+      priority: 0.2
+    }))
+  ];
 
   for (const location of locations) {
     entries.push({

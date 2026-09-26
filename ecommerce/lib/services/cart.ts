@@ -7,6 +7,7 @@ import { evaluateDiscount, type DiscountContext, type DiscountLine } from "@/lib
 import { checkGiftCard, loadGiftCard } from "@/lib/services/giftcards";
 import {
   describeCartIntegrityWarnings,
+  describePriceChange,
   describeStockClamp,
   planCartQuantity,
   planSetCartQuantity,
@@ -118,8 +119,8 @@ export async function getOrCreateCartForLocation(
     }
     if (existing.locationId === locationId) return existing;
 
-    // Cambio sede indivisibile: non puo lasciare righe della vecchia sede su un
-    // cart gia riassegnato, ne conservare coupon/gift card fuori contesto.
+    // Cambio sede indivisibile: non può lasciare righe della vecchia sede su un
+    // cart già riassegnato, ne conservare coupon/gift card fuori contesto.
     await tx.cartItem.deleteMany({ where: { cartId: existing.id } });
     await tx.cart.updateMany({
       where: { id: existing.id, status: "ACTIVE" },
@@ -132,7 +133,7 @@ export async function getOrCreateCartForLocation(
 }
 
 export async function addItemToCart(cartId: string, storeVariantId: string, qty: number): Promise<CartQtyMutation> {
-  if (!Number.isInteger(qty) || qty <= 0 || qty > 99) throw new DomainError("Quantita non valida.");
+  if (!Number.isInteger(qty) || qty <= 0 || qty > 99) throw new DomainError("Quantità non valida.");
   return readCommittedTransaction(async (tx) => {
     const cart = await tx.cart.findUnique({ where: { id: cartId } });
     if (!cart || cart.status !== "ACTIVE") throw new DomainError("Carrello non disponibile.");
@@ -161,10 +162,12 @@ export async function addItemToCart(cartId: string, storeVariantId: string, qty:
     });
     if (planned.qty <= 0) throw new DomainError("Prodotto esaurito.");
 
+    // Il prezzo visto al momento dell'aggiunta permette di segnalare variazioni.
+    const unitCentsSnapshot = effectivePrice(sv.priceCentsOverride, sv.variant.basePriceCents);
     await tx.cartItem.upsert({
       where: { cartId_storeVariantId: { cartId, storeVariantId } },
-      update: { qty: planned.qty },
-      create: { cartId, storeVariantId, qty: planned.qty }
+      update: { qty: planned.qty, unitCentsSnapshot },
+      create: { cartId, storeVariantId, qty: planned.qty, unitCentsSnapshot }
     });
     await tx.cart.update({ where: { id: cartId }, data: { updatedAt: new Date() } });
     return {
@@ -177,7 +180,7 @@ export async function addItemToCart(cartId: string, storeVariantId: string, qty:
 }
 
 export async function setItemQty(cartId: string, itemId: string, qty: number): Promise<CartQtyMutation | null> {
-  if (!Number.isInteger(qty) || qty < 0 || qty > 99) throw new DomainError("Quantita non valida.");
+  if (!Number.isInteger(qty) || qty < 0 || qty > 99) throw new DomainError("Quantità non valida.");
   return readCommittedTransaction(async (tx) => {
     const cart = await tx.cart.findUnique({ where: { id: cartId }, select: { status: true } });
     if (!cart || cart.status !== "ACTIVE") throw new DomainError("Carrello non disponibile.");
@@ -260,12 +263,24 @@ export type CartLine = {
   taxRateBps: number;
 };
 
+export type UnavailableCartLine = {
+  itemId: string;
+  productName: string;
+  productSlug: string;
+  variantName: string;
+  image: string | null;
+  qty: number;
+  reason: "unavailable" | "sold_out";
+};
+
 export type CartView = {
   cart: CartWithItems;
   locationId: string;
   locationName: string;
   locationSlug: string;
   lines: CartLine[];
+  /** Righe non acquistabili ora: restano visibili (niente cancellazioni silenziose) ma bloccano il checkout. */
+  unavailableLines: UnavailableCartLine[];
   itemCount: number;
   subtotalCents: number;
   discountCents: number;
@@ -326,6 +341,18 @@ export function buildCartView(
     };
   });
   const integrityWarnings = describeCartIntegrityWarnings(integrity);
+  const removedReason = new Map(integrity.removed.map((item) => [item.itemId, item.reason]));
+  const unavailableLines: UnavailableCartLine[] = cart.items
+    .filter((item) => removedReason.has(item.id))
+    .map((item) => ({
+      itemId: item.id,
+      productName: item.storeVariant.variant.product.name,
+      productSlug: item.storeVariant.variant.product.slug,
+      variantName: item.storeVariant.variant.name,
+      image: item.storeVariant.variant.product.image ?? item.storeVariant.variant.product.images[0]?.url ?? null,
+      qty: item.qty,
+      reason: removedReason.get(item.id) ?? "unavailable"
+    }));
   const subtotalCents = lines.reduce((sum, l) => sum + l.totalCents, 0);
 
   let discountCents = 0;
@@ -349,6 +376,7 @@ export function buildCartView(
     locationName: cart.location.name,
     locationSlug: cart.location.slug,
     lines,
+    unavailableLines,
     itemCount: lines.reduce((sum, l) => sum + l.qty, 0),
     subtotalCents,
     discountCents,
@@ -358,6 +386,13 @@ export function buildCartView(
   };
 }
 
+/**
+ * Allinea il carrello salvato allo stato reale senza cancellare nulla:
+ * - quantita oltre lo stock vengono ridotte (se lo stock e > 0);
+ * - le righe esaurite o non più vendibili RESTANO, segnalate dalla vista
+ *   (lo stock a zero può dipendere da prenotazioni temporanee di altri clienti);
+ * - il prezzo visto viene aggiornato dopo aver segnalato la variazione.
+ */
 export async function persistSanitizedCart(cart: CartWithItems): Promise<string[]> {
   const integrity = sanitizeCartLines(
     cart.items.map((item) => ({
@@ -370,22 +405,38 @@ export async function persistSanitizedCart(cart: CartWithItems): Promise<string[
         productActive: item.storeVariant.variant.product.status === "ACTIVE",
         variantActive: item.storeVariant.variant.isActive,
         stockQty: item.storeVariant.stockQty,
-        unitCents: effectivePrice(item.storeVariant.priceCentsOverride, item.storeVariant.variant.basePriceCents)
+        unitCents: effectivePrice(item.storeVariant.priceCentsOverride, item.storeVariant.variant.basePriceCents),
+        previousUnitCents: item.unitCentsSnapshot ?? undefined
       }
     }))
   );
-  const removedIds = integrity.removed.map((item) => item.itemId);
-  if (removedIds.length === 0 && integrity.clamped.length === 0) return [];
+  const names = new Map(cart.items.map((item) => [item.id, item.storeVariant.variant.product.name]));
+  if (integrity.clamped.length === 0 && integrity.priceChanges.length === 0) return [];
   await prisma.$transaction(async (tx) => {
-    if (removedIds.length > 0) {
-      await tx.cartItem.deleteMany({ where: { cartId: cart.id, id: { in: removedIds } } });
-    }
     for (const change of integrity.clamped) {
-      await tx.cartItem.update({ where: { id: change.itemId }, data: { qty: change.to } });
+      await tx.cartItem.updateMany({ where: { id: change.itemId, cartId: cart.id }, data: { qty: change.to } });
     }
-    await tx.cart.update({ where: { id: cart.id }, data: { updatedAt: new Date() } });
+    for (const change of integrity.priceChanges) {
+      await tx.cartItem.updateMany({ where: { id: change.itemId, cartId: cart.id }, data: { unitCentsSnapshot: change.to } });
+    }
   });
-  return describeCartIntegrityWarnings(integrity);
+  return [
+    ...describeCartIntegrityWarnings({ removed: [], clamped: integrity.clamped }),
+    ...integrity.priceChanges.map((change) =>
+      describePriceChange({ productName: names.get(change.itemId), from: change.from, to: change.to })
+    )
+  ];
+}
+
+/** Rimuove in un colpo le righe non acquistabili (esaurite o non più vendute). */
+export async function removeUnavailableItems(cartId: string): Promise<number> {
+  const cart = await prisma.cart.findUnique({ where: { id: cartId }, include: cartInclude });
+  if (!cart || cart.status !== "ACTIVE") return 0;
+  const view = buildCartView(cart);
+  const ids = view.unavailableLines.map((line) => line.itemId);
+  if (ids.length === 0) return 0;
+  const removed = await prisma.cartItem.deleteMany({ where: { cartId, id: { in: ids } } });
+  return removed.count;
 }
 
 export async function isolateCartTokenInDb(token: string): Promise<void> {
@@ -440,7 +491,7 @@ export async function syncCartCookieAfterLogin(customerId: string): Promise<void
  * Anti-fixation: quando il token del browser non corrisponde a nessun carrello
  * ma il cliente ne ha uno precedente, il carrello viene ri-etichettato con un
  * token GENERATO DAL SERVER — mai con il valore arrivato dal client. Un
- * attaccante che conosce/imposta il cookie della vittima non puo quindi
+ * attaccante che conosce/imposta il cookie della vittima non può quindi
  * ereditarne il carrello al login.
  */
 export async function attachCartToCustomer(
@@ -471,7 +522,12 @@ export async function attachCartToCustomer(
               });
             } else {
               await tx.cartItem.create({
-                data: { cartId: current.id, storeVariantId: item.storeVariantId, qty: item.qty }
+                data: {
+                  cartId: current.id,
+                  storeVariantId: item.storeVariantId,
+                  qty: item.qty,
+                  unitCentsSnapshot: item.unitCentsSnapshot
+                }
               });
             }
           }

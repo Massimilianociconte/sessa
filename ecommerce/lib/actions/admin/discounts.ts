@@ -39,7 +39,7 @@ export async function createDiscountAction(formData: FormData): Promise<void> {
     ...formDataToObject(formData),
     firstOrderOnly: formData.get("firstOrderOnly") === "on",
     // Il carrello supporta intenzionalmente un solo codice: niente promessa di
-    // cumulabilita finche non esiste un modello multi-discount end-to-end.
+    // cumulabilita finché non esiste un modello multi-discount end-to-end.
     stackable: false,
     isActive: formData.get("isActive") !== "off"
   });
